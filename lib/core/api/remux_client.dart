@@ -13,6 +13,7 @@ class RemuxClient {
   final http.Client _client;
   final String deviceId;
   String? accessToken;
+  String? userId;
   String? sessionId;
 
   static const deviceProfile = {
@@ -27,32 +28,65 @@ class RemuxClient {
 
   Map<String, String> get _headers {
     final token = _cleanToken(accessToken);
+    final authorization = StringBuffer('MediaBrowser Client="rodplayer", Device="FireTV", DeviceId="$deviceId", Version="1.0.0"');
+    if (token != null) authorization.write(', Token="$token"');
     return {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
-      if (token != null) ...{
-        // Send the token using the common Emby/Jellyfin and bearer conventions.
-        'Authorization': 'Bearer $token',
-        'X-Emby-Token': token,
-        'X-MediaBrowser-Token': token,
-      },
+      'Authorization': authorization.toString(),
     };
   }
 
   static String? _cleanToken(String? token) {
     final value = token?.trim();
     if (value == null || value.isEmpty) return null;
-    return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
+    return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
   }
 
-  Future<List<dynamic>> search(String query) async {
-    final response = await _client.get(Uri.parse('$baseUrl/Items?searchTerm=${Uri.encodeQueryComponent(query)}&Recursive=true'), headers: _headers);
+  /// Checks server availability. Jellyfin exposes this endpoint without auth.
+  Future<Map<String, dynamic>> healthCheck() async {
+    final response = await _client.get(Uri.parse('$baseUrl/System/Info/Public'));
+    _check(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// Authenticates the user and stores the Jellyfin access token and user ID.
+  Future<void> authenticate({required String username, required String password}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/Users/AuthenticateByName'),
+      headers: _headers,
+      body: jsonEncode({'Username': username, 'Pw': password}),
+    );
+    _check(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    accessToken = data['AccessToken'] as String?;
+    userId = (data['User'] as Map<String, dynamic>?)?['Id'] as String?;
+    if (accessToken == null || userId == null) {
+      throw StateError('Authentication response did not include AccessToken and User.Id');
+    }
+  }
+
+  String _userQuery() {
+    final id = userId;
+    if (id == null || id.isEmpty) throw StateError('Authenticate before requesting user items');
+    return 'userId=${Uri.encodeQueryComponent(id)}';
+  }
+
+  Future<List<dynamic>> getItems() async {
+    final response = await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}'), headers: _headers);
     _check(response);
     return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
   }
 
+  Future<List<dynamic>> search(String query) async {
+    final response = await _client.get(Uri.parse('$baseUrl/Search?${_userQuery()}&searchTerm=${Uri.encodeQueryComponent(query)}'), headers: _headers);
+    _check(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return (data['Items'] as List<dynamic>?) ?? (data['SearchHints'] as List<dynamic>?) ?? [];
+  }
+
   Future<Uri> getStreamUri(String itemId) async {
-    final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo'), headers: _headers, body: jsonEncode({'DeviceProfile': deviceProfile, 'StartTimeTicks': 0}));
+    final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': deviceProfile, 'StartTimeTicks': 0}));
     _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final sources = (data['MediaSources'] as List<dynamic>? ?? []);
