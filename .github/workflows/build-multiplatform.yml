@@ -15,17 +15,14 @@ jobs:
       - run: flutter create --platforms=android .
       - run: |
           python3 - <<'PY'
-          p='android/app/src/main/AndroidManifest.xml'
-          s=open(p).read()
+          p='android/app/src/main/AndroidManifest.xml'; s=open(p).read()
           s=s.replace('<application', '<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application')
           s=s.replace('<category android:name="android.intent.category.LAUNCHER" />', '<category android:name="android.intent.category.LAUNCHER" />\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />')
           open(p,'w').write(s)
           PY
       - run: flutter pub get
-      - name: Build arm64 Fire TV / Android TV APK
-        run: flutter build apk --release --target-platform android-arm64 --split-per-abi
-      - name: Build armeabi-v7a APK
-        run: flutter build apk --release --target-platform android-arm --split-per-abi
+      - run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+      - run: flutter build apk --release --target-platform android-arm --split-per-abi
       - uses: actions/upload-artifact@v4
         with: {name: android-firetv-apks, path: build/app/outputs/flutter-apk/*.apk}
   macos:
@@ -35,10 +32,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
       - run: flutter create --platforms=macos .
-      - run: flutter pub get
-      - run: flutter build macos --release
-      - name: Package macOS app
-        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
+      - run: flutter pub get && flutter build macos --release
+      - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with: {name: rodplayer-macos, path: RodPlayer-macOS.zip}
   windows:

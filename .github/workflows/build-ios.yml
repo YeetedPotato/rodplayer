@@ -13,16 +13,33 @@ jobs:
           channel: stable
           architecture: arm64
           cache: true
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Generate native iOS project when absent
+        run: test -d ios && test -f ios/Podfile || flutter create --platforms=ios .
+      - name: Set iOS 13 deployment target
+        run: |
+          python3 - <<'PY'
+          p='ios/Podfile'
+          s=open(p).read()
+          import re
+          s=re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", s)
+          if "platform :ios" not in s: s="platform :ios, '13.0'\n"+s
+          open(p,'w').write(s)
+          PY
+          printf '\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each { |config| config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = "13.0" }\n  end\nend\n' >> ios/Podfile
+      - name: Install dependencies and pods
+        run: flutter pub get && cd ios && pod install --repo-update
       - name: Build unsigned iOS bundle
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --build- ipa=false --dart-define=CI=true
+        env:
+          FLUTTER_BUILD_NAME: 0.1.0
+          FLUTTER_BUILD_NUMBER: 1
       - name: Package sideloadable IPA
         run: |
-          rm -rf Payload
+          set -eux
+          rm -rf Payload RodPlayer.ipa
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
-          ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
