@@ -53,9 +53,9 @@ jobs:
             echo "Commit: $GITHUB_SHA"
             echo
             echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
           } > failure-report.md
-          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
   macos:
     runs-on: macos-14
     steps:
@@ -89,9 +89,9 @@ jobs:
             echo "Commit: $GITHUB_SHA"
             echo
             echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
           } > failure-report.md
-          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
   windows:
     runs-on: windows-2022
     steps:
@@ -124,6 +124,6 @@ jobs:
             echo "Commit: $GITHUB_SHA"
             echo
             echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
           } > failure-report.md
-          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true

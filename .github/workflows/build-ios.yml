@@ -42,9 +42,6 @@ jobs:
         run: flutter pub get && cd ios && pod install --repo-update
       - name: Build unsigned iOS bundle
         run: flutter build ios --release --no-codesign
-        env:
-          FLUTTER_BUILD_NAME: 0.1.0
-          FLUTTER_BUILD_NUMBER: 1
       - name: Package sideloadable IPA
         run: |
           set -eux
@@ -72,6 +69,6 @@ jobs:
             echo "Commit: $GITHUB_SHA"
             echo
             echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
           } > failure-report.md
-          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
