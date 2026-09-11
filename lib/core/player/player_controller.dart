@@ -27,7 +27,7 @@ class RodPlayerEngine {
   Future<void> open(Uri uri, {String? title}) async {
     final media = Media(uri.toString(), httpHeaders: const {});
     for (final entry in mpvProperties.entries) {
-      media.extras[entry.key] = entry.value;
+      media.extras?[entry.key] = entry.value;
     }
     await player.open(media, play: true);
   }
