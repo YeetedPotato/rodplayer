@@ -18,8 +18,7 @@ jobs:
       - name: Set iOS 13 deployment target
         run: |
           python3 - <<'PY'
-          p='ios/Podfile'
-          s=open(p).read()
+          p='ios/Podfile'; s=open(p).read()
           import re
           s=re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", s)
           if "platform :ios" not in s: s="platform :ios, '13.0'\n"+s
@@ -29,7 +28,7 @@ jobs:
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
       - name: Build unsigned iOS bundle
-        run: flutter build ios --release --no-codesign --build- ipa=false --dart-define=CI=true
+        run: flutter build ios --release --no-codesign
         env:
           FLUTTER_BUILD_NAME: 0.1.0
           FLUTTER_BUILD_NUMBER: 1
