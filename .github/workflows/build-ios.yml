@@ -1,0 +1,31 @@
+name: Build iOS IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Build unsigned iOS bundle
+        run: flutter build ios --release --no-codesign
+      - name: Package sideloadable IPA
+        run: |
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RodPlayer-ipa
+          path: RodPlayer.ipa
+          if-no-files-found: error
