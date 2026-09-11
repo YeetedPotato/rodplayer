@@ -21,13 +21,23 @@ jobs:
       - name: Set iOS 13 deployment target
         run: |
           python3 - <<'PY'
-          p='ios/Podfile'; s=open(p).read()
+          from pathlib import Path
           import re
-          s=re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", s)
-          if "platform :ios" not in s: s="platform :ios, '13.0'\n"+s
-          open(p,'w').write(s)
+          path = Path('ios/Podfile')
+          text = path.read_text()
+          text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", text)
+          if 'platform :ios' not in text:
+              text = "platform :ios, '13.0'\\n" + text
+          setting = "    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'"
+          if 'IPHONEOS_DEPLOYMENT_TARGET' not in text:
+              anchor = 'flutter_additional_ios_build_settings(target)'
+              if anchor in text:
+                  text = text.replace(anchor, anchor + '\\n' + setting, 1)
+              else:
+                  target_loop = 'installer.pods_project.targets.each do |target|'
+                  text = text.replace(target_loop, target_loop + '\\n' + setting, 1)
+          path.write_text(text)
           PY
-          printf '\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each { |config| config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = "13.0" }\n  end\nend\n' >> ios/Podfile
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
       - name: Build unsigned iOS bundle
