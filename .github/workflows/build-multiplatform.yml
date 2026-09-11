@@ -6,6 +6,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 jobs:
   android:
     runs-on: ubuntu-24.04

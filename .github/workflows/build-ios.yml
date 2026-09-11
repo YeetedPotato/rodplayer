@@ -6,6 +6,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 jobs:
   build:
     runs-on: macos-14
@@ -27,15 +28,17 @@ jobs:
           text = path.read_text()
           text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", text)
           if 'platform :ios' not in text:
-              text = "platform :ios, '13.0'\\n" + text
-          setting = "    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'"
+              text = "platform :ios, '13.0'" + chr(10) + text
           if 'IPHONEOS_DEPLOYMENT_TARGET' not in text:
               anchor = 'flutter_additional_ios_build_settings(target)'
+              nested = (anchor + chr(10) +
+                        '      target.build_configurations.each do |config|' + chr(10) +
+                        "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'" + chr(10) +
+                        '      end')
               if anchor in text:
-                  text = text.replace(anchor, anchor + '\\n' + setting, 1)
+                  text = text.replace(anchor, nested, 1)
               else:
-                  target_loop = 'installer.pods_project.targets.each do |target|'
-                  text = text.replace(target_loop, target_loop + '\\n' + setting, 1)
+                  raise RuntimeError('Expected Flutter post_install target hook was not found')
           path.write_text(text)
           PY
       - name: Install dependencies and pods
