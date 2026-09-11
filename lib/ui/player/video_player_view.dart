@@ -30,7 +30,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     super.initState();
     _keepAlive = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => _report(),
+      (_) => unawaited(_report()),
     );
   }
 
@@ -49,7 +49,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   @override
   void dispose() {
     _keepAlive?.cancel();
-    _report();
+    unawaited(_report());
     super.dispose();
   }
 
