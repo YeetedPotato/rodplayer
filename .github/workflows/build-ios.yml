@@ -36,7 +36,6 @@ jobs:
                   raise RuntimeError('Expected Flutter post_install target hook was not found')
               text = text.replace(anchor, nested, 1)
           podfile.write_text(text)
-
           project = Path('ios/Runner.xcodeproj/project.pbxproj')
           text = project.read_text()
           text = re.sub(r'CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;', text)
@@ -59,14 +58,31 @@ jobs:
           done
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
-      - name: Build unsigned iOS bundle
-        run: flutter build ios --release --no-codesign
+      - name: Generate Flutter iOS build configuration
+        run: flutter build ios --release --no-codesign --config-only
+      - name: Build unsigned device app with Xcode
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGN_ENTITLEMENTS='' \
+            DEVELOPMENT_TEAM='' \
+            PROVISIONING_PROFILE_SPECIFIER='' \
+            build
       - name: Package sideloadable IPA
         run: |
           set -eux
           rm -rf Payload RodPlayer.ipa
           mkdir Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          cp -R build/ios/Build/Products/Release-iphoneos/Runner.app Payload/Runner.app
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
