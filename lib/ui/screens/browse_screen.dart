@@ -3,6 +3,7 @@ import 'package:rodplayer/core/api/remux_client.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
 import 'package:rodplayer/core/theme/remux_theme.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/media_bar.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
 
 class BrowseScreen extends StatefulWidget {
@@ -78,6 +79,22 @@ class _BrowseScreenState extends State<BrowseScreen> {
                 ),
               ),
               actions: [IconButton(onPressed: () {}, icon: const Icon(Icons.search), tooltip: 'Search')],
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                child: SizedBox(
+                  height: 280,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(theme.radiusLarge),
+                    child: Stack(fit: StackFit.expand, children: [
+                      DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.obsidianRaised, theme.obsidianGlass]))),
+                      Positioned(left: 24, bottom: 24, child: Text('Featured collection', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700))),
+                      const Positioned(top: 16, right: 16, child: MediaBar()),
+                    ]),
+                  ),
+                ),
+              ),
             ),
             SliverToBoxAdapter(child: _shelf('Continue Watching', const ['The Last Voyage', 'Shoreline', 'Night Shift'], aspectRatio: 16 / 9)),
             SliverToBoxAdapter(child: _shelf('Next Up', const ['The Archive', 'Horizon', 'The Long Road', 'Northbound'])),
