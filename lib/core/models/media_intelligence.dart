@@ -6,7 +6,7 @@ class MediaIntelligence {
   final int? width, height, bitrate, durationTicks;
 
   factory MediaIntelligence.fromJson(Map<String, dynamic> json) {
-    final streams = (json['MediaStreams'] ?? json['MediaStreams'] ?? json['Streams'] ?? const <dynamic>[]) as List<dynamic>;
+    final streams = (json['MediaStreams'] ?? json['Streams'] ?? const <dynamic>[]) as List<dynamic>;
     StreamIntelligence? pick(String type) { for (final raw in streams) { final s = StreamIntelligence.fromJson(raw as Map<String, dynamic>); if (s.type == type) return s; } return null; }
     return MediaIntelligence(video: pick('Video'), audio: pick('Audio'), subtitle: pick('Subtitle'), width: _int(json['Width']), height: _int(json['Height']), bitrate: _int(json['Bitrate']), durationTicks: _int(json['RunTimeTicks']));
   }
@@ -44,7 +44,7 @@ class StreamIntelligence {
 
   String get displayAudio {
     final text = '${codec ?? ''} ${profile ?? ''} ${audioSpatialFormat ?? ''} ${localizedDisplayTitle ?? ''}'.toLowerCase();
-    var name = text.contains('truehd') ? 'TrueHD' : text.contains('atmos') ? 'Atmos' : text.contains('dts:x') ? 'DTS:X' : text.contains('dts-hd') ? 'DTS-HD MA' : text.contains('flac') ? 'FLAC' : (codec ?? 'Audio');
+    final name = text.contains('truehd') ? 'TrueHD' : text.contains('atmos') ? 'Atmos' : text.contains('dts:x') ? 'DTS:X' : text.contains('dts-hd') ? 'DTS-HD MA' : text.contains('flac') ? 'FLAC' : (codec ?? 'Audio');
     final layout = channelLayout ?? (channels == 8 ? '7.1' : channels == 6 ? '5.1' : channels == null ? null : '$channels ch');
     return layout == null ? name : '$name $layout';
   }
