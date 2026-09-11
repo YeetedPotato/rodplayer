@@ -26,7 +26,7 @@ jobs:
           import re
           podfile = Path('ios/Podfile')
           text = podfile.read_text()
-          text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '15.0'", text)
+          text = re.sub(r"platform :ios, ['\"]([^'\"]+)['\"]", "platform :ios, '15.0'", text)
           if 'platform :ios' not in text:
               text = "platform :ios, '15.0'" + chr(10) + text
           if 'CODE_SIGNING_ALLOWED' not in text:
@@ -58,6 +58,10 @@ jobs:
           done
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
+      - name: Analyze Dart code
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee analyze.log
       - name: Include CocoaPods xcconfig files
         run: |
           set -eux
@@ -66,10 +70,12 @@ jobs:
           grep -q 'Pods-Runner.release.xcconfig' "$release" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$release"
           grep -q 'Pods-Runner.debug.xcconfig' "$debug" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"' >> "$debug"
       - name: Generate Flutter iOS build configuration
-        run: flutter build ios --release --no-codesign --config-only
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --config-only 2>&1 | tee build.log
       - name: Build unsigned device app with Xcode
         run: |
-          set -euxo pipefail
+          set -o pipefail
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
@@ -83,7 +89,7 @@ jobs:
             CODE_SIGN_ENTITLEMENTS='' \
             DEVELOPMENT_TEAM='' \
             PROVISIONING_PROFILE_SPECIFIER='' \
-            build
+            build 2>&1 | tee build.log
       - name: Package sideloadable IPA
         run: |
           set -eux
@@ -97,6 +103,13 @@ jobs:
           name: RodPlayer-ipa
           path: RodPlayer.ipa
           if-no-files-found: error
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-ios
+          path: '*.log'
+          if-no-files-found: warn
       - name: File issue on failure
         if: ${{ failure() }}
         shell: bash
@@ -109,8 +122,15 @@ jobs:
             echo "Run: $GITHUB_RUN_NUMBER"
             echo "Workflow: $GITHUB_WORKFLOW"
             echo "Commit: $GITHUB_SHA"
-            echo
-            echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
+            if [ -f build.log ]; then
+              echo -e "\n### Build Log Tail (last 150 lines):\n\`\`\`text"
+              tail -n 150 build.log
+              echo -e "\`\`\`"
+            fi
+            if [ -f analyze.log ]; then
+              echo -e "\n### Analyze Log:\n\`\`\`text"
+              tail -n 100 analyze.log
+              echo -e "\`\`\`"
+            fi
           } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
