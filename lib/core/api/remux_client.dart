@@ -2,6 +2,21 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
+class RemuxAuthException implements Exception {
+  RemuxAuthException(this.message);
+  final String message;
+  @override
+  String toString() => 'RemuxAuthException: $message';
+}
+
+class RemuxConnectionException implements Exception {
+  RemuxConnectionException(this.message, {this.statusCode});
+  final String message;
+  final int? statusCode;
+  @override
+  String toString() => 'RemuxConnectionException: $message';
+}
+
 /// Client for a Remux Emby/Jellyfin compatibility layer.
 class RemuxClient {
   RemuxClient({required String baseUrl, http.Client? client})
@@ -30,11 +45,7 @@ class RemuxClient {
     final token = _cleanToken(accessToken);
     final authorization = StringBuffer('MediaBrowser Client="rodplayer", Device="FireTV", DeviceId="$deviceId", Version="1.0.0"');
     if (token != null) authorization.write(', Token="$token"');
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Authorization': authorization.toString(),
-    };
+    return {'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': authorization.toString()};
   }
 
   static String? _cleanToken(String? token) {
@@ -43,32 +54,27 @@ class RemuxClient {
     return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
   }
 
-  /// Checks server availability. Jellyfin exposes this endpoint without auth.
   Future<Map<String, dynamic>> healthCheck() async {
     final response = await _client.get(Uri.parse('$baseUrl/System/Info/Public'));
     _check(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  /// Authenticates the user and stores the Jellyfin access token and user ID.
   Future<void> authenticate({required String username, required String password}) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/Users/AuthenticateByName'),
-      headers: _headers,
-      body: jsonEncode({'Username': username, 'Pw': password}),
-    );
+    final response = await _client.post(Uri.parse('$baseUrl/Users/AuthenticateByName'), headers: _headers, body: jsonEncode({'Username': username, 'Pw': password}));
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw RemuxAuthException('Jellyfin rejected the supplied credentials (${response.statusCode})');
+    }
     _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     accessToken = data['AccessToken'] as String?;
     userId = (data['User'] as Map<String, dynamic>?)?['Id'] as String?;
-    if (accessToken == null || userId == null) {
-      throw StateError('Authentication response did not include AccessToken and User.Id');
-    }
+    if (accessToken == null || userId == null) throw RemuxAuthException('Authentication response did not include AccessToken and User.Id');
   }
 
   String _userQuery() {
     final id = userId;
-    if (id == null || id.isEmpty) throw StateError('Authenticate before requesting user items');
+    if (id == null || id.isEmpty) throw RemuxAuthException('Authenticate before requesting user items');
     return 'userId=${Uri.encodeQueryComponent(id)}';
   }
 
@@ -90,7 +96,7 @@ class RemuxClient {
     _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final sources = (data['MediaSources'] as List<dynamic>? ?? []);
-    if (sources.isEmpty) throw StateError('Remux returned no playable media source');
+    if (sources.isEmpty) throw RemuxConnectionException('Remux returned no playable media source');
     return Uri.parse((sources.first as Map<String, dynamic>)['Path'] as String);
   }
 
@@ -102,7 +108,9 @@ class RemuxClient {
   }
 
   void _check(http.Response response) {
-    if (response.statusCode < 200 || response.statusCode >= 300) throw StateError('Remux request failed (${response.statusCode})');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw RemuxConnectionException('Remux request failed (${response.statusCode})', statusCode: response.statusCode);
+    }
   }
 
   void close() => _client.close();
