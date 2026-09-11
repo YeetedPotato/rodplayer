@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/api/remux_client.dart';
 import 'core/player/player_controller.dart';
+import 'core/theme/remux_theme.dart';
 import 'ui/player/video_player_view.dart';
 
 const _serverUrlKey = 'remux_server_url';
@@ -30,7 +31,7 @@ class RodPlayerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'RodPlayer',
-        theme: ThemeData.dark(useMaterial3: true),
+        theme: remuxThemeData(),
         home: RodPlayerShell(preferences: preferences),
       );
 }
@@ -42,7 +43,8 @@ class RodPlayerShell extends StatefulWidget {
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
-}
+
+  }
 
 class _RodPlayerShellState extends State<RodPlayerShell> {
   RemuxClient? _client;
