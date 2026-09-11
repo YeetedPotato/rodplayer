@@ -302,7 +302,7 @@ class _LibraryHomeState extends State<LibraryHome> {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
           title: const Text('RodPlayer Library'),
-          actions: [IconButton(onPressed: _openSettings, icon: const Icon(Icons.settings), tooltip: 'Server settings)],
+          actions: [IconButton(onPressed: _openSettings, icon: const Icon(Icons.settings), tooltip: 'Server settings')],
         ),
         body: Padding(
           padding: const EdgeInsets.all(16),
