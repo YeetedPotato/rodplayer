@@ -9,6 +9,12 @@ import 'ui/player/video_player_view.dart';
 const _serverUrlKey = 'remux_server_url';
 const _serverTokenKey = 'remux_server_token';
 
+String? _cleanToken(String? token) {
+  final value = token?.trim();
+  if (value == null || value.isEmpty) return null;
+  return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -50,17 +56,17 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
 
   void _loadConfiguration() {
     final url = widget.preferences.getString(_serverUrlKey);
-    final token = widget.preferences.getString(_serverTokenKey);
+    final token = _cleanToken(widget.preferences.getString(_serverTokenKey));
     if (url != null && url.isNotEmpty) {
       _client = RemuxClient(baseUrl: url);
-      _client!.accessToken = token?.isEmpty == true ? null : token;
+      _client!.accessToken = token;
     }
     setState(() => _loading = false);
   }
 
   void _connect(String url, String? token) {
     final client = RemuxClient(baseUrl: url);
-    client.accessToken = token?.isEmpty == true ? null : token;
+    client.accessToken = _cleanToken(token);
     setState(() => _client = client);
   }
 
@@ -146,8 +152,7 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
       _message = null;
     });
     final client = RemuxClient(baseUrl: url);
-    final token = _tokenController.text.trim();
-    client.accessToken = token.isEmpty ? null : token;
+    client.accessToken = _cleanToken(_tokenController.text);
     try {
       await client.search('');
       if (!mounted) return client;
@@ -178,11 +183,12 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
       });
       return;
     }
+    final token = _cleanToken(_tokenController.text);
     setState(() => _saving = true);
     await widget.preferences.setString(_serverUrlKey, url);
-    await widget.preferences.setString(_serverTokenKey, _tokenController.text.trim());
+    await widget.preferences.setString(_serverTokenKey, token ?? '');
     if (!mounted) return;
-    widget.onConnected(url, _tokenController.text.trim());
+    widget.onConnected(url, token);
   }
 
   @override
@@ -207,7 +213,7 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Remux server URL',
-                    hintText: 'https://remux.turo.im or http://192.168.1.50:8096',
+                    hintText: 'https://media.example.com or http://192.168.1.50:8096',
                     prefixIcon: Icon(Icons.link),
                     border: OutlineInputBorder(),
                   ),
