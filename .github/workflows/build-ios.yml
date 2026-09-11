@@ -58,13 +58,13 @@ jobs:
           done
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
-      - name: Include CocoaPods release configuration
+      - name: Include CocoaPods xcconfig files
         run: |
           set -eux
           release=ios/Flutter/Release.xcconfig
           debug=ios/Flutter/Debug.xcconfig
-          grep -q 'Pods-Runner.release.xcconfig' "$release" || printf '%s\n' '#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$release"
-          grep -q 'Pods-Runner.debug.xcconfig' "$debug" || printf '%s\n' '#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"' >> "$debug"
+          grep -q 'Pods-Runner.release.xcconfig' "$release" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$release"
+          grep -q 'Pods-Runner.debug.xcconfig' "$debug" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"' >> "$debug"
       - name: Generate Flutter iOS build configuration
         run: flutter build ios --release --no-codesign --config-only
       - name: Build unsigned device app with Xcode
