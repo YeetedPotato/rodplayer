@@ -194,3 +194,129 @@ jobs:
             fi
           } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Generate native iOS project when absent
+        run: test -d ios && test -f ios/Podfile || flutter create --platforms=ios .
+      - name: Configure unsigned iOS Xcode project
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          podfile = Path('ios/Podfile')
+          text = podfile.read_text()
+          text = re.sub(r"platform :ios, ['\"]([^'\"]+)['\"]", "platform :ios, '15.0'", text)
+          if 'platform :ios' not in text:
+              text = "platform :ios, '15.0'" + chr(10) + text
+          if 'CODE_SIGNING_ALLOWED' not in text:
+              anchor = 'flutter_additional_ios_build_settings(target)'
+              nested = (anchor + chr(10) + '      target.build_configurations.each do |config|' + chr(10) + "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'" + chr(10) + "        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGN_IDENTITY'] = ''" + chr(10) + "        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''" + chr(10) + '      end')
+              if anchor not in text:
+                  raise RuntimeError('Expected Flutter post_install target hook was not found')
+              text = text.replace(anchor, nested, 1)
+          podfile.write_text(text)
+          project = Path('ios/Runner.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          text = re.sub(r'CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;', text)
+          text = re.sub(r'DEVELOPMENT_TEAM = [^;]+;', 'DEVELOPMENT_TEAM = "";', text)
+          text = re.sub(r'PROVISIONING_PROFILE_SPECIFIER = [^;]+;', 'PROVISIONING_PROFILE_SPECIFIER = "";', text)
+          text = re.sub(r'CODE_SIGN_IDENTITY = [^;]+;', 'CODE_SIGN_IDENTITY = "";', text)
+          if 'CODE_SIGNING_ALLOWED = NO;' not in text:
+              text = text.replace('CODE_SIGN_STYLE = Manual;', 'CODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;', 1)
+          project.write_text(text)
+          PY
+          mkdir -p ios/Flutter
+          for config in Release Debug; do
+            touch "ios/Flutter/${config}.xcconfig"
+            grep -q '^CODE_SIGNING_ALLOWED = NO$' "ios/Flutter/${config}.xcconfig" || cat >> "ios/Flutter/${config}.xcconfig" <<'EOF'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          EXPANDED_CODE_SIGN_IDENTITY =
+          EOF
+          done
+      - name: Install dependencies and pods
+        run: flutter pub get && cd ios && pod install --repo-update
+      - name: Analyze Dart code
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee analyze.log
+      - name: Include CocoaPods xcconfig files
+        run: |
+          set -eux
+          release=ios/Flutter/Release.xcconfig
+          debug=ios/Flutter/Debug.xcconfig
+          grep -q 'Pods-Runner.release.xcconfig' "$release" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$release"
+          grep -q 'Pods-Runner.debug.xcconfig' "$debug" || printf '%s\n' '#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"' >> "$debug"
+      - name: Generate Flutter iOS build configuration
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --config-only 2>&1 | tee build.log
+      - name: Build unsigned device app with Xcode
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGN_ENTITLEMENTS='' \
+            DEVELOPMENT_TEAM='' \
+            PROVISIONING_PROFILE_SPECIFIER='' \
+            build 2>&1 | tee build.log
+      - name: Package sideloadable IPA
+        run: |
+          set -eux
+          rm -rf Payload RodPlayer.ipa
+          mkdir Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/Runner.app Payload/Runner.app
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RodPlayer-ipa
+          path: RodPlayer.ipa
+          if-no-files-found: error
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-ios
+          path: '*.log'
+          if-no-files-found: warn
+      - name: File issue on failure
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## GitHub Actions failure"
+            echo "Job: $GITHUB_JOB"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Workflow: $GITHUB_WORKFLOW"
+            echo "Commit: $GITHUB_SHA"
+            if [ -f build.log ]; then
+              echo -e "\n### Build Log Tail (last 150 lines):\n\`\`\`text"
+              tail -n 150 build.log
+              echo -e "\`\`\`"
+            fi
+            if [ -f analyze.log ]; then
+              echo -e "\n### Analyze Log:\n\`\`\`text"
+              tail -n 100 analyze.log
+              echo -e "\`\`\`"
+            fi
+          } > failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
