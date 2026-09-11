@@ -5,6 +5,7 @@ on:
     branches: [main]
 permissions:
   contents: read
+  issues: write
 jobs:
   android:
     runs-on: ubuntu-24.04
@@ -25,6 +26,12 @@ jobs:
       - run: flutter build apk --release --target-platform android-arm --split-per-abi
       - uses: actions/upload-artifact@v4
         with: {name: android-firetv-apks, path: build/app/outputs/flutter-apk/*.apk}
+      - name: File issue on failure
+        if: ${{ failure() }}
+        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        run: |
+          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
   macos:
     runs-on: macos-14
     steps:
@@ -36,6 +43,12 @@ jobs:
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with: {name: rodplayer-macos, path: RodPlayer-macOS.zip}
+      - name: File issue on failure
+        if: ${{ failure() }}
+        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        run: |
+          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
   windows:
     runs-on: windows-2022
     steps:
@@ -47,3 +60,10 @@ jobs:
       - run: flutter build windows --release
       - uses: actions/upload-artifact@v4
         with: {name: rodplayer-windows-x64, path: build/windows/x64/runner/Release}
+      - name: File issue on failure
+        if: ${{ failure() }}
+        shell: bash
+        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        run: |
+          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md

@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+permissions:
+  contents: read
+  issues: write
 jobs:
   build:
     runs-on: macos-14
@@ -45,3 +48,19 @@ jobs:
           name: RodPlayer-ipa
           path: RodPlayer.ipa
           if-no-files-found: error
+      - name: File issue on failure
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## GitHub Actions failure"
+            echo "Job: $GITHUB_JOB"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Workflow: $GITHUB_WORKFLOW"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo '### Failed-log tail'
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+          } > failure-report.md
+          gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
