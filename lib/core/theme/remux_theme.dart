@@ -14,5 +14,5 @@ class RemuxTheme extends ThemeExtension<RemuxTheme> {
 ThemeData remuxThemeData() {
   const t = RemuxTheme();
   final scheme = ColorScheme.fromSeed(seedColor: t.gold, brightness: Brightness.dark, surface: t.obsidian, primary: t.gold, onPrimary: t.obsidian, secondary: t.goldBright);
-  return ThemeData(useMaterial3: true, colorScheme: scheme, scaffoldBackgroundColor: t.obsidian, extensions: const [t], textTheme: TextTheme(bodyLarge: TextStyle(color: t.textPrimary), bodyMedium: TextStyle(color: t.textSecondary), titleLarge: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w700), labelLarge: TextStyle(color: t.obsidian, fontWeight: FontWeight.w700)), cardTheme: CardTheme(color: t.obsidianGlass, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radiusMedium))));
+  return ThemeData(useMaterial3: true, colorScheme: scheme, scaffoldBackgroundColor: t.obsidian, extensions: const [t], textTheme: TextTheme(bodyLarge: TextStyle(color: t.textPrimary), bodyMedium: TextStyle(color: t.textSecondary), titleLarge: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w700), labelLarge: TextStyle(color: t.obsidian, fontWeight: FontWeight.w700)), cardTheme: CardThemeData(color: t.obsidianGlass, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radiusMedium))));
 }
