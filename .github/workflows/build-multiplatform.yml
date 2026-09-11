@@ -13,58 +13,117 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: {channel: stable, cache: true}
-      - run: flutter create --platforms=android .
-      - run: |
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+      - name: Add Android TV and Fire TV launcher support
+        run: |
           python3 - <<'PY'
-          p='android/app/src/main/AndroidManifest.xml'; s=open(p).read()
-          s=s.replace('<application', '<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application')
-          s=s.replace('<category android:name="android.intent.category.LAUNCHER" />', '<category android:name="android.intent.category.LAUNCHER" />\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />')
-          open(p,'w').write(s)
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          text = text.replace('<application', '<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application', 1)
+          text = text.replace('<category android:name="android.intent.category.LAUNCHER" />', '<category android:name="android.intent.category.LAUNCHER" />\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />', 1)
+          path.write_text(text)
           PY
-      - run: flutter pub get
-      - run: flutter build apk --release --target-platform android-arm64 --split-per-abi
-      - run: flutter build apk --release --target-platform android-arm --split-per-abi
-      - uses: actions/upload-artifact@v4
-        with: {name: android-firetv-apks, path: build/app/outputs/flutter-apk/*.apk}
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Build Android arm64 APK
+        run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+      - name: Build Android armeabi-v7a APK
+        run: flutter build apk --release --target-platform android-arm --split-per-abi
+      - name: Upload Android and Fire TV APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-firetv-apks
+          path: build/app/outputs/flutter-apk/*.apk
       - name: File issue on failure
         if: ${{ failure() }}
-        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          {
+            echo "## GitHub Actions failure"
+            echo "Job: $GITHUB_JOB"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Workflow: $GITHUB_WORKFLOW"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo '### Failed-log tail'
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+          } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
   macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: {channel: stable, cache: true}
-      - run: flutter create --platforms=macos .
-      - run: flutter pub get && flutter build macos --release
-      - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
-      - uses: actions/upload-artifact@v4
-        with: {name: rodplayer-macos, path: RodPlayer-macOS.zip}
+        with:
+          channel: stable
+          cache: true
+      - name: Generate macOS project
+        run: flutter create --platforms=macos .
+      - name: Build macOS app
+        run: flutter pub get && flutter build macos --release
+      - name: Package macOS app
+        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rodplayer-macos
+          path: RodPlayer-macOS.zip
       - name: File issue on failure
         if: ${{ failure() }}
-        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          {
+            echo "## GitHub Actions failure"
+            echo "Job: $GITHUB_JOB"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Workflow: $GITHUB_WORKFLOW"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo '### Failed-log tail'
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+          } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md
   windows:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: {channel: stable, cache: true}
-      - run: flutter create --platforms=windows .
-      - run: flutter pub get
-      - run: flutter build windows --release
-      - uses: actions/upload-artifact@v4
-        with: {name: rodplayer-windows-x64, path: build/windows/x64/runner/Release}
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Windows project
+        run: flutter create --platforms=windows .
+      - name: Build Windows x64
+        shell: bash
+        run: flutter pub get && flutter build windows --release
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rodplayer-windows-x64
+          path: build/windows/x64/runner/Release
       - name: File issue on failure
         if: ${{ failure() }}
         shell: bash
-        env: {GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          { echo "## GitHub Actions failure"; echo "Job: $GITHUB_JOB"; echo "Run: $GITHUB_RUN_NUMBER"; echo "Workflow: $GITHUB_WORKFLOW"; echo "Commit: $GITHUB_SHA"; echo; echo '### Failed-log tail'; gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120; } > failure-report.md
+          {
+            echo "## GitHub Actions failure"
+            echo "Job: $GITHUB_JOB"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Workflow: $GITHUB_WORKFLOW"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo '### Failed-log tail'
+            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120
+          } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md

@@ -31,10 +31,7 @@ jobs:
               text = "platform :ios, '13.0'" + chr(10) + text
           if 'IPHONEOS_DEPLOYMENT_TARGET' not in text:
               anchor = 'flutter_additional_ios_build_settings(target)'
-              nested = (anchor + chr(10) +
-                        '      target.build_configurations.each do |config|' + chr(10) +
-                        "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'" + chr(10) +
-                        '      end')
+              nested = (anchor + chr(10) + '      target.build_configurations.each do |config|' + chr(10) + "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'" + chr(10) + '      end')
               if anchor in text:
                   text = text.replace(anchor, nested, 1)
               else:
@@ -55,7 +52,7 @@ jobs:
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload RodPlayer.ipa
-      - name: Upload IPA artifact
+      - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: RodPlayer-ipa
@@ -63,6 +60,7 @@ jobs:
           if-no-files-found: error
       - name: File issue on failure
         if: ${{ failure() }}
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
