@@ -19,24 +19,33 @@ jobs:
           cache: true
       - name: Generate native iOS project when absent
         run: test -d ios && test -f ios/Podfile || flutter create --platforms=ios .
-      - name: Configure unsigned iOS build
+      - name: Configure unsigned iOS Xcode project
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          path = Path('ios/Podfile')
-          text = path.read_text()
+          podfile = Path('ios/Podfile')
+          text = podfile.read_text()
           text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '15.0'", text)
           if 'platform :ios' not in text:
               text = "platform :ios, '15.0'" + chr(10) + text
           if 'CODE_SIGNING_ALLOWED' not in text:
               anchor = 'flutter_additional_ios_build_settings(target)'
               nested = (anchor + chr(10) + '      target.build_configurations.each do |config|' + chr(10) + "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'" + chr(10) + "        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGN_IDENTITY'] = ''" + chr(10) + "        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''" + chr(10) + '      end')
-              if anchor in text:
-                  text = text.replace(anchor, nested, 1)
-              else:
+              if anchor not in text:
                   raise RuntimeError('Expected Flutter post_install target hook was not found')
-          path.write_text(text)
+              text = text.replace(anchor, nested, 1)
+          podfile.write_text(text)
+
+          project = Path('ios/Runner.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          text = re.sub(r'CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;', text)
+          text = re.sub(r'DEVELOPMENT_TEAM = [^;]+;', 'DEVELOPMENT_TEAM = "";', text)
+          text = re.sub(r'PROVISIONING_PROFILE_SPECIFIER = [^;]+;', 'PROVISIONING_PROFILE_SPECIFIER = "";', text)
+          text = re.sub(r'CODE_SIGN_IDENTITY = [^;]+;', 'CODE_SIGN_IDENTITY = "";', text)
+          if 'CODE_SIGNING_ALLOWED = NO;' not in text:
+              text = text.replace('CODE_SIGN_STYLE = Manual;', 'CODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;', 1)
+          project.write_text(text)
           PY
           mkdir -p ios/Flutter
           for config in Release Debug; do
