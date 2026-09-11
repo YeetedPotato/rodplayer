@@ -58,13 +58,13 @@ class _BrowseScreenState extends State<BrowseScreen> {
             SliverAppBar(
               pinned: true,
               expandedHeight: 128,
-              backgroundColor: theme.obsidianGlassHeavy,
+              backgroundColor: theme.obsidianGlassStrong,
               surfaceTintColor: Colors.transparent,
               flexibleSpace: FlexibleSpaceBar(
                 titlePadding: const EdgeInsetsDirectional.only(start: 24, bottom: 16),
                 title: Text('Browse', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
                 background: DecoratedBox(
-                  decoration: BoxDecoration(color: theme.obsidianGlassHeavy, border: Border(bottom: BorderSide(color: theme.textMuted.withValues(alpha: 0.18)))),
+                  decoration: BoxDecoration(color: theme.obsidianGlassStrong, border: Border(bottom: BorderSide(color: theme.textMuted.withValues(alpha: 0.18)))),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 28, 24, 52),
                     child: Row(children: [
