@@ -30,15 +30,30 @@ jobs:
           PY
       - name: Install Flutter dependencies
         run: flutter pub get
+      - name: Analyze Dart code
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee analyze.log
       - name: Build Android arm64 APK
-        run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+        run: |
+          set -o pipefail
+          flutter build apk --release --target-platform android-arm64 --split-per-abi 2>&1 | tee build.log
       - name: Build Android armeabi-v7a APK
-        run: flutter build apk --release --target-platform android-arm --split-per-abi
+        run: |
+          set -o pipefail
+          flutter build apk --release --target-platform android-arm --split-per-abi 2>&1 | tee -a build.log
       - name: Upload Android and Fire TV APKs
         uses: actions/upload-artifact@v4
         with:
           name: android-firetv-apks
           path: build/app/outputs/flutter-apk/*.apk
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-android
+          path: '*.log'
+          if-no-files-found: warn
       - name: File issue on failure
         if: ${{ failure() }}
         shell: bash
@@ -51,9 +66,16 @@ jobs:
             echo "Run: $GITHUB_RUN_NUMBER"
             echo "Workflow: $GITHUB_WORKFLOW"
             echo "Commit: $GITHUB_SHA"
-            echo
-            echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
+            if [ -f build.log ]; then
+              echo -e "\n### Build Log Tail (last 150 lines):\n\`\`\`text"
+              tail -n 150 build.log
+              echo -e "\`\`\`"
+            fi
+            if [ -f analyze.log ]; then
+              echo -e "\n### Analyze Log:\n\`\`\`text"
+              tail -n 100 analyze.log
+              echo -e "\`\`\`"
+            fi
           } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
   macos:
@@ -66,8 +88,16 @@ jobs:
           cache: true
       - name: Generate macOS project
         run: flutter create --platforms=macos .
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Dart code
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee analyze.log
       - name: Build macOS app
-        run: flutter pub get && flutter build macos --release
+        run: |
+          set -o pipefail
+          flutter build macos --release 2>&1 | tee build.log
       - name: Package macOS app
         run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - name: Upload macOS artifact
@@ -75,6 +105,13 @@ jobs:
         with:
           name: rodplayer-macos
           path: RodPlayer-macOS.zip
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-macos
+          path: '*.log'
+          if-no-files-found: warn
       - name: File issue on failure
         if: ${{ failure() }}
         shell: bash
@@ -87,9 +124,16 @@ jobs:
             echo "Run: $GITHUB_RUN_NUMBER"
             echo "Workflow: $GITHUB_WORKFLOW"
             echo "Commit: $GITHUB_SHA"
-            echo
-            echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
+            if [ -f build.log ]; then
+              echo -e "\n### Build Log Tail (last 150 lines):\n\`\`\`text"
+              tail -n 150 build.log
+              echo -e "\`\`\`"
+            fi
+            if [ -f analyze.log ]; then
+              echo -e "\n### Analyze Log:\n\`\`\`text"
+              tail -n 100 analyze.log
+              echo -e "\`\`\`"
+            fi
           } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
   windows:
@@ -102,14 +146,30 @@ jobs:
           cache: true
       - name: Generate Windows project
         run: flutter create --platforms=windows .
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Dart code
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee analyze.log
       - name: Build Windows x64
         shell: bash
-        run: flutter pub get && flutter build windows --release
+        run: |
+          set -o pipefail
+          flutter build windows --release 2>&1 | tee build.log
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: rodplayer-windows-x64
           path: build/windows/x64/runner/Release
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-windows
+          path: '*.log'
+          if-no-files-found: warn
       - name: File issue on failure
         if: ${{ failure() }}
         shell: bash
@@ -122,8 +182,15 @@ jobs:
             echo "Run: $GITHUB_RUN_NUMBER"
             echo "Workflow: $GITHUB_WORKFLOW"
             echo "Commit: $GITHUB_SHA"
-            echo
-            echo '### Failed-log tail'
-            gh run view "$GITHUB_RUN_ID" --log-failed 2>&1 | tail -n 120 || echo "Logs pending backend upload"
+            if [ -f build.log ]; then
+              echo -e "\n### Build Log Tail (last 150 lines):\n\`\`\`text"
+              tail -n 150 build.log
+              echo -e "\`\`\`"
+            fi
+            if [ -f analyze.log ]; then
+              echo -e "\n### Analyze Log:\n\`\`\`text"
+              tail -n 100 analyze.log
+              echo -e "\`\`\`"
+            fi
           } > failure-report.md
           gh issue create --title "CI failure: $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" --body-file failure-report.md || true
