@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
-/// Client for lostb1t's Remux Emby/Jellyfin compatibility layer.
+/// Client for a Remux Emby/Jellyfin compatibility layer.
 class RemuxClient {
   RemuxClient({required String baseUrl, http.Client? client})
       : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
@@ -25,11 +25,25 @@ class RemuxClient {
     'TranscodingProfiles': [],
   };
 
-  Map<String, String> get _headers => {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        if (accessToken != null) 'X-Emby-Token': accessToken!,
-      };
+  Map<String, String> get _headers {
+    final token = _cleanToken(accessToken);
+    return {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      if (token != null) ...{
+        // Send the token using the common Emby/Jellyfin and bearer conventions.
+        'Authorization': 'Bearer $token',
+        'X-Emby-Token': token,
+        'X-MediaBrowser-Token': token,
+      },
+    };
+  }
+
+  static String? _cleanToken(String? token) {
+    final value = token?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
+  }
 
   Future<List<dynamic>> search(String query) async {
     final response = await _client.get(Uri.parse('$baseUrl/Items?searchTerm=${Uri.encodeQueryComponent(query)}&Recursive=true'), headers: _headers);
