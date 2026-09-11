@@ -19,25 +19,35 @@ jobs:
           cache: true
       - name: Generate native iOS project when absent
         run: test -d ios && test -f ios/Podfile || flutter create --platforms=ios .
-      - name: Set iOS 13 deployment target
+      - name: Configure unsigned iOS build
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           path = Path('ios/Podfile')
           text = path.read_text()
-          text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '13.0'", text)
+          text = re.sub(r"platform :ios, ['\"][^'\"]+['\"]", "platform :ios, '15.0'", text)
           if 'platform :ios' not in text:
-              text = "platform :ios, '13.0'" + chr(10) + text
-          if 'IPHONEOS_DEPLOYMENT_TARGET' not in text:
+              text = "platform :ios, '15.0'" + chr(10) + text
+          if 'CODE_SIGNING_ALLOWED' not in text:
               anchor = 'flutter_additional_ios_build_settings(target)'
-              nested = (anchor + chr(10) + '      target.build_configurations.each do |config|' + chr(10) + "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'" + chr(10) + '      end')
+              nested = (anchor + chr(10) + '      target.build_configurations.each do |config|' + chr(10) + "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'" + chr(10) + "        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'" + chr(10) + "        config.build_settings['CODE_SIGN_IDENTITY'] = ''" + chr(10) + "        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''" + chr(10) + '      end')
               if anchor in text:
                   text = text.replace(anchor, nested, 1)
               else:
                   raise RuntimeError('Expected Flutter post_install target hook was not found')
           path.write_text(text)
           PY
+          mkdir -p ios/Flutter
+          for config in Release Debug; do
+            touch "ios/Flutter/${config}.xcconfig"
+            grep -q '^CODE_SIGNING_ALLOWED = NO$' "ios/Flutter/${config}.xcconfig" || cat >> "ios/Flutter/${config}.xcconfig" <<'EOF'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          EXPANDED_CODE_SIGN_IDENTITY =
+          EOF
+          done
       - name: Install dependencies and pods
         run: flutter pub get && cd ios && pod install --repo-update
       - name: Build unsigned iOS bundle
