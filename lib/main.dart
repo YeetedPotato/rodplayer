@@ -6,6 +6,7 @@ import 'core/api/remux_client.dart';
 import 'core/player/player_controller.dart';
 import 'core/theme/remux_theme.dart';
 import 'ui/player/video_player_view.dart';
+import 'ui/screens/browse_screen.dart';
 
 const _serverUrlKey = 'remux_server_url';
 const _serverTokenKey = 'remux_server_token';
@@ -25,7 +26,6 @@ Future<void> main() async {
 
 class RodPlayerApp extends StatelessWidget {
   const RodPlayerApp({required this.preferences, super.key});
-
   final SharedPreferences preferences;
 
   @override
@@ -38,13 +38,11 @@ class RodPlayerApp extends StatelessWidget {
 
 class RodPlayerShell extends StatefulWidget {
   const RodPlayerShell({required this.preferences, super.key});
-
   final SharedPreferences preferences;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
-
-  }
+}
 
 class _RodPlayerShellState extends State<RodPlayerShell> {
   RemuxClient? _client;
@@ -78,28 +76,14 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_client == null) {
-      return ServerSetupPage(
-        preferences: widget.preferences,
-        onConnected: _connect,
-      );
+      return ServerSetupPage(preferences: widget.preferences, onConnected: _connect);
     }
-    return LibraryHome(
-      client: _client!,
-      preferences: widget.preferences,
-      onConnected: _connect,
-    );
+    return BrowseScreen(client: _client!);
   }
 }
 
 class ServerSetupPage extends StatefulWidget {
-  const ServerSetupPage({
-    required this.preferences,
-    required this.onConnected,
-    this.initialUrl,
-    this.initialToken,
-    super.key,
-  });
-
+  const ServerSetupPage({required this.preferences, required this.onConnected, this.initialUrl, this.initialToken, super.key});
   final SharedPreferences preferences;
   final void Function(String url, String? token) onConnected;
   final String? initialUrl;
@@ -143,32 +127,20 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
   Future<RemuxClient?> _test() async {
     final url = _normalizedUrl();
     if (url == null) {
-      setState(() {
-        _success = false;
-        _message = 'Enter a valid http:// or https:// server URL.';
-      });
+      setState(() { _success = false; _message = 'Enter a valid http:// or https:// server URL.'; });
       return null;
     }
-    setState(() {
-      _testing = true;
-      _message = null;
-    });
+    setState(() { _testing = true; _message = null; });
     final client = RemuxClient(baseUrl: url);
     client.accessToken = _cleanToken(_tokenController.text);
     try {
       await client.search('');
       if (!mounted) return client;
-      setState(() {
-        _success = true;
-        _message = 'Connection successful.';
-      });
+      setState(() { _success = true; _message = 'Connection successful.'; });
       return client;
     } catch (error) {
       if (!mounted) return null;
-      setState(() {
-        _success = false;
-        _message = 'Connection failed: $error';
-      });
+      setState(() { _success = false; _message = 'Connection failed: $error'; });
       return null;
     } finally {
       client.close();
@@ -179,10 +151,7 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
   Future<void> _save() async {
     final url = _normalizedUrl();
     if (url == null) {
-      setState(() {
-        _success = false;
-        _message = 'Enter a valid http:// or https:// server URL.';
-      });
+      setState(() { _success = false; _message = 'Enter a valid http:// or https:// server URL.'; });
       return;
     }
     final token = _cleanToken(_tokenController.text);
@@ -209,125 +178,17 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
                 const SizedBox(height: 8),
                 const Text('Enter a hosted server or a local network address to begin playback.'),
                 const SizedBox(height: 24),
-                TextField(
-                  controller: _urlController,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Remux server URL',
-                    hintText: 'https://media.example.com or http://192.168.1.50:8096',
-                    prefixIcon: Icon(Icons.link),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
+                TextField(controller: _urlController, keyboardType: TextInputType.url, autocorrect: false, decoration: const InputDecoration(labelText: 'Remux server URL', hintText: 'https://media.example.com or http://192.168.1.50:8096', prefixIcon: Icon(Icons.link), border: OutlineInputBorder())),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _tokenController,
-                  obscureText: true,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'API key / token (optional)',
-                    hintText: 'For Jellyfin or Emby authentication',
-                    prefixIcon: Icon(Icons.key_outlined),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
+                TextField(controller: _tokenController, obscureText: true, autocorrect: false, decoration: const InputDecoration(labelText: 'API key / token (optional)', hintText: 'For Jellyfin or Emby authentication', prefixIcon: Icon(Icons.key_outlined), border: OutlineInputBorder())),
                 const SizedBox(height: 20),
-                if (_message != null)
-                  Text(_message!, style: TextStyle(color: _success ? Colors.greenAccent : Colors.orangeAccent)),
+                if (_message != null) Text(_message!, style: TextStyle(color: _success ? Colors.greenAccent : Colors.orangeAccent)),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _testing || _saving ? null : _test,
-                  icon: _testing ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.wifi_find),
-                  label: const Text('Test Connection'),
-                ),
+                OutlinedButton.icon(onPressed: _testing || _saving ? null : _test, icon: _testing ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.wifi_find), label: const Text('Test Connection')),
                 const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _testing || _saving ? null : _save,
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('Save & Connect'),
-                ),
+                FilledButton.icon(onPressed: _testing || _saving ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Save & Connect')),
               ],
             ),
-          ),
-        ),
-      );
-}
-
-class LibraryHome extends StatefulWidget {
-  const LibraryHome({required this.client, required this.preferences, required this.onConnected, super.key});
-
-  final RemuxClient client;
-  final SharedPreferences preferences;
-  final void Function(String url, String? token) onConnected;
-
-  @override
-  State<LibraryHome> createState() => _LibraryHomeState();
-}
-
-class _LibraryHomeState extends State<LibraryHome> {
-  final _searchController = TextEditingController();
-  List<dynamic> _items = [];
-  bool _loading = false;
-  String? _error;
-
-  Future<void> _search() async {
-    setState(() { _loading = true; _error = null; });
-    try {
-      final items = await widget.client.search(_searchController.text.trim());
-      if (mounted) setState(() => _items = items);
-    } catch (error) {
-      if (mounted) setState(() => _error = '$error');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _openSettings() async {
-    final url = widget.preferences.getString(_serverUrlKey);
-    final token = widget.preferences.getString(_serverTokenKey);
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ServerSetupPage(
-        preferences: widget.preferences,
-        initialUrl: url,
-        initialToken: token,
-        onConnected: (newUrl, newToken) {
-          widget.onConnected(newUrl, newToken);
-          Navigator.of(context).pop();
-        },
-      ),
-    ));
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('RodPlayer Library'),
-          actions: [IconButton(onPressed: _openSettings, icon: const Icon(Icons.settings), tooltip: 'Server settings')],
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(children: [
-                Expanded(child: TextField(controller: _searchController, onSubmitted: (_) => _search(), decoration: const InputDecoration(labelText: 'Search library', border: OutlineInputBorder()))),
-                const SizedBox(width: 8),
-                IconButton(onPressed: _loading ? null : _search, icon: const Icon(Icons.search)),
-              ]),
-              const SizedBox(height: 16),
-              if (_loading) const CircularProgressIndicator(),
-              if (_error != null) Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
-              Expanded(child: ListView.builder(itemCount: _items.length, itemBuilder: (context, index) {
-                final item = _items[index] as Map<String, dynamic>;
-                return ListTile(title: Text(item['Name'] as String? ?? 'Untitled'), subtitle: Text(item['Type'] as String? ?? ''));
-              })),
-            ],
           ),
         ),
       );
