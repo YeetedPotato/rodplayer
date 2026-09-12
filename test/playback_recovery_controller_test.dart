@@ -3,10 +3,10 @@ import 'package:rodplayer/core/playback/playback_decision.dart';
 import 'package:rodplayer/core/playback/playback_recovery_controller.dart';
 
 void main() {
-  const fallback = PlaybackDecision(
+  final fallback = PlaybackDecision(
     method: PlayMethod.directStream,
     reason: 'server supplied fallback',
-    url: Uri.parse('https://media/fallback'),
+    url: Uri.parse('https://remux.example.com/fallback'),
   );
 
   test('retries with exponential backoff and recovers', () async {
