@@ -31,6 +31,20 @@ void main() {
     final client = RemuxClient(baseUrl: base, client: _MockClient((request) => throw TimeoutException('slow')));
     expect(() => client.healthCheck(), throwsA(isA<RemuxConnectionException>()));
   });
+  test('deviceProfile uses the renamed direct-play profile without av1', () {
+    final profile = RemuxClient.deviceProfile;
+    expect(profile['Name'], 'Remux UHD Direct Play');
+    expect((profile['DirectPlayProfiles'] as List<dynamic>).single['VideoCodec'], 'h264,hevc');
+  });
+  test('getLatestMovies and getLatestTvShows query the latest shelves', () async {
+    final requests = <http.BaseRequest>[];
+    final client = RemuxClient(baseUrl: base, client: _MockClient((request) { requests.add(request); return http.Response(jsonEncode({'Items': [{'Id': 'item-1'}]}), 200); }));
+    client.userId = 'user-1';
+    expect(await client.getLatestMovies(limit: 7), [{'Id': 'item-1'}]);
+    expect(await client.getLatestTvShows(limit: 9), [{'Id': 'item-1'}]);
+    expect(requests[0].url.toString(), '$base/Items?userId=user-1&IncludeItemTypes=Movie&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=7&Fields=PrimaryImageAspectRatio,UserData');
+    expect(requests[1].url.toString(), '$base/Items?userId=user-1&IncludeItemTypes=Series&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=9&Fields=PrimaryImageAspectRatio,UserData');
+  });
   test('search and getItems attach sanitized MediaBrowser auth headers', () async {
     final requests = <http.BaseRequest>[];
     final client = RemuxClient(baseUrl: base, client: _MockClient((request) { requests.add(request); return http.Response(jsonEncode({'Items': []}), 200); }));
