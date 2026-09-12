@@ -24,6 +24,43 @@ class _BrowseScreenState extends State<BrowseScreen> {
     'https://image.tmdb.org/t/p/w500/9f6z1QJ7H0K7S0xP6YxX5xS5j3K.jpg',
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadBrowseItems();
+  }
+
+  Future<void> _loadBrowseItems() async {
+    try {
+      await widget.client.getItems();
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showBrowseError(error);
+    }
+  }
+
+  void _showBrowseError(Object error) {
+    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final message = switch (error) {
+      RemuxAuthException(:final message) => message,
+      RemuxConnectionException(:final message) => message,
+      _ => 'Unable to load browse items: $error',
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message, style: TextStyle(color: theme.textPrimary)),
+          backgroundColor: const Color(0xFF08090B),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(theme.radiusMedium),
+            side: BorderSide(color: const Color(0xFFEBCF52).withValues(alpha: 0.38)),
+          ),
+        ),
+      );
+  }
+
   Widget _card(String title, int index, {double aspectRatio = 2 / 3}) => FocusableMediaCard(
         title: title,
         subtitle: aspectRatio > 1 ? '${(index + 1) * 12}% watched' : 'Movie',
