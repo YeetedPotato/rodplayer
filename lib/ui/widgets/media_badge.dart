@@ -1,0 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:rodplayer/core/theme/remux_theme.dart';
+
+class MediaBadge extends StatelessWidget { const MediaBadge(this.label, {super.key, this.accent = false}); final String label; final bool accent; @override Widget build(BuildContext context) { final t = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme(); return Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: (accent ? t.gold : Colors.white).withValues(alpha: accent ? 0.16 : 0.08), borderRadius: BorderRadius.circular(t.radiusPill), border: Border.all(color: t.borderColor(0.12))), child: Text(label, style: TextStyle(color: accent ? t.gold : t.textSecondary, fontSize: 11, fontWeight: FontWeight.w700))); } }
+class MediaBadges extends StatelessWidget { const MediaBadges({super.key, required this.labels}); final List<String> labels; @override Widget build(BuildContext context) => Wrap(spacing: 6, runSpacing: 6, children: labels.map((x) => MediaBadge(x, accent: x == '4K')).toList()); }
