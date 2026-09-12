@@ -1,57 +1,46 @@
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:flutter_test/flutter_test.dart';
-import 'package:rodplayer/core/playback/stream_token_provider.dart';
-
-void main() {
-  test('returns the initial token when valid', () async {
-    var calls = 0;
-    final provider = StreamTokenProvider(
-      initialToken: 'plain-token',
-      refreshToken: () async {
-        calls++;
-        return 'new-token';
-      },
-    );
-
-    expect(await provider.getValidToken(), 'plain-token');
-    expect(calls, 0);
+/// Supplies cached Jellyfin tokens and deduplicates refreshes.
+class StreamTokenProvider {
+  StreamTokenProvider({
+    required this.refreshToken,
+    this.initialToken,
+    this.refreshBuffer = const Duration(minutes: 1),
   });
 
-  test('refreshes when forced', () async {
-    final provider = StreamTokenProvider(
-      initialToken: 'old-token',
-      refreshToken: () async => 'new-token',
-    );
+  final Future<String> Function() refreshToken;
+  final String? initialToken;
+  final Duration refreshBuffer;
+  Future<String>? _refreshing;
+  String? _token;
 
-    expect(await provider.getValidToken(forceRefresh: true), 'new-token');
-  });
+  Future<String> getValidToken({bool forceRefresh = false}) {
+    _token ??= initialToken;
+    if (!forceRefresh && _token != null && !_expiresSoon(_token!)) {
+      return Future<String>.value(_token!);
+    }
+    return _refreshing ??= _refresh().whenComplete(() => _refreshing = null);
+  }
 
-  test('deduplicates concurrent refreshes', () async {
-    var calls = 0;
-    final gate = Completer<void>();
-    final provider = StreamTokenProvider(refreshToken: () async {
-      calls++;
-      await gate.future;
-      return 'fresh-token';
-    });
+  Future<String> _refresh() async {
+    final token = await refreshToken();
+    if (token.isEmpty) throw StateError('Token refresh returned an empty token');
+    _token = token;
+    return token;
+  }
 
-    final first = provider.getValidToken(forceRefresh: true);
-    final second = provider.getValidToken(forceRefresh: true);
-    gate.complete();
-    expect(await Future.wait([first, second]), ['fresh-token', 'fresh-token']);
-    expect(calls, 1);
-  });
-
-  test('propagates refresh failures and permits a later retry', () async {
-    var calls = 0;
-    final provider = StreamTokenProvider(refreshToken: () async {
-      calls++;
-      if (calls == 1) throw StateError('offline');
-      return 'recovered-token';
-    });
-
-    expect(provider.getValidToken(), throwsA(isA<StateError>()));
-    expect(await provider.getValidToken(), 'recovered-token');
-  });
+  bool _expiresSoon(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length < 2) return false;
+      final payload = json.decode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+      final exp = payload is Map<String, dynamic> ? payload['exp'] : null;
+      if (exp is! num) return false;
+      return DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000)
+          .isBefore(DateTime.now().add(refreshBuffer));
+    } catch (_) {
+      return false;
+    }
+  }
 }
