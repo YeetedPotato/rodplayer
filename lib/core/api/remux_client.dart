@@ -21,7 +21,27 @@ class RemuxClient {
   Future<List<dynamic>> getNextUp() async { final response = await _client.get(Uri.parse('$baseUrl/Shows/NextUp?${_userQuery()}&Limit=20&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers); _check(response); return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? []; }
   Future<List<dynamic>> getUserViews() async { final response = await _client.get(Uri.parse('$baseUrl/Users/$userId/Views'), headers: _headers); _check(response); return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? []; }
   Future<List<dynamic>> search(String query) async { final response = await _client.get(Uri.parse('$baseUrl/Search?${_userQuery()}&searchTerm=${Uri.encodeQueryComponent(query)}'), headers: _headers); _check(response); final data = jsonDecode(response.body) as Map<String, dynamic>; return (data['Items'] as List<dynamic>?) ?? (data['SearchHints'] as List<dynamic>?) ?? []; }
-  Future<Uri> getStreamUri(String itemId) async { final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': deviceProfile, 'StartTimeTicks': 0})); _check(response); final data = jsonDecode(response.body) as Map<String, dynamic>; final sources = data['MediaSources'] as List<dynamic>? ?? []; if (sources.isEmpty) throw RemuxConnectionException('Remux returned no playable media source'); return Uri.parse((sources.first as Map<String, dynamic>)['Path'] as String); }
+  Future<Uri> getStreamUri(String itemId) async {
+    final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': deviceProfile, 'StartTimeTicks': 0}));
+    _check(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final sources = data['MediaSources'] as List<dynamic>? ?? [];
+    for (final value in sources) {
+      if (value is! Map<String, dynamic>) continue;
+      for (final key in const ['DirectStreamUrl', 'TranscodingUrl', 'Path']) {
+        final candidate = value[key];
+        if (candidate is! String || candidate.trim().isEmpty) continue;
+        final text = candidate.trim();
+        final parsed = Uri.parse(text);
+        if (key == 'Path' && parsed.scheme.isNotEmpty && !{'http', 'https', 'file'}.contains(parsed.scheme)) continue;
+        final resolved = parsed.hasScheme ? parsed : Uri.parse(baseUrl).resolve(text);
+        final token = _cleanToken(accessToken);
+        if (token != null && !resolved.queryParameters.containsKey('api_key')) return resolved.replace(queryParameters: {...resolved.queryParameters, 'api_key': token});
+        return resolved;
+      }
+    }
+    throw RemuxConnectionException('Remux returned no playable media source');
+  }
   Future<void> reportProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async { if (sessionId == null) return; final ticks = position.inMicroseconds * 10; final totalTicks = duration.inMicroseconds * 10; await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'PositionTicks': ticks, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': totalTicks})); }
   void _check(http.Response response) { if (response.statusCode < 200 || response.statusCode >= 300) throw RemuxConnectionException('Remux request failed (${response.statusCode})', statusCode: response.statusCode); }
   void close() => _client.close();
