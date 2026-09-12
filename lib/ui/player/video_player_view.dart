@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-
-import '../../core/api/remux_client.dart';
-import '../../core/player/player_controller.dart';
+import 'package:rodplayer/core/api/remux_client.dart';
+import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/core/theme/remux_theme.dart';
 
 class VideoPlayerView extends StatefulWidget {
   const VideoPlayerView({
@@ -28,10 +28,38 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   @override
   void initState() {
     super.initState();
+    widget.engine.error.addListener(_showPlaybackError);
     _keepAlive = Timer.periodic(
       const Duration(seconds: 10),
       (_) => unawaited(_report()),
     );
+  }
+
+  void _showPlaybackError() {
+    final message = widget.engine.error.value;
+    if (!mounted || message == null || message.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Playback error: $message', style: TextStyle(color: theme.textPrimary)),
+            backgroundColor: theme.obsidianRaised,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(theme.radiusMedium),
+              side: BorderSide(color: theme.goldBright.withValues(alpha: 0.38)),
+            ),
+            action: SnackBarAction(
+              label: 'RETRY',
+              textColor: theme.goldBright,
+              onPressed: () => unawaited(widget.engine.retry()),
+            ),
+          ),
+        );
+    });
   }
 
   Future<void> _report() async {
@@ -48,6 +76,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   void dispose() {
+    widget.engine.error.removeListener(_showPlaybackError);
     _keepAlive?.cancel();
     unawaited(_report());
     super.dispose();
@@ -55,30 +84,33 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      onKeyEvent: (_, event) {
-        if (event.logicalKey.keyLabel == 'Media Play Pause') {
-          widget.engine.player.playOrPause();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            Center(
-              child: Video(
-                controller: widget.engine.controller,
-                controls: AdaptiveVideoControls,
+    return PopScope(
+      canPop: true,
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: (_, event) {
+          if (event.logicalKey.keyLabel == 'Media Play Pause') {
+            widget.engine.player.playOrPause();
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              Center(
+                child: Video(
+                  controller: widget.engine.controller,
+                  controls: AdaptiveVideoControls,
+                ),
               ),
-            ),
-            Positioned(
-              top: 20,
-              left: 20,
-              child: _Hud(engine: widget.engine),
-            ),
-          ],
+              Positioned(
+                top: 20,
+                left: 20,
+                child: _Hud(engine: widget.engine),
+              ),
+            ],
+          ),
         ),
       ),
     );
