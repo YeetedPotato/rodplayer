@@ -89,16 +89,20 @@ class RodPlayerEngine {
     unawaited(_retry());
   }
 
-  Future<void> _retry() async {
-    await Future<void>.delayed(Duration(seconds: _retryCount));
-    _retryScheduled = false;
+  Future<void> retry() async {
     if (_disposed || _uri == null) return;
+    _retryScheduled = false;
     try {
       await _openAtPosition();
       error.value = null;
     } on Object catch (retryError) {
       _handleError(retryError.toString());
     }
+  }
+
+  Future<void> _retry() async {
+    await Future<void>.delayed(Duration(seconds: _retryCount));
+    await retry();
   }
 
   void _handlePlayingChanged(bool value) {
