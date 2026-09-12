@@ -32,11 +32,38 @@ class RemuxEngine {
   @visibleForTesting int get retryCount => _retryCount;
   @visibleForTesting int get maxRetries => _maxRetries;
   @visibleForTesting Duration retryDelayForAttempt(int attempt) => Duration(seconds: 1 << (attempt - 1));
+
   static const Map<String, String> mpvProperties = {
     'hwdec': 'auto-safe', 'vo': 'gpu-next', 'demuxer-max-bytes': '512MiB',
     'demuxer-max-back-bytes': '256MiB', 'cache': 'yes', 'network-timeout': '15',
     'socket-buffer-size': '4MiB', 'tone-mapping': 'bt.2446a', 'target-colorspace-hint': 'yes',
+    // Request bitstream passthrough for codecs supported by common AV
+    // receivers. mpv falls back to decoded PCM when the selected audio output
+    // cannot expose the requested IEC61937/HDMI format.
+    'audio-spdif': 'ac3,eac3,dts,dts-hd,truehd',
+    'audio-passthrough': 'yes',
+    'audio-fallback-to-null': 'no',
+    // Let libass select matching subtitle tracks and render text subtitles;
+    // bitmap PGS/VobSub tracks remain available through mpv's native renderer.
+    'sub-auto': 'fuzzy',
+    'sub-ass': 'yes',
+    'sub-forced': 'yes',
   };
+
+  static Map<String, String> get effectiveMpvProperties {
+    if (kIsWeb) return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-spdif': 'no', 'audio-passthrough': 'no'});
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-device': 'auto'});
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-device': 'auto'});
+    }
+  }
+
   Future<void> open(Uri uri, {String? title, Map<String, String>? headers, String? authToken}) async {
     _uri = uri; _retryCount = 0; _retryScheduled = false; error.value = null;
     _headers = <String, String>{...?headers};
@@ -46,7 +73,7 @@ class RemuxEngine {
   Future<void> _openAtPosition() async {
     final uri = _uri; if (_disposed || uri == null) return;
     final position = player.state.position; final media = Media(uri.toString(), httpHeaders: _headers);
-    for (final entry in mpvProperties.entries) { media.extras?[entry.key] = entry.value; }
+    for (final entry in effectiveMpvProperties.entries) { media.extras?[entry.key] = entry.value; }
     await player.open(media, play: true); if (position > Duration.zero) await player.seek(position);
   }
   void _handleError(String message) {
