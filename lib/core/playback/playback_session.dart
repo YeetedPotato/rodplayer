@@ -1,11 +1,12 @@
-import 'package:rodplayer/core/api/remux_client.dart';
+typedef PlaybackStart = Future<void> Function(String itemId, String sessionId);
+typedef PlaybackProgress = Future<void> Function(String itemId, String sessionId, Duration position, Duration duration, bool paused);
+typedef PlaybackStop = Future<void> Function(String itemId, String sessionId, Duration position);
 
 class PlaybackReporter {
-  const PlaybackReporter(this.client);
-  final RemuxClient client;
-  Future<void> start({required String itemId, required String sessionId}) => client.reportPlaybackStart(itemId: itemId, sessionId: sessionId);
-  Future<void> progress({required String itemId, required String sessionId, required Duration position, required Duration duration, bool paused = false}) => client.reportPlaybackProgress(itemId: itemId, sessionId: sessionId, position: position, duration: duration, isPaused: paused);
-  Future<void> stop({required String itemId, required String sessionId, required Duration position}) => client.reportPlaybackStop(itemId: itemId, sessionId: sessionId, position: position);
+  const PlaybackReporter({required this.start, required this.progress, required this.stop});
+  final PlaybackStart start;
+  final PlaybackProgress progress;
+  final PlaybackStop stop;
 }
 
 class PlaybackSession {
@@ -13,7 +14,7 @@ class PlaybackSession {
   final String itemId;
   final String sessionId;
   final PlaybackReporter reporter;
-  Future<void> start() => reporter.start(itemId: itemId, sessionId: sessionId);
-  Future<void> reportProgress(Duration position, Duration duration, {bool paused = false}) => reporter.progress(itemId: itemId, sessionId: sessionId, position: position, duration: duration, paused: paused);
-  Future<void> stop(Duration position) => reporter.stop(itemId: itemId, sessionId: sessionId, position: position);
+  Future<void> begin() => reporter.start(itemId, sessionId);
+  Future<void> reportProgress(Duration position, Duration duration, {bool paused = false}) => reporter.progress(itemId, sessionId, position, duration, paused);
+  Future<void> end(Duration position) => reporter.stop(itemId, sessionId, position);
 }
