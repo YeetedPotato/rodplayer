@@ -39,8 +39,9 @@ class PlaybackCoordinator {
   }
 
   void detach() {
-    unawaited(_stallSubscription?.cancel());
+    final subscription = _stallSubscription;
     _stallSubscription = null;
+    unawaited(subscription?.cancel() ?? Future<void>.value());
     _attached = false;
   }
 
