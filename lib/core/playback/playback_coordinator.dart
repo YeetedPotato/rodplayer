@@ -33,13 +33,13 @@ class PlaybackCoordinator {
     _stallSubscription = stallDetector.events.listen((event) {
       if (event.stalled) {
         _emit('Stall detected, attempting recovery...');
-        _recover('Playback stalled');
+        unawaited(_recover('Playback stalled'));
       }
     });
   }
 
   void detach() {
-    _stallSubscription?.cancel();
+    unawaited(_stallSubscription?.cancel());
     _stallSubscription = null;
     _attached = false;
   }
