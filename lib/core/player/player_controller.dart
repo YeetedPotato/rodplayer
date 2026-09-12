@@ -34,6 +34,15 @@ class RodPlayerEngine {
 
   static const int _maxRetries = 3;
 
+  @visibleForTesting
+  int get retryCount => _retryCount;
+
+  @visibleForTesting
+  int get maxRetries => _maxRetries;
+
+  @visibleForTesting
+  Duration retryDelayForAttempt(int attempt) => Duration(seconds: attempt);
+
   static const Map<String, String> mpvProperties = {
     'hwdec': 'auto-safe',
     'vo': 'gpu-next',
@@ -101,7 +110,7 @@ class RodPlayerEngine {
   }
 
   Future<void> _retry() async {
-    await Future<void>.delayed(Duration(seconds: _retryCount));
+    await Future<void>.delayed(retryDelayForAttempt(_retryCount));
     await retry();
   }
 
