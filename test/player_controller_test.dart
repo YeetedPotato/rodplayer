@@ -27,13 +27,13 @@ void main() {
       expect(engine.retryCount, 0);
     });
 
-    test('uses increasing one-second exponential retry delays', () {
+    test('uses exponential retry delays', () {
       final engine = RodPlayerEngine();
       addTearDown(engine.dispose);
 
       expect(engine.retryDelayForAttempt(1), const Duration(seconds: 1));
       expect(engine.retryDelayForAttempt(2), const Duration(seconds: 2));
-      expect(engine.retryDelayForAttempt(3), const Duration(seconds: 3));
+      expect(engine.retryDelayForAttempt(3), const Duration(seconds: 4));
     });
 
     test('retry starts from the current player position', () {
