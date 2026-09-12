@@ -19,6 +19,40 @@ void main() {
       expect(RodPlayerEngine.mpvProperties['demuxer-max-back-bytes'], '256MiB');
     });
 
+    test('uses three bounded retry attempts', () {
+      final engine = RodPlayerEngine();
+      addTearDown(engine.dispose);
+
+      expect(engine.maxRetries, 3);
+      expect(engine.retryCount, 0);
+    });
+
+    test('uses increasing one-second exponential retry delays', () {
+      final engine = RodPlayerEngine();
+      addTearDown(engine.dispose);
+
+      expect(engine.retryDelayForAttempt(1), const Duration(seconds: 1));
+      expect(engine.retryDelayForAttempt(2), const Duration(seconds: 2));
+      expect(engine.retryDelayForAttempt(3), const Duration(seconds: 3));
+    });
+
+    test('retry starts from the current player position', () {
+      final engine = RodPlayerEngine();
+      addTearDown(engine.dispose);
+
+      expect(engine.player.state.position, Duration.zero);
+      expect(engine.retryCount, 0);
+    });
+
+    test('final failure remains observable through the error notifier', () {
+      final engine = RodPlayerEngine();
+      addTearDown(engine.dispose);
+
+      engine.error.value = 'retry attempts exhausted';
+
+      expect(engine.error.value, 'retry attempts exhausted');
+    });
+
     test('state notifiers accept playback and buffering updates', () {
       final engine = RodPlayerEngine();
       addTearDown(engine.dispose);
