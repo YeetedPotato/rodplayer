@@ -3,7 +3,7 @@ import 'package:rodplayer/core/player/player_controller.dart';
 
 void main() {
   group('RodPlayerEngine', () {
-    test('starts with the default playback state', () async {
+    test('starts with the default playback state', () {
       final engine = RodPlayerEngine();
       addTearDown(engine.dispose);
 
@@ -19,7 +19,7 @@ void main() {
       expect(RodPlayerEngine.mpvProperties['demuxer-max-back-bytes'], '256MiB');
     });
 
-    test('state notifiers accept playback and buffering updates', () async {
+    test('state notifiers accept playback and buffering updates', () {
       final engine = RodPlayerEngine();
       addTearDown(engine.dispose);
       final playingValues = <bool>[];
@@ -38,7 +38,7 @@ void main() {
       expect(bufferingValues, <bool>[true, false]);
     });
 
-    test('error notifier can represent and clear a retry failure', () async {
+    test('error notifier can represent and clear a retry failure', () {
       final engine = RodPlayerEngine();
       addTearDown(engine.dispose);
 
