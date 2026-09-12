@@ -21,8 +21,8 @@ class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
   void _selectAudio(AudioTrack track) { widget.player.setAudioTrack(track); setState(() {}); }
   void _selectSubtitle(SubtitleTrack track) { widget.player.setSubtitleTrack(track); setState(() {}); }
 
-  String _trackLabel(String? title, String? language, String? codec) {
-    final parts = <String>[title, language, codec].whereType<String>().where((value) => value.isNotEmpty).toList();
+  String _trackLabel(String? title, String? language) {
+    final parts = <String>[title, language].whereType<String>().where((value) => value.isNotEmpty).toList();
     return parts.isEmpty ? 'Unknown track' : parts.join(' • ');
   }
 
@@ -42,9 +42,9 @@ class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Row(children: <Widget>[Text('Tracks', style: Theme.of(context).textTheme.titleLarge), const Spacer(), IconButton(autofocus: true, tooltip: 'Close', onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]),
-              _TrackGroup<AudioTrack>(title: 'Audio', tracks: state.tracks.audio, selected: selectedAudio, label: (track) => _trackLabel(track.title, track.language, track.codec), onSelected: _selectAudio),
+              _TrackGroup<AudioTrack>(title: 'Audio', tracks: state.tracks.audio, selected: selectedAudio, label: (track) => _trackLabel(track.title, track.language), onSelected: _selectAudio),
               const SizedBox(height: 20),
-              _TrackGroup<SubtitleTrack>(title: 'Subtitles', tracks: state.tracks.subtitle, selected: selectedSubtitle, label: (track) => _trackLabel(track.title, track.language, track.codec), onSelected: _selectSubtitle, onOff: () => _selectSubtitle(SubtitleTrack.no())),
+              _TrackGroup<SubtitleTrack>(title: 'Subtitles', tracks: state.tracks.subtitle, selected: selectedSubtitle, label: (track) => _trackLabel(track.title, track.language), onSelected: _selectSubtitle, onOff: () => _selectSubtitle(SubtitleTrack.no())),
             ],
           ))),
         )),
