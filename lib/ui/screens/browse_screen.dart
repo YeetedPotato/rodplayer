@@ -20,6 +20,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
   final ScrollController _scroll = ScrollController();
   late final Future<List<dynamic>> _nextUp;
   late final Future<List<dynamic>> _libraries;
+  late final Future<List<dynamic>> _latestMovies;
+  late final Future<List<dynamic>> _latestTvShows;
   final List<String> _posters = const [
     'https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg',
     'https://image.tmdb.org/t/p/w500/1XDDXPXGI7p8DhvjniLyrzsyVSj.jpg',
@@ -32,6 +34,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
     super.initState();
     _nextUp = widget.client.getNextUp();
     _libraries = widget.client.getUserViews();
+    _latestMovies = widget.client.getLatestMovies();
+    _latestTvShows = widget.client.getLatestTvShows();
   }
 
   @override
@@ -136,8 +140,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
         SliverToBoxAdapter(child: _dataShelf('My Media', _libraries, ratio: 1)),
         SliverToBoxAdapter(child: _shelf('Continue Watching', ['The Last Voyage', 'Shoreline', 'Night Shift'], ratio: 16 / 9)),
         SliverToBoxAdapter(child: _dataShelf('Next Up', _nextUp, ratio: 16 / 9)),
-        SliverToBoxAdapter(child: _shelf('Latest Movies', ['The Archive', 'Horizon', 'Northbound'])),
-        SliverToBoxAdapter(child: _shelf('Latest TV Shows', ['Dark Harbor', 'The Bureau', 'Open Water'])),
+        SliverToBoxAdapter(child: _dataShelf('Latest Movies', _latestMovies)),
+        SliverToBoxAdapter(child: _dataShelf('Latest TV Shows', _latestTvShows)),
         const SliverPadding(padding: EdgeInsets.only(bottom: 40)),
       ])),
     ));
