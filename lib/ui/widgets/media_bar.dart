@@ -38,7 +38,30 @@ class _MediaBarState extends State<MediaBar> {
   void _toggleMute() => _setVolume(_volume == 0 ? (_savedVolume == 0 ? 0.8 : _savedVolume) : 0);
   void _openSettings() {
     final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
-    showDialog<void>(context: context, barrierColor: Colors.black.withValues(alpha: 0.62), builder: (context) => BackdropFilter(filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18), child: Dialog(backgroundColor: theme.obsidianGlassStrong.withValues(alpha: 0.96), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.radiusLarge), side: BorderSide(color: theme.gold.withValues(alpha: 0.4))), child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Text('Playback settings', style: Theme.of(context).textTheme.titleLarge), const Spacer(), IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]), const SizedBox(height: 12), Text('Volume ${(_volume * 100).round()}%', style: TextStyle(color: theme.textPrimary)), Slider(value: _volume, onChanged: _setVolume)]))));
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.62),
+      builder: (dialogContext) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Dialog(
+          backgroundColor: theme.obsidianGlassStrong.withValues(alpha: 0.96),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.radiusLarge), side: BorderSide(color: theme.gold.withValues(alpha: 0.4))),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [Text('Playback settings', style: Theme.of(dialogContext).textTheme.titleLarge), const Spacer(), IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close))]),
+                const SizedBox(height: 12),
+                Text('Volume ${(_volume * 100).round()}%', style: TextStyle(color: theme.textPrimary)),
+                Slider(value: _volume, onChanged: _setVolume),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
   @override
   Widget build(BuildContext context) {
