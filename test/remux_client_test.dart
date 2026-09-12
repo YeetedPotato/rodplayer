@@ -38,7 +38,7 @@ void main() {
     await client.search('hello'); await client.getItems();
     expect(requests, hasLength(2));
     for (final request in requests) {
-      expect(request.headers['authorization'], contains('Token=\"secret\"'));
+      expect(request.headers['authorization'], contains('Token="secret"'));
       expect(request.headers['authorization'], isNot(contains('Bearer')));
       expect(request.url.toString(), startsWith(base));
     }
