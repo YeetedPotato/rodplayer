@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import '../lib/core/api/remux_client.dart';
+import 'package:rodplayer/core/api/remux_client.dart';
 
 class _MockClient extends http.BaseClient {
   _MockClient(this.handler);
@@ -38,7 +38,7 @@ void main() {
     await client.search('hello'); await client.getItems();
     expect(requests, hasLength(2));
     for (final request in requests) {
-      expect(request.headers['authorization'], contains('Token="secret"'));
+      expect(request.headers['authorization'], contains('Token=\"secret\"'));
       expect(request.headers['authorization'], isNot(contains('Bearer')));
       expect(request.url.toString(), startsWith(base));
     }
