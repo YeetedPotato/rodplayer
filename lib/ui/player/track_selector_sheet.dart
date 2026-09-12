@@ -22,7 +22,7 @@ class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
   void _selectSubtitle(SubtitleTrack track) { widget.player.setSubtitleTrack(track); setState(() {}); }
 
   String _trackLabel(String? title, String? language) {
-    final parts = <String>[title, language].whereType<String>().where((value) => value.isNotEmpty).toList();
+    final parts = <String?>[title, language].whereType<String>().where((value) => value.isNotEmpty).toList();
     return parts.isEmpty ? 'Unknown track' : parts.join(' • ');
   }
 
