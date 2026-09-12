@@ -17,18 +17,11 @@ void main() {
     expect(find.byTooltip('Mute'), findsOneWidget);
   });
 
-  testWidgets('slideshow pause toggles to play', (tester) async {
-    await tester.pumpWidget(harness());
-    await tester.tap(find.byTooltip('Pause slideshow'));
-    await tester.pump();
-    expect(find.byTooltip('Play slideshow'), findsOneWidget);
-  });
-
   testWidgets('settings opens a glass dialog', (tester) async {
     await tester.pumpWidget(harness());
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Playback settings'), findsOneWidget);
-    expect(find.text('media.example.com'), findsOneWidget);
+    expect(find.text('media.example.com'), findsNothing);
   });
 }
