@@ -6,8 +6,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 /// The playback engine. mpv options are deliberately centralized so platform
 /// views and the HUD remain independent of the transport implementation.
-class RodPlayerEngine {
-  RodPlayerEngine({this.onError}) {
+class RemuxEngine {
+  RemuxEngine({this.onError}) {
     player = Player(configuration: const PlayerConfiguration());
     controller = VideoController(player);
     _subscriptions = <StreamSubscription<Object?>>[
