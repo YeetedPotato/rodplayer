@@ -41,7 +41,8 @@ class RodPlayerEngine {
   int get maxRetries => _maxRetries;
 
   @visibleForTesting
-  Duration retryDelayForAttempt(int attempt) => Duration(seconds: attempt);
+  Duration retryDelayForAttempt(int attempt) =>
+      Duration(seconds: 1 << (attempt - 1));
 
   static const Map<String, String> mpvProperties = {
     'hwdec': 'auto-safe',
