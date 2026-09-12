@@ -37,8 +37,17 @@ class RemuxEngine {
     'hwdec': 'auto-safe', 'vo': 'gpu-next', 'demuxer-max-bytes': '512MiB',
     'demuxer-max-back-bytes': '256MiB', 'cache': 'yes', 'network-timeout': '15',
     'socket-buffer-size': '4MiB', 'tone-mapping': 'bt.2446a', 'target-colorspace-hint': 'yes',
-    'audio-spdif': 'ac3,eac3,dts,dts-hd,truehd', 'audio-passthrough': 'yes',
-    'audio-fallback-to-null': 'no', 'sub-auto': 'fuzzy', 'sub-ass': 'yes', 'sub-forced': 'yes',
+    // Request bitstream passthrough for codecs supported by common AV
+    // receivers. mpv falls back to decoded PCM when the selected audio output
+    // cannot expose the requested IEC61937/HDMI format.
+    'audio-spdif': 'ac3,eac3,dts,dts-hd,truehd',
+    'audio-passthrough': 'yes',
+    'audio-fallback-to-null': 'no',
+    // Let libass select matching subtitle tracks and render text subtitles;
+    // bitmap PGS/VobSub tracks remain available through mpv's native renderer.
+    'sub-auto': 'fuzzy',
+    'sub-ass': 'yes',
+    'sub-forced': 'yes',
   };
 
   static Map<String, String> get effectiveMpvProperties {
@@ -46,6 +55,7 @@ class RemuxEngine {
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
       case TargetPlatform.iOS:
+        return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-device': 'auto'});
       case TargetPlatform.macOS:
       case TargetPlatform.windows:
       case TargetPlatform.linux:
@@ -53,6 +63,7 @@ class RemuxEngine {
         return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-device': 'auto'});
     }
   }
+
   Future<void> open(Uri uri, {String? title, Map<String, String>? headers, String? authToken}) async {
     _uri = uri; _retryCount = 0; _retryScheduled = false; error.value = null;
     _headers = <String, String>{...?headers};
@@ -84,5 +95,6 @@ class RemuxEngine {
     error.dispose(); playing.dispose(); buffering.dispose(); await player.dispose();
   }
 }
+
 @Deprecated('Use RemuxEngine instead.')
 typedef RodPlayerEngine = RemuxEngine;
