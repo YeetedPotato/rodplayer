@@ -41,7 +41,7 @@ class PlaybackCoordinator {
   void detach() {
     final subscription = _stallSubscription;
     _stallSubscription = null;
-    unawaited(subscription?.cancel() ?? Future<void>.value());
+    unawaited(subscription?.cancel());
     _attached = false;
   }
 
@@ -56,7 +56,11 @@ class PlaybackCoordinator {
         _emit('Token refresh failed: $error');
       }
     }
-    final reason = authFailure ? 'Stream authorization failed' : networkDrop ? 'Network connection dropped' : 'Stream failed';
+    final reason = authFailure
+        ? 'Stream authorization failed'
+        : networkDrop
+            ? 'Network connection dropped'
+            : 'Stream failed';
     await _recover(reason);
   }
 
