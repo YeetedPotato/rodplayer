@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -49,7 +48,7 @@ class RemuxClient {
   static String? _cleanToken(String? token) {
     final value = token?.trim();
     if (value == null || value.isEmpty) return null;
-    return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
+    return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
   }
 
   Future<Map<String, dynamic>> healthCheck() async {

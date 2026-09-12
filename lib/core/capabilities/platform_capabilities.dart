@@ -1,14 +1,20 @@
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 
 class DeviceCapabilities {
   const DeviceCapabilities._();
 
   static Map<String, dynamic> currentDeviceProfile() {
-    final deviceName = Platform.isAndroid
-        ? 'Rod Android'
-        : Platform.isIOS
-            ? 'Rod iOS'
-            : 'Rod Player';
+    final deviceName = kIsWeb
+        ? 'Remux Web'
+        : defaultTargetPlatform == TargetPlatform.android
+            ? 'Remux Android'
+            : defaultTargetPlatform == TargetPlatform.iOS
+                ? 'Remux iOS'
+                : defaultTargetPlatform == TargetPlatform.macOS
+                    ? 'Remux macOS'
+                    : defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Remux Windows'
+                        : 'Remux Desktop';
 
     return <String, dynamic>{
       'Name': deviceName,
