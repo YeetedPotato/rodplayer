@@ -35,7 +35,7 @@ void main() {
     await tester.pumpWidget(testApp(Scaffold(body: FocusTraversalGroup(policy: OrderedTraversalPolicy(), child: Row(children: [
       SizedBox(width: 200, child: FocusableMediaCard(key: const ValueKey<String>('first-card'), title: 'First', focusNode: firstFocus, autofocus: true)),
       SizedBox(width: 200, child: FocusableMediaCard(key: const ValueKey<String>('second-card'), title: 'Second', focusNode: secondFocus)),
-    ]))));
+    ])))));
     await tester.pumpAndSettle();
     expect(firstFocus.hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
