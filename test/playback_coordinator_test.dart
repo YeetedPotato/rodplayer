@@ -1,4 +1,3 @@
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/playback/playback_coordinator.dart';
 import 'package:rodplayer/core/playback/playback_decision.dart';
