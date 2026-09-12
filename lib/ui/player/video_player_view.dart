@@ -114,6 +114,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                   left: 20,
                   child: _Hud(engine: widget.engine),
                 ),
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: 24,
+                  child: _StatusBar(engine: widget.engine),
+                ),
               ],
             ),
           ),
@@ -146,6 +152,50 @@ class _Hud extends StatelessWidget {
               color: theme.goldBright,
               icon: Icon(snapshot.data == true ? Icons.pause : Icons.play_arrow),
               onPressed: engine.player.playOrPause,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.engine});
+
+  final RodPlayerEngine engine;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    return StreamBuilder<String>(
+      stream: engine.statuses,
+      builder: (_, snapshot) {
+        final message = snapshot.data;
+        if (message == null || message.isEmpty) return const SizedBox.shrink();
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.obsidianRaised.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(theme.radiusMedium),
+            border: Border.all(color: theme.goldBright.withValues(alpha: 0.8)),
+            boxShadow: theme.goldGlow,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline, color: theme.goldBright, size: 18),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    message,
+                    style: TextStyle(color: theme.goldBright),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
         );
