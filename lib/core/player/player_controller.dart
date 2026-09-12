@@ -28,7 +28,6 @@ class RodPlayerEngine {
   late final List<StreamSubscription<Object?>> _subscriptions;
   Uri? _uri;
   Map<String, String> _headers = const <String, String>{};
-  String? _title;
   int _retryCount = 0;
   bool _retryScheduled = false;
   bool _disposed = false;
@@ -54,7 +53,6 @@ class RodPlayerEngine {
     String? authToken,
   }) async {
     _uri = uri;
-    _title = title;
     _retryCount = 0;
     _retryScheduled = false;
     error.value = null;
