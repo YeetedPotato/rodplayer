@@ -6,7 +6,7 @@ void main() {
   const fallback = PlaybackDecision(
     method: PlayMethod.directStream,
     reason: 'server supplied fallback',
-    url: Uri(scheme: 'https', host: 'media', path: 'fallback'),
+    url: Uri.parse('https://media/fallback'),
   );
 
   test('retries with exponential backoff and recovers', () async {
