@@ -10,17 +10,17 @@ class PlaybackReporter {
   final PlaybackProgress progress;
   final PlaybackStop stop;
 
-  factory PlaybackReporter.fromRemuxClient(RemuxClient client) => PlaybackReporter(
-        start: (itemId, sessionId) => client.reportPlaybackStarted(itemId: itemId, sessionId: sessionId),
-        progress: (itemId, _, position, duration, paused) => client.reportPlaybackProgress(itemId: itemId, position: position, duration: duration, isPaused: paused),
-        stop: (itemId, _, position) => client.reportPlaybackStopped(itemId: itemId, position: position),
+  factory PlaybackReporter.fromRemuxClient(RemuxClient client, {PlaybackStreamInfo? streamInfo}) => PlaybackReporter(
+        start: (itemId, sessionId) => client.reportPlaybackStarted(itemId: itemId, sessionId: sessionId, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
+        progress: (itemId, _, position, duration, paused) => client.reportPlaybackProgress(itemId: itemId, position: position, duration: duration, isPaused: paused, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
+        stop: (itemId, _, position) => client.reportPlaybackStopped(itemId: itemId, position: position, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
       );
 }
 
 class PlaybackSession {
   PlaybackSession({required this.itemId, required this.sessionId, required this.reporter, this.streamInfo});
 
-  factory PlaybackSession.fromRemuxClient({required String itemId, required String sessionId, required RemuxClient client, PlaybackStreamInfo? streamInfo}) => PlaybackSession(itemId: itemId, sessionId: sessionId, reporter: PlaybackReporter.fromRemuxClient(client), streamInfo: streamInfo);
+  factory PlaybackSession.fromRemuxClient({required String itemId, required String sessionId, required RemuxClient client, PlaybackStreamInfo? streamInfo}) => PlaybackSession(itemId: itemId, sessionId: sessionId, reporter: PlaybackReporter.fromRemuxClient(client, streamInfo: streamInfo), streamInfo: streamInfo);
 
   final String itemId;
   final String sessionId;
