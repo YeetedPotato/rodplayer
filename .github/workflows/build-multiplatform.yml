@@ -7,6 +7,10 @@ permissions:
   contents: read
   issues: write
   actions: read
+
+env:
+  FLUTTER_CHANNEL: stable
+
 jobs:
   android:
     runs-on: ubuntu-24.04
@@ -14,96 +18,130 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
-      - name: Install Flutter dependencies
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+      - name: Configure Android TV and Fire TV manifest
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          s = s.replace('<application', '<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application', 1)
+          s = s.replace('<category android:name="android.intent.category.LAUNCHER" />', '<category android:name="android.intent.category.LAUNCHER" />\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />', 1)
+          p.write_text(s)
+          PY
+      - name: Install dependencies
         run: flutter pub get
       - name: Analyze Dart code
+        shell: bash
         run: |
           set -o pipefail
           flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
           status=${PIPESTATUS[0]}
-          {
-            echo "## Dart Analyzer Output"
-            echo '```text'
-            cat analyze.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build Android arm64 APK
-        run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+        run: flutter build apk --release --target-platform android-arm64 --split-per-abi 2>&1 | tee build.log
+      - name: Build Android armeabi-v7a APK
+        run: flutter build apk --release --target-platform android-arm --split-per-abi 2>&1 | tee -a build.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-firetv-apks
+          path: build/app/outputs/flutter-apk/*.apk
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-android
+          path: '*.log'
+          if-no-files-found: warn
+
   macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Install Flutter dependencies
-        run: flutter pub get
+        with: {channel: stable, cache: true}
+      - name: Generate macOS project
+        run: flutter create --platforms=macos .
+      - run: flutter pub get
       - name: Analyze Dart code
         run: |
           set -o pipefail
           flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
           status=${PIPESTATUS[0]}
-          {
-            echo "## Dart Analyzer Output"
-            echo '```text'
-            cat analyze.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build macOS app
-        run: flutter build macos --release
+        run: flutter build macos --release 2>&1 | tee build.log
+      - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with: {name: rodplayer-macos, path: RodPlayer-macOS.zip}
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with: {name: debug-logs-macos, path: '*.log', if-no-files-found: warn}
+
   windows:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Install Flutter dependencies
-        run: flutter pub get
+        with: {channel: stable, cache: true}
+      - name: Generate Windows project
+        run: flutter create --platforms=windows .
+      - run: flutter pub get
       - name: Analyze Dart code
         shell: bash
         run: |
           set -o pipefail
           flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
           status=${PIPESTATUS[0]}
-          {
-            echo "## Dart Analyzer Output"
-            echo '```text'
-            cat analyze.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build Windows x64
         shell: bash
-        run: flutter build windows --release
+        run: flutter build windows --release 2>&1 | tee build.log
+      - uses: actions/upload-artifact@v4
+        with: {name: rodplayer-windows-x64, path: build/windows/x64/runner/Release}
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with: {name: debug-logs-windows, path: '*.log', if-no-files-found: warn}
+
   ios:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          architecture: arm64
-          cache: true
-      - name: Install dependencies
-        run: flutter pub get
+        with: {channel: stable, architecture: arm64, cache: true}
+      - name: Generate iOS project
+        run: flutter create --platforms=ios .
+      - name: Configure CocoaPods and unsigned build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ios/Podfile')
+          s = p.read_text().replace("platform :ios, '12.0'", "platform :ios, '15.0'")
+          if 'platform :ios' not in s: s = "platform :ios, '15.0'\n" + s
+          p.write_text(s)
+          PY
+          mkdir -p ios/Flutter
+          for c in Debug Release; do printf '%s\n' 'CODE_SIGNING_ALLOWED = NO' 'CODE_SIGNING_REQUIRED = NO' 'CODE_SIGN_IDENTITY =' >> "ios/Flutter/$c.xcconfig"; done
+      - name: Install dependencies and CocoaPods
+        run: flutter pub get && cd ios && pod install --repo-update
       - name: Analyze Dart code
         run: |
           set -o pipefail
           flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
           status=${PIPESTATUS[0]}
-          {
-            echo "## Dart Analyzer Output"
-            echo '```text'
-            cat analyze.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build unsigned iOS app
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign 2>&1 | tee build.log
+      - name: Upload debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with: {name: debug-logs-ios, path: '*.log', if-no-files-found: warn}
