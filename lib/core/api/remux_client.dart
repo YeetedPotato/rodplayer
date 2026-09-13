@@ -33,16 +33,6 @@ class RemuxClient {
   String? userId;
   String? sessionId;
 
-  static const deviceProfile = <String, dynamic>{
-    'Name': 'Remux UHD Direct Play',
-    'MaxStreamingBitrate': 140000000,
-    'MaxStaticBitrate': 140000000,
-    'DirectPlayProfiles': <Map<String, String>>[
-      <String, String>{'Container': 'mp4,mkv,ts,m2ts', 'Type': 'Video', 'VideoCodec': 'h264,hevc', 'AudioCodec': 'aac,ac3,eac3,truehd,dts,flac'},
-    ],
-    'TranscodingProfiles': <Map<String, String>>[],
-  };
-
   Map<String, String> get _headers {
     final token = _cleanToken(accessToken);
     final authorization = StringBuffer('MediaBrowser Client="rodplayer", Device="FireTV", DeviceId="$deviceId", Version="1.0.0"');
@@ -53,7 +43,7 @@ class RemuxClient {
   static String? _cleanToken(String? token) {
     final value = token?.trim();
     if (value == null || value.isEmpty) return null;
-    return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
+    return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
   }
 
   Future<Map<String, dynamic>> healthCheck() async {
@@ -97,8 +87,31 @@ class RemuxClient {
   Future<List<dynamic>> getUserViews() async => _items(await _client.get(Uri.parse('$baseUrl/Users/$userId/Views'), headers: _headers));
   Future<List<dynamic>> search({required String query, int limit = 20}) async => _items(await _client.get(Uri.parse('$baseUrl/Search/Hints?${_userQuery()}&SearchTerm=${Uri.encodeQueryComponent(query)}&Limit=$limit&IncludeItemTypes=Movie,Series,Episode'), headers: _headers), key: 'SearchHints');
 
-  Future<void> toggleFavorite({required String itemId, required bool isFavorite}) async { final uri = Uri.parse('$baseUrl/Users/$userId/FavoriteItems/$itemId'); final response = isFavorite ? await _client.post(uri, headers: _headers) : await _client.delete(uri, headers: _headers); _check(response); }
-  Future<Uri> getStreamUri(String itemId) async { final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile()).toDeviceProfile(), 'StartTimeTicks': 0})); _check(response); final data = jsonDecode(response.body) as Map<String, dynamic>; final sources = data['MediaSources'] as List<dynamic>? ?? []; final engine = PlaybackDecisionEngine(DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile())); for (final value in sources) { if (value is! Map<String, dynamic>) continue; final decision = engine.decide(value); final candidate = decision.url; if (candidate == null || decision.method == PlayMethod.transcode) continue; final resolved = candidate.hasScheme ? candidate : Uri.parse(baseUrl).resolve(candidate.toString()); final token = _cleanToken(accessToken); if (token != null && !resolved.queryParameters.containsKey('api_key')) return resolved.replace(queryParameters: {...resolved.queryParameters, 'api_key': token}); return resolved; } throw RemuxConnectionException('Remux returned no playable media source'); }
+  Future<void> toggleFavorite({required String itemId, required bool isFavorite}) async {
+    final uri = Uri.parse('$baseUrl/Users/$userId/FavoriteItems/$itemId');
+    final response = isFavorite ? await _client.post(uri, headers: _headers) : await _client.delete(uri, headers: _headers);
+    _check(response);
+  }
+
+  Future<Uri> getStreamUri(String itemId) async {
+    final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile()).toDeviceProfile(), 'StartTimeTicks': 0}));
+    _check(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final sources = data['MediaSources'] as List<dynamic>? ?? [];
+    final engine = PlaybackDecisionEngine(DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile()));
+    for (final value in sources) {
+      if (value is! Map<String, dynamic>) continue;
+      final decision = engine.decide(value);
+      final candidate = decision.url;
+      if (candidate == null || decision.method == PlayMethod.transcode) continue;
+      final resolved = candidate.hasScheme ? candidate : Uri.parse(baseUrl).resolve(candidate.toString());
+      final token = _cleanToken(accessToken);
+      if (token != null && !resolved.queryParameters.containsKey('api_key')) return resolved.replace(queryParameters: {...resolved.queryParameters, 'api_key': token});
+      return resolved;
+    }
+    throw RemuxConnectionException('Remux returned no playable media source');
+  }
+
   Future<void> reportPlaybackStarted({required String itemId, required String sessionId}) async { this.sessionId = sessionId; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'MediaSourceId': itemId, 'PlayMethod': 'DirectPlay', 'IsPaused': false})); _check(response); }
   Future<void> reportPlaybackProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async { final activeSession = sessionId; if (activeSession == null) return; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'PositionTicks': position.inMicroseconds * 10, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': duration.inMicroseconds * 10})); _check(response); }
   Future<void> reportPlaybackStopped({required String itemId, required Duration position}) async { final activeSession = sessionId; if (activeSession == null) return; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Stopped'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'MediaSourceId': itemId, 'PositionTicks': position.inMicroseconds * 10})); _check(response); sessionId = null; }
