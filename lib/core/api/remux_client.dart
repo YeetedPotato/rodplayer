@@ -64,7 +64,7 @@ class RemuxClient {
   static String? _cleanToken(String? token) {
     final value = token?.trim();
     if (value == null || value.isEmpty) return null;
-    return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
+    return value.replaceFirst(RegExp(r'^Bearer\\s+', caseSensitive: false), '').trim();
   }
 
   Future<Map<String, dynamic>> healthCheck() async {
@@ -150,11 +150,27 @@ class RemuxClient {
     throw RemuxConnectionException('Remux returned no playable media source');
   }
 
-  Future<void> reportProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async {
-    if (sessionId == null) return;
-    final ticks = position.inMicroseconds * 10;
-    final totalTicks = duration.inMicroseconds * 10;
-    await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'PositionTicks': ticks, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': totalTicks}));
+  Future<void> reportPlaybackStarted({required String itemId, required String sessionId}) async {
+    this.sessionId = sessionId;
+    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'MediaSourceId': itemId, 'PlayMethod': 'DirectPlay', 'IsPaused': false}));
+    _check(response);
+  }
+
+  Future<void> reportPlaybackProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async {
+    final activeSession = sessionId;
+    if (activeSession == null) return;
+    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'PositionTicks': position.inMicroseconds * 10, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': duration.inMicroseconds * 10}));
+    _check(response);
+  }
+
+  Future<void> reportProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) => reportPlaybackProgress(itemId: itemId, position: position, duration: duration, isPaused: isPaused);
+
+  Future<void> reportPlaybackStopped({required String itemId, required Duration position}) async {
+    final activeSession = sessionId;
+    if (activeSession == null) return;
+    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Stopped'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'MediaSourceId': itemId, 'PositionTicks': position.inMicroseconds * 10}));
+    _check(response);
+    sessionId = null;
   }
 
   void _check(http.Response response) {
