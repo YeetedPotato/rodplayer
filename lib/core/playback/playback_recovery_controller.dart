@@ -27,6 +27,8 @@ class PlaybackRecoveryController {
   final _states = StreamController<RecoveryState>.broadcast();
   RecoveryState _state = const RecoveryState(phase: RecoveryPhase.idle, reason: 'Ready');
   bool _recovering = false;
+  bool _disposed = false;
+  int _generation = 0;
 
   RecoveryState get state => _state;
   Stream<RecoveryState> get states => _states.stream;
@@ -36,31 +38,43 @@ class PlaybackRecoveryController {
     required Future<bool> Function() retryCurrent,
     required Future<PlaybackDecision> Function() fallback,
   }) async {
-    if (_recovering) return;
+    if (_recovering || _disposed) return;
     _recovering = true;
+    final generation = _generation;
     try {
       for (var attempt = 1; attempt <= maxRetries; attempt++) {
+        if (!_isActive(generation)) return;
         _emit(RecoveryState(phase: RecoveryPhase.retrying, reason: '$reason; retrying stream', attempt: attempt));
         await sleep(_backoff(attempt));
+        if (!_isActive(generation)) return;
         if (await retryCurrent()) {
           _emit(RecoveryState(phase: RecoveryPhase.recovered, reason: 'Recovered current stream after retry $attempt', attempt: attempt));
           return;
         }
       }
+      if (!_isActive(generation)) return;
       _emit(RecoveryState(phase: RecoveryPhase.fallingBack, reason: 'Direct play failed after $maxRetries retries; selecting fallback'));
       final decision = await fallback();
+      if (!_isActive(generation)) return;
       if (decision.method != PlayMethod.directPlay || decision.url != null) {
         _emit(RecoveryState(phase: RecoveryPhase.recovered, reason: 'Fallback selected: ${decision.method.name}; ${decision.reason}'));
       } else {
         _emit(RecoveryState(phase: RecoveryPhase.failed, reason: 'Fallback unavailable: ${decision.reason}'));
       }
     } catch (error) {
-      _emit(RecoveryState(phase: RecoveryPhase.failed, reason: 'Playback recovery failed: $error'));
+      if (_isActive(generation)) _emit(RecoveryState(phase: RecoveryPhase.failed, reason: 'Playback recovery failed: $error'));
     } finally {
-      _recovering = false;
+      if (generation == _generation) _recovering = false;
     }
   }
 
+  /// Stops an in-flight recovery when playback is stopped or completed.
+  void cancel() {
+    _generation++;
+    _recovering = false;
+  }
+
+  bool _isActive(int generation) => !_disposed && generation == _generation;
   Duration _backoff(int attempt) => initialBackoff * (1 << (attempt - 1));
 
   void _emit(RecoveryState value) {
@@ -68,6 +82,12 @@ class PlaybackRecoveryController {
     if (!_states.isClosed) _states.add(value);
   }
 
-  Future<void> dispose() => _states.close();
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    cancel();
+    await _states.close();
+  }
+
   static Future<void> _defaultSleep(Duration duration) => Future<void>.delayed(duration);
 }

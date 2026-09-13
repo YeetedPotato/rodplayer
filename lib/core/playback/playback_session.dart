@@ -25,10 +25,24 @@ class PlaybackSession {
   final String itemId;
   final String sessionId;
   final PlaybackReporter reporter;
+  bool _started = false;
+  bool _ended = false;
 
-  Future<void> begin() => reporter.start(itemId, sessionId);
+  Future<void> begin() async {
+    if (_started || _ended) return;
+    _started = true;
+    await reporter.start(itemId, sessionId);
+  }
 
-  Future<void> reportProgress(Duration position, Duration duration, {bool paused = false}) => reporter.progress(itemId, sessionId, position, duration, paused);
+  Future<void> reportProgress(Duration position, Duration duration, {bool paused = false}) {
+    if (_ended) return Future<void>.value();
+    return reporter.progress(itemId, sessionId, position, duration, paused);
+  }
 
-  Future<void> end(Duration position) => reporter.stop(itemId, sessionId, position);
+  /// Idempotent terminal notification for stop and completion paths.
+  Future<void> end(Duration position) async {
+    if (_ended) return;
+    _ended = true;
+    await reporter.stop(itemId, sessionId, position);
+  }
 }

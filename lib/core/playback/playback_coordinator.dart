@@ -45,6 +45,12 @@ class PlaybackCoordinator {
     _attached = false;
   }
 
+  /// Ends recovery before a new playback session or terminal player state.
+  void stopRecovery() {
+    recoveryController.cancel();
+    detach();
+  }
+
   Future<void> handleStreamFailure({int? statusCode, bool networkDrop = false}) async {
     if (_disposed) return;
     final authFailure = statusCode == 401 || statusCode == 403;
@@ -65,6 +71,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> _recover(String reason) async {
+    if (_disposed) return;
     await recoveryController.handleFailure(
       reason: reason,
       retryCurrent: retryCurrent,
@@ -82,6 +89,7 @@ class PlaybackCoordinator {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    recoveryController.cancel();
     detach();
     await _status.close();
   }
