@@ -1,6 +1,19 @@
 import 'package:flutter/foundation.dart';
 
-enum PlatformProfile { ios, fireTv, androidTv, androidMobile, macos, windows, web }
+enum PlatformProfile {
+  ios,
+  fireTv,
+  androidTv,
+  androidMobile,
+  macos,
+  windows,
+  web;
+
+  @Deprecated('Use fireTv instead')
+  static const fireTv4kMax = fireTv;
+  @Deprecated('Use fireTv instead')
+  static const fireTvLite = fireTv;
+}
 
 class DeviceCapabilities {
   const DeviceCapabilities({required this.profile, required this.videoCodecs, required this.audioCodecs, required this.containers, this.maxStreamingBitrate = 140000000, this.supportsHdr10 = false, this.supportsDolbyVision = false, this.supportsAv1 = false, this.supportsDpadFocus = false, this.supportsKeyboardScrubbing = false, this.hardwareAcceleration = false, this.audioPassthrough = const <String>[], this.subtitleCodecs = const ['srt', 'ass', 'ssa', 'subrip', 'webvtt']});
