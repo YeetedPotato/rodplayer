@@ -43,9 +43,21 @@ class AdvancedPlaybackController {
   final ValueNotifier<List<PlaybackChapter>> chapters = ValueNotifier<List<PlaybackChapter>>(<PlaybackChapter>[]);
   final ValueNotifier<List<PlaybackMarker>> markers = ValueNotifier<List<PlaybackMarker>>(<PlaybackMarker>[]);
 
-  Future<void> setRate(double value) async { rate.value = value.clamp(0.5, 2.0); await player.setRate(rate.value); }
-  Future<void> adjustAudioDelay(Duration value) async { audioDelay.value = value; await player.setAudioDelay(value); }
-  Future<void> adjustSubtitleDelay(Duration value) async { subtitleDelay.value = value; await player.setSubtitleDelay(value); }
+  Future<void> setRate(double value) async {
+    rate.value = value.clamp(0.5, 2.0).toDouble();
+    await player.setRate(rate.value);
+  }
+
+  Future<void> adjustAudioDelay(Duration value) async {
+    audioDelay.value = value;
+    await player.setProperty('audio-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+  }
+
+  Future<void> adjustSubtitleDelay(Duration value) async {
+    subtitleDelay.value = value;
+    await player.setProperty('sub-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+  }
+
   Future<void> setSubtitleStyle(SubtitleStyle style) async {
     final properties = <String, String>{
       if (style.fontSize != null) 'sub-font-size': '${style.fontSize}',
