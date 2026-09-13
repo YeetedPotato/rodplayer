@@ -57,7 +57,7 @@ class JellyfinLibraryItem {
 }
 
 class NextUpItem extends JellyfinLibraryItem {
-  const NextUpItem({required super.id, required super.title, super.seriesName, super.seasonNumber, super.episodeNumber, super.playbackPositionTicks, super.runTimeTicks, super.backdropImageTag, super.posterImageTag, super.isFavorite});
+  const NextUpItem({required super.id, required super.title, super.seriesName, super.seasonNumber, super.episodeNumber, super.playbackPositionTicks, super.runTimeTicks, super.backdropImageTag, super.posterImageTag, super.isFavorite = false});
   factory NextUpItem.fromJson(Map<String, dynamic> json) {
     final item = JellyfinLibraryItem.fromJson(json);
     return NextUpItem(id: item.id, title: item.title, seriesName: item.seriesName, seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber, playbackPositionTicks: item.playbackPositionTicks, runTimeTicks: item.runTimeTicks, backdropImageTag: item.backdropImageTag, posterImageTag: item.posterImageTag, isFavorite: item.isFavorite);
@@ -65,7 +65,7 @@ class NextUpItem extends JellyfinLibraryItem {
 }
 
 class ResumableItem extends JellyfinLibraryItem {
-  const ResumableItem({required super.id, required super.title, super.seriesName, super.seasonNumber, super.episodeNumber, super.playbackPositionTicks, super.runTimeTicks, super.backdropImageTag, super.posterImageTag, super.isFavorite});
+  const ResumableItem({required super.id, required super.title, super.seriesName, super.seasonNumber, super.episodeNumber, super.playbackPositionTicks, super.runTimeTicks, super.backdropImageTag, super.posterImageTag, super.isFavorite = false});
   factory ResumableItem.fromJson(Map<String, dynamic> json) {
     final item = JellyfinLibraryItem.fromJson(json);
     return ResumableItem(id: item.id, title: item.title, seriesName: item.seriesName, seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber, playbackPositionTicks: item.playbackPositionTicks, runTimeTicks: item.runTimeTicks, backdropImageTag: item.backdropImageTag, posterImageTag: item.posterImageTag, isFavorite: item.isFavorite);
