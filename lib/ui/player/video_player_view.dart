@@ -19,13 +19,27 @@ class VideoPlayerView extends StatefulWidget {
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
   Timer? _keepAlive;
+  final List<StreamSubscription<bool>> _playbackSubscriptions = <StreamSubscription<bool>>[];
+  bool _disposed = false;
+  bool _reportInFlight = false;
 
   @override
   void initState() {
     super.initState();
     widget.engine.error.addListener(_showPlaybackError);
+    _playbackSubscriptions.add(widget.engine.player.stream.playing.listen((_) => _reportingStateChanged()));
+    _playbackSubscriptions.add(widget.engine.player.stream.buffering.listen((_) => _reportingStateChanged()));
     unawaited(widget.playbackSession?.begin());
     _keepAlive = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_report()));
+  }
+
+  void _reportingStateChanged() {
+    if (!_disposed && !widget.engine.player.state.playing && !widget.engine.player.state.buffering) {
+      _keepAlive?.cancel();
+      _keepAlive = null;
+    } else if (!_disposed && _keepAlive == null) {
+      _keepAlive = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_report()));
+    }
   }
 
   void _showPlaybackError() {
@@ -50,26 +64,38 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   Future<void> _report() async {
-    final id = widget.itemId;
-    final session = widget.playbackSession;
+    if (_disposed || _reportInFlight) return;
     final playerState = widget.engine.player.state;
-    if (session != null) {
-      await session.reportProgress(playerState.position, playerState.duration, paused: !playerState.playing);
-      return;
+    if (!playerState.playing || playerState.buffering) return;
+    _reportInFlight = true;
+    try {
+      final id = widget.itemId;
+      final session = widget.playbackSession;
+      if (session != null) {
+        await session.reportProgress(playerState.position, playerState.duration);
+      } else if (id != null) {
+        await widget.client.reportProgress(itemId: id, position: playerState.position, duration: playerState.duration, isPaused: false);
+      }
+    } finally {
+      _reportInFlight = false;
     }
-    if (id != null) await widget.client.reportProgress(itemId: id, position: playerState.position, duration: playerState.duration, isPaused: !playerState.playing);
   }
 
   @override
   void dispose() {
+    _disposed = true;
     widget.engine.error.removeListener(_showPlaybackError);
     _keepAlive?.cancel();
+    _keepAlive = null;
+    for (final subscription in _playbackSubscriptions) {
+      unawaited(subscription.cancel());
+    }
     final playerState = widget.engine.player.state;
     final session = widget.playbackSession;
     if (session != null) {
       unawaited(session.end(playerState.position));
-    } else {
-      unawaited(_report());
+    } else if (widget.itemId != null) {
+      unawaited(widget.client.reportProgress(itemId: widget.itemId!, position: playerState.position, duration: playerState.duration, isPaused: true));
     }
     super.dispose();
   }
