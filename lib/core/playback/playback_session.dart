@@ -1,4 +1,4 @@
-import 'package:rodplayer/api/remux_client.dart';
+import 'package:rodplayer/core/api/remux_client.dart';
 
 typedef PlaybackStart = Future<void> Function(String itemId, String sessionId);
 typedef PlaybackProgress = Future<void> Function(String itemId, String sessionId, Duration position, Duration duration, bool paused);
