@@ -55,3 +55,6 @@ class RemuxEngine {
   Future<void> seekFast(Duration position) => advanced.seekFast(position);
   Future<void> dispose() async { if (_disposed) return; _disposed = true; for (final subscription in _subscriptions) { await subscription.cancel(); } await coordinator?.dispose(); advanced.dispose(); error.dispose(); playing.dispose(); buffering.dispose(); await player.dispose(); }
 }
+
+@Deprecated('Use RemuxEngine instead.')
+typedef RodPlayerEngine = RemuxEngine;
