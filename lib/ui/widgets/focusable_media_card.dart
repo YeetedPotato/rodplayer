@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
 import 'package:rodplayer/core/theme/remux_theme.dart';
 import 'package:rodplayer/ui/widgets/media_badge_overlay.dart';
@@ -20,7 +21,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
   late final FocusNode _focusNode;
   FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode;
   @override void initState() { super.initState(); _focusNode = FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'); }
-  @override void dispose() { _focusNode.dispose(); super.dispose(); }
+  @override void dispose() { if (widget.focusNode == null) _focusNode.dispose(); super.dispose(); }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
