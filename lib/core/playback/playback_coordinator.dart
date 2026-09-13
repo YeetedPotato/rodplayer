@@ -16,6 +16,7 @@ class PlaybackCoordinator {
   final _status = StreamController<String>.broadcast();
   StreamSubscription<StallEvent>? _stallSubscription;
   StreamSubscription<RecoveryState>? _recoverySubscription;
+  Future<void>? _recoveryInFlight;
   bool _attached = false;
   bool _disposed = false;
   Stream<String> get statuses => _status.stream;
@@ -36,12 +37,22 @@ class PlaybackCoordinator {
   Future<void> handleStreamFailure({int? statusCode, bool networkDrop = false}) async {
     if (_disposed) return;
     final authFailure = statusCode == 401 || statusCode == 403;
-    if (authFailure) { _emit('Stream authorization failed, refreshing token...'); try { await tokenProvider.getValidToken(forceRefresh: true); } catch (error) { _emit('Token refresh failed: $error'); } }
+    if (authFailure) {
+      _emit('Stream authorization failed, refreshing token...');
+      try {
+        await tokenProvider.getValidToken(forceRefresh: true);
+      } catch (error) {
+        _emit('Token refresh failed: $error');
+      }
+    }
     final reason = authFailure ? 'Stream authorization failed' : networkDrop ? 'Network connection dropped' : 'Stream failed';
     await _recover(reason);
   }
-  Future<void> _recover(String reason) async {
-    if (_disposed) return;
+  Future<void> _recover(String reason) {
+    if (_disposed) return Future<void>.value();
+    return _recoveryInFlight ??= _runRecovery(reason).whenComplete(() => _recoveryInFlight = null);
+  }
+  Future<void> _runRecovery(String reason) async {
     await recoveryController.handleFailure(reason: reason, retryCurrent: retryCurrent, fallback: () async { _emit('Falling back to transcode...'); return fallback(); });
   }
   void _emit(String message) { if (!_status.isClosed) _status.add(message); }
