@@ -43,6 +43,15 @@ class AdvancedPlaybackController {
   final ValueNotifier<List<PlaybackChapter>> chapters = ValueNotifier<List<PlaybackChapter>>(<PlaybackChapter>[]);
   final ValueNotifier<List<PlaybackMarker>> markers = ValueNotifier<List<PlaybackMarker>>(<PlaybackMarker>[]);
 
+  Future<void> _setProperty(String name, String value) async {
+    try {
+      final dynamic platform = player.platform;
+      await platform.setProperty(name, value);
+    } catch (_) {
+      // Platform does not support direct mpv property manipulation or web.
+    }
+  }
+
   Future<void> setRate(double value) async {
     rate.value = value.clamp(0.5, 2.0).toDouble();
     await player.setRate(rate.value);
@@ -50,12 +59,12 @@ class AdvancedPlaybackController {
 
   Future<void> adjustAudioDelay(Duration value) async {
     audioDelay.value = value;
-    await player.setProperty('audio-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+    await _setProperty('audio-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
   }
 
   Future<void> adjustSubtitleDelay(Duration value) async {
     subtitleDelay.value = value;
-    await player.setProperty('sub-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+    await _setProperty('sub-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
   }
 
   Future<void> setSubtitleStyle(SubtitleStyle style) async {
@@ -67,7 +76,7 @@ class AdvancedPlaybackController {
       if (style.margin != null) 'sub-margin-y': '${style.margin}',
       if (style.position != null) 'sub-pos': '${style.position}',
     };
-    for (final entry in properties.entries) { await player.setProperty(entry.key, entry.value); }
+    for (final entry in properties.entries) { await _setProperty(entry.key, entry.value); }
   }
   void setChapters(Iterable<PlaybackChapter> values) => chapters.value = List<PlaybackChapter>.unmodifiable(values);
   void setMarkers(Iterable<PlaybackMarker> values) => markers.value = List<PlaybackMarker>.unmodifiable(values);
@@ -75,7 +84,7 @@ class AdvancedPlaybackController {
   Future<void> nextChapter() async { final current = player.state.position; final next = chapters.value.firstWhere((chapter) => chapter.start > current, orElse: () => chapters.value.isEmpty ? const PlaybackChapter(title: '', start: Duration.zero) : chapters.value.last); if (next.title.isNotEmpty) await player.seek(next.start); }
   Future<void> previousChapter() async { final current = player.state.position; final prior = chapters.value.where((chapter) => chapter.start < current - const Duration(seconds: 2)).toList(); if (prior.isNotEmpty) await player.seek(prior.last.start); }
   Future<void> seekAccurate(Duration position) => player.seek(position);
-  Future<void> seekFast(Duration position) async { await player.setProperty('hr-seek', 'no'); await player.seek(position); }
+  Future<void> seekFast(Duration position) async { await _setProperty('hr-seek', 'no'); await player.seek(position); }
   PlaybackMarker? markerAt(Duration position) { for (final marker in markers.value) { if (position >= marker.start && position < marker.end) return marker; } return null; }
   void dispose() { rate.dispose(); audioDelay.dispose(); subtitleDelay.dispose(); chapters.dispose(); markers.dispose(); }
 }
