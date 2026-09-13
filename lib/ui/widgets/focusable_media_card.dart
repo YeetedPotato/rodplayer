@@ -22,23 +22,33 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
   @override void initState() { super.initState(); _focusNode = FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'); }
   @override void dispose() { _focusNode.dispose(); super.dispose(); }
 
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+      widget.onTap?.call();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final focused = _effectiveFocusNode.hasFocus;
     final radius = BorderRadius.circular(theme.radiusMedium);
     return Focus(
       focusNode: _effectiveFocusNode,
       autofocus: widget.autofocus,
       onFocusChange: (_) => setState(() {}),
+      onKeyEvent: _handleKey,
       child: AnimatedScale(
-        scale: _effectiveFocusNode.hasFocus ? 1.045 : 1,
+        scale: focused ? 1.045 : 1,
         duration: const Duration(milliseconds: 175), curve: Curves.easeOutCubic,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 175), curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: theme.obsidianGlass, borderRadius: radius,
-            border: Border.all(color: _effectiveFocusNode.hasFocus ? theme.goldBright : theme.obsidianGlass, width: _effectiveFocusNode.hasFocus ? 2 : 1),
-            boxShadow: _effectiveFocusNode.hasFocus ? [...theme.glassShadow, ...theme.goldGlow] : theme.glassShadow,
+            border: Border.all(color: focused ? theme.goldBright : theme.obsidianGlass, width: focused ? 2 : 1),
+            boxShadow: focused ? [...theme.glassShadow, ...theme.goldGlow] : theme.glassShadow,
           ), clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: widget.onTap, borderRadius: radius, focusColor: Colors.transparent, hoverColor: Colors.transparent,

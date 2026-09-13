@@ -20,40 +20,37 @@ class SmartShelf extends StatelessWidget {
     final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
     final shelfPadding = padding ?? const EdgeInsets.symmetric(horizontal: 24);
     final resolvedItemWidth = itemWidth ?? _defaultItemWidth(aspectRatio);
-    return DecoratedBox(
-      decoration: BoxDecoration(color: theme.obsidian),
-      child: Padding(
-        padding: const EdgeInsets.only(top: 18, bottom: 24),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-            padding: shelfPadding,
-            child: Row(children: [
+    return FocusTraversalGroup(
+      policy: ReadingOrderTraversalPolicy(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: theme.obsidian),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 18, bottom: 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(padding: shelfPadding, child: Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Flexible(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700, letterSpacing: 0.1))),
                   if (itemCountBadge) ...[const SizedBox(width: 10), _CountBadge(count: itemCount, theme: theme)],
                 ]),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 3),
-                  Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textMuted)),
-                ],
+                if (subtitle != null) ...[const SizedBox(height: 3), Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textMuted))],
               ])),
               if (action != null) ...[const SizedBox(width: 12), action!],
-            ]),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: _itemHeight(resolvedItemWidth, aspectRatio),
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: shelfPadding,
-              physics: const BouncingScrollPhysics(),
-              itemCount: itemCount,
-              itemBuilder: (context, index) => SizedBox(width: resolvedItemWidth, child: _ShelfItem(autofocus: autofocusFirstItem && index == 0, child: itemBuilder(context, index))),
-              separatorBuilder: (_, __) => SizedBox(width: itemSpacing),
+            ])),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: _itemHeight(resolvedItemWidth, aspectRatio),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: shelfPadding,
+                physics: const BouncingScrollPhysics(),
+                itemCount: itemCount,
+                itemBuilder: (context, index) => SizedBox(width: resolvedItemWidth, child: _ShelfItem(autofocus: autofocusFirstItem && index == 0, child: itemBuilder(context, index))),
+                separatorBuilder: (_, __) => SizedBox(width: itemSpacing),
+              ),
             ),
-          ),
-        ]),
+          ]),
+        ),
       ),
     );
   }
