@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 
 void main() {
-  group('RodPlayerEngine', () {
+  group('RemuxEngine', () {
     test('starts with the default playback state', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       expect(engine.playing.value, isFalse);
       expect(engine.buffering.value, isFalse);
@@ -12,35 +12,35 @@ void main() {
     });
 
     test('exposes the resilience-focused mpv properties', () {
-      expect(RodPlayerEngine.mpvProperties['cache'], 'yes');
-      expect(RodPlayerEngine.mpvProperties['network-timeout'], '15');
-      expect(RodPlayerEngine.mpvProperties['demuxer-max-bytes'], '512MiB');
-      expect(RodPlayerEngine.mpvProperties['demuxer-max-back-bytes'], '256MiB');
+      expect(RemuxEngine.mpvProperties['cache'], 'yes');
+      expect(RemuxEngine.mpvProperties['network-timeout'], '15');
+      expect(RemuxEngine.mpvProperties['demuxer-max-bytes'], '512MiB');
+      expect(RemuxEngine.mpvProperties['demuxer-max-back-bytes'], '256MiB');
     });
 
     test('configures passthrough and libass subtitle fallback', () {
-      expect(RodPlayerEngine.mpvProperties['audio-spdif'], 'ac3,eac3,dts,dts-hd,truehd');
-      expect(RodPlayerEngine.mpvProperties['audio-passthrough'], 'yes');
-      expect(RodPlayerEngine.mpvProperties['audio-fallback-to-null'], 'no');
-      expect(RodPlayerEngine.mpvProperties['sub-auto'], 'fuzzy');
-      expect(RodPlayerEngine.mpvProperties['sub-ass'], 'yes');
-      expect(RodPlayerEngine.mpvProperties['sub-forced'], 'yes');
+      expect(RemuxEngine.mpvProperties['audio-spdif'], 'ac3,eac3,dts,dts-hd,truehd');
+      expect(RemuxEngine.mpvProperties['audio-passthrough'], 'yes');
+      expect(RemuxEngine.mpvProperties['audio-fallback-to-null'], 'no');
+      expect(RemuxEngine.mpvProperties['sub-auto'], 'fuzzy');
+      expect(RemuxEngine.mpvProperties['sub-ass'], 'yes');
+      expect(RemuxEngine.mpvProperties['sub-forced'], 'yes');
     });
 
     test('provides platform-safe effective mpv properties', () {
-      expect(RodPlayerEngine.effectiveMpvProperties['audio-device'], anyOf(isNull, 'auto'));
-      expect(RodPlayerEngine.effectiveMpvProperties['sub-auto'], 'fuzzy');
+      expect(RemuxEngine.effectiveMpvProperties['audio-device'], anyOf(isNull, 'auto'));
+      expect(RemuxEngine.effectiveMpvProperties['sub-auto'], 'fuzzy');
     });
 
     test('uses three bounded retry attempts', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       expect(engine.maxRetries, 3);
       expect(engine.retryCount, 0);
     });
 
     test('uses exponential retry delays', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       expect(engine.retryDelayForAttempt(1), const Duration(seconds: 1));
       expect(engine.retryDelayForAttempt(2), const Duration(seconds: 2));
@@ -48,21 +48,21 @@ void main() {
     });
 
     test('retry starts from the current player position', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       expect(engine.player.state.position, Duration.zero);
       expect(engine.retryCount, 0);
     });
 
     test('final failure remains observable through the error notifier', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       engine.error.value = 'retry attempts exhausted';
       expect(engine.error.value, 'retry attempts exhausted');
     });
 
     test('state notifiers accept playback and buffering updates', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       final playingValues = <bool>[];
       final bufferingValues = <bool>[];
@@ -77,7 +77,7 @@ void main() {
     });
 
     test('error notifier can represent and clear a retry failure', () {
-      final engine = RodPlayerEngine();
+      final engine = RemuxEngine();
       addTearDown(engine.dispose);
       engine.error.value = 'network failure';
       expect(engine.error.value, 'network failure');
