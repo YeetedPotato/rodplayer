@@ -18,13 +18,14 @@ class PlaybackReporter {
 }
 
 class PlaybackSession {
-  PlaybackSession({required this.itemId, required this.sessionId, required this.reporter});
+  PlaybackSession({required this.itemId, required this.sessionId, required this.reporter, this.streamInfo});
 
-  factory PlaybackSession.fromRemuxClient({required String itemId, required String sessionId, required RemuxClient client}) => PlaybackSession(itemId: itemId, sessionId: sessionId, reporter: PlaybackReporter.fromRemuxClient(client));
+  factory PlaybackSession.fromRemuxClient({required String itemId, required String sessionId, required RemuxClient client, PlaybackStreamInfo? streamInfo}) => PlaybackSession(itemId: itemId, sessionId: sessionId, reporter: PlaybackReporter.fromRemuxClient(client), streamInfo: streamInfo);
 
   final String itemId;
   final String sessionId;
   final PlaybackReporter reporter;
+  final PlaybackStreamInfo? streamInfo;
   bool _started = false;
   bool _ended = false;
 
@@ -39,7 +40,6 @@ class PlaybackSession {
     return reporter.progress(itemId, sessionId, position, duration, paused);
   }
 
-  /// Idempotent terminal notification for stop and completion paths.
   Future<void> end(Duration position) async {
     if (_ended) return;
     _ended = true;
