@@ -48,6 +48,21 @@ void main() {
     await c.dispose();
   });
 
+  test('stall flows through the recovery controller to recovered state', () async {
+    final states = <RecoveryState>[];
+    final c = coordinator();
+    final subscription = recovery.states.listen(states.add);
+    c.attach();
+    detector.update(position: Duration.zero, isPlaying: true);
+    await Future<void>.delayed(const Duration(milliseconds: 35));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(states.map((state) => state.phase), contains(RecoveryPhase.retrying));
+    expect(states.map((state) => state.phase), contains(RecoveryPhase.recovered));
+    await subscription.cancel();
+    await c.dispose();
+  });
+
   test('auth failure refreshes the token', () async {
     var refreshed = false;
     final c = coordinator(refresh: () async {
