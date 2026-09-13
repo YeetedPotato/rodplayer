@@ -1,0 +1,7 @@
+# Explicitly pin the analyzer configuration used by flutter analyze.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # Keep analyzer diagnostics visible without promoting warnings or infos to errors.
+  errors:
+    deprecated_member_use: warning
