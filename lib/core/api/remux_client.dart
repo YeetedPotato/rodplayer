@@ -38,27 +38,16 @@ class RemuxClient {
     'MaxStreamingBitrate': 140000000,
     'MaxStaticBitrate': 140000000,
     'DirectPlayProfiles': <Map<String, String>>[
-      <String, String>{
-        'Container': 'mp4,mkv,ts,m2ts',
-        'Type': 'Video',
-        'VideoCodec': 'h264,hevc',
-        'AudioCodec': 'aac,ac3,eac3,truehd,dts,flac',
-      },
+      <String, String>{'Container': 'mp4,mkv,ts,m2ts', 'Type': 'Video', 'VideoCodec': 'h264,hevc', 'AudioCodec': 'aac,ac3,eac3,truehd,dts,flac'},
     ],
     'TranscodingProfiles': <Map<String, String>>[],
   };
 
   Map<String, String> get _headers {
     final token = _cleanToken(accessToken);
-    final authorization = StringBuffer(
-      'MediaBrowser Client="rodplayer", Device="FireTV", DeviceId="$deviceId", Version="1.0.0"',
-    );
+    final authorization = StringBuffer('MediaBrowser Client="rodplayer", Device="FireTV", DeviceId="$deviceId", Version="1.0.0"');
     if (token != null) authorization.write(', Token="$token"');
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Authorization': authorization.toString(),
-    };
+    return {'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': authorization.toString()};
   }
 
   static String? _cleanToken(String? token) {
@@ -91,50 +80,39 @@ class RemuxClient {
   String _userQuery() {
     final id = userId;
     if (id == null || id.isEmpty) throw RemuxAuthException('Authenticate before requesting user items');
-    return 'userId=${Uri.encodeQueryComponent(id)}';
+    return 'UserId=${Uri.encodeQueryComponent(id)}';
   }
 
-  Future<List<dynamic>> getItems() async {
-    final response = await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}'), headers: _headers);
-    _check(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
-  }
-
-  Future<List<dynamic>> getLatestMovies({int limit = 20}) async {
-    final response = await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}&IncludeItemTypes=Movie&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=$limit&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers);
-    _check(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
-  }
-
-  Future<List<dynamic>> getLatestTvShows({int limit = 20}) async {
-    final response = await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}&IncludeItemTypes=Series&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=$limit&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers);
-    _check(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
-  }
-
-  Future<List<dynamic>> getNextUp() async {
-    final response = await _client.get(Uri.parse('$baseUrl/Shows/NextUp?${_userQuery()}&Limit=20&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers);
-    _check(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
-  }
-
-  Future<List<dynamic>> getUserViews() async {
-    final response = await _client.get(Uri.parse('$baseUrl/Users/$userId/Views'), headers: _headers);
-    _check(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['Items'] as List<dynamic>? ?? [];
-  }
-
-  Future<List<dynamic>> search(String query) async {
-    final response = await _client.get(Uri.parse('$baseUrl/Search?${_userQuery()}&searchTerm=${Uri.encodeQueryComponent(query)}'), headers: _headers);
+  List<dynamic> _items(http.Response response, {String key = 'Items'}) {
     _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return (data['Items'] as List<dynamic>?) ?? (data['SearchHints'] as List<dynamic>?) ?? [];
+    return (data[key] as List<dynamic>?) ?? [];
+  }
+
+  Future<List<dynamic>> getItems() async => _items(await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}'), headers: _headers));
+
+  Future<List<dynamic>> getLatestMovies({int limit = 20}) async => _items(await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}&IncludeItemTypes=Movie&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=$limit&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers));
+
+  Future<List<dynamic>> getLatestTvShows({int limit = 20}) async => _items(await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}&IncludeItemTypes=Series&Recursive=true&SortBy=DateCreated&SortOrder=Descending&Limit=$limit&Fields=PrimaryImageAspectRatio,UserData'), headers: _headers));
+
+  Future<List<dynamic>> getNextUp({int limit = 12}) async => _items(await _client.get(Uri.parse('$baseUrl/Shows/NextUp?${_userQuery()}&Limit=$limit&Fields=PrimaryImageAspectRatio,UserData,SeriesName,SeasonNumber,IndexNumber,RunTimeTicks,UserData'), headers: _headers));
+
+  Future<List<dynamic>> getResumeItems({int limit = 12}) async => _items(await _client.get(Uri.parse('$baseUrl/Items?${_userQuery()}&Filters=IsResumable&Recursive=true&SortBy=DatePlayed&SortOrder=Descending&Limit=$limit&Fields=PrimaryImageAspectRatio,BackdropImageTags,UserData,SeriesName,SeasonNumber,IndexNumber,RunTimeTicks'), headers: _headers));
+
+  Future<List<dynamic>> getUserViews() async => _items(await _client.get(Uri.parse('$baseUrl/Users/$userId/Views'), headers: _headers));
+
+  Future<List<dynamic>> search({required String query, int limit = 20}) async => _items(await _client.get(Uri.parse('$baseUrl/Search/Hints?${_userQuery()}&SearchTerm=${Uri.encodeQueryComponent(query)}&Limit=$limit&IncludeItemTypes=Movie,Series,Episode'), headers: _headers), key: 'SearchHints');
+
+  Future<void> toggleFavorite({required String itemId, required bool isFavorite}) async {
+    final uri = Uri.parse('$baseUrl/Users/$userId/FavoriteItems/$itemId');
+    final response = isFavorite ? await _client.post(uri, headers: _headers) : await _client.delete(uri, headers: _headers);
+    _check(response);
   }
 
   Future<Uri> getStreamUri(String itemId) async {
     final response = await _client.post(Uri.parse('$baseUrl/Items/$itemId/PlaybackInfo?${_userQuery()}'), headers: _headers, body: jsonEncode({'DeviceProfile': DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile()).toDeviceProfile(), 'StartTimeTicks': 0}));
-    _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
+    _check(response);
     final sources = data['MediaSources'] as List<dynamic>? ?? [];
     final engine = PlaybackDecisionEngine(DeviceCapabilities.forProfile(DeviceCapabilities.currentProfile()));
     for (final value in sources) {
@@ -150,32 +128,11 @@ class RemuxClient {
     throw RemuxConnectionException('Remux returned no playable media source');
   }
 
-  Future<void> reportPlaybackStarted({required String itemId, required String sessionId}) async {
-    this.sessionId = sessionId;
-    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'MediaSourceId': itemId, 'PlayMethod': 'DirectPlay', 'IsPaused': false}));
-    _check(response);
-  }
-
-  Future<void> reportPlaybackProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async {
-    final activeSession = sessionId;
-    if (activeSession == null) return;
-    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'PositionTicks': position.inMicroseconds * 10, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': duration.inMicroseconds * 10}));
-    _check(response);
-  }
-
+  Future<void> reportPlaybackStarted({required String itemId, required String sessionId}) async { this.sessionId = sessionId; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': sessionId, 'MediaSourceId': itemId, 'PlayMethod': 'DirectPlay', 'IsPaused': false})); _check(response); }
+  Future<void> reportPlaybackProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) async { final activeSession = sessionId; if (activeSession == null) return; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Progress'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'PositionTicks': position.inMicroseconds * 10, 'MediaSourceId': itemId, 'IsPaused': isPaused, 'PlayMethod': 'DirectPlay', 'EventName': 'timeupdate', 'RunTimeTicks': duration.inMicroseconds * 10})); _check(response); }
+  Future<void> reportPlaybackStopped({required String itemId, required Duration position}) async { final activeSession = sessionId; if (activeSession == null) return; final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Stopped'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'MediaSourceId': itemId, 'PositionTicks': position.inMicroseconds * 10})); _check(response); sessionId = null; }
   Future<void> reportProgress({required String itemId, required Duration position, required Duration duration, bool isPaused = false}) => reportPlaybackProgress(itemId: itemId, position: position, duration: duration, isPaused: isPaused);
 
-  Future<void> reportPlaybackStopped({required String itemId, required Duration position}) async {
-    final activeSession = sessionId;
-    if (activeSession == null) return;
-    final response = await _client.post(Uri.parse('$baseUrl/Sessions/Playing/Stopped'), headers: _headers, body: jsonEncode({'ItemId': itemId, 'SessionId': activeSession, 'MediaSourceId': itemId, 'PositionTicks': position.inMicroseconds * 10}));
-    _check(response);
-    sessionId = null;
-  }
-
-  void _check(http.Response response) {
-    if (response.statusCode < 200 || response.statusCode >= 300) throw RemuxConnectionException('Remux request failed (${response.statusCode})', statusCode: response.statusCode);
-  }
-
+  void _check(http.Response response) { if (response.statusCode < 200 || response.statusCode >= 300) throw RemuxConnectionException('Remux request failed (${response.statusCode})', statusCode: response.statusCode); }
   void close() => _client.close();
 }
