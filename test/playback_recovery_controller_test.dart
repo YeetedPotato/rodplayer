@@ -34,7 +34,7 @@ void main() {
     await controller.dispose();
   });
 
-  test('falls back after direct play exhausts retries', () async {
+  test('falls back after current playback exhausts retries', () async {
     final phases = <RecoveryPhase>[];
     var fallbackCalls = 0;
     final controller = PlaybackRecoveryController(
@@ -50,6 +50,7 @@ void main() {
         return fallback;
       },
     );
+    await pumpEventQueue();
 
     expect(fallbackCalls, 1);
     expect(phases, [RecoveryPhase.retrying, RecoveryPhase.retrying, RecoveryPhase.fallingBack, RecoveryPhase.recovered]);

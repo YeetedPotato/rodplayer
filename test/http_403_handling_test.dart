@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
 
+import 'fakes/test_playback_engine.dart';
 import 'test_support.dart';
 
 class _ForbiddenClient extends http.BaseClient {
@@ -23,8 +23,8 @@ void main() {
     await expectLater(client.healthCheck(), throwsA(isA<ServerConnectionException>().having((exception) => exception.statusCode, 'statusCode', 403)));
   });
 
-  test('MediaKitPlaybackEngine exposes a transport failure through its error state', () async {
-    final engine = MediaKitPlaybackEngine();
+  test('PlaybackEngine exposes a transport failure through its error state', () async {
+    final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
     engine.error.value = 'Server request failed (403)';
     expect(engine.error.value, 'Server request failed (403)');

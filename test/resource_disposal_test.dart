@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 
 void main() {
+  setUpAll(MediaKit.ensureInitialized);
+
   test('dispose cancels subscriptions and disposes state notifiers', () async {
     final engine = MediaKitPlaybackEngine();
     final playingValues = <bool>[];

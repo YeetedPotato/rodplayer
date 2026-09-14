@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class MediaBar extends StatefulWidget {
-  const MediaBar({super.key, this.engine, this.initialVolume = 0.8});
+  const MediaBar({required this.engine, super.key, this.initialVolume = 0.8});
 
-  final MediaKitPlaybackEngine? engine;
+  final PlaybackEngine engine;
   final double initialVolume;
 
   @override
@@ -16,23 +16,20 @@ class MediaBar extends StatefulWidget {
 }
 
 class _MediaBarState extends State<MediaBar> {
-  late final MediaKitPlaybackEngine _ownedEngine;
-  MediaKitPlaybackEngine get _engine => widget.engine ?? _ownedEngine;
+  PlaybackEngine get _engine => widget.engine;
   late double _volume;
   late double _savedVolume;
 
   @override
   void initState() {
     super.initState();
-    if (widget.engine == null) _ownedEngine = MediaKitPlaybackEngine();
     _volume = widget.initialVolume.clamp(0.0, 1.0);
     _savedVolume = _volume == 0 ? 0.8 : _volume;
-    unawaited(_engine.player.setVolume(_volume * 100));
+    unawaited(_engine.setVolume(_volume * 100));
   }
 
   @override
   void dispose() {
-    if (widget.engine == null) unawaited(_ownedEngine.dispose());
     super.dispose();
   }
 
@@ -41,7 +38,7 @@ class _MediaBarState extends State<MediaBar> {
       _volume = value.clamp(0.0, 1.0);
       if (_volume > 0) _savedVolume = _volume;
     });
-    unawaited(_engine.player.setVolume(_volume * 100));
+    unawaited(_engine.setVolume(_volume * 100));
   }
 
   void _toggleMute() => _setVolume(
@@ -97,82 +94,72 @@ class _MediaBarState extends State<MediaBar> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
-    return StreamBuilder<bool>(
-      stream: _engine.player.stream.playing,
-      initialData: _engine.player.state.playing,
-      builder: (context, playingSnapshot) {
-        final isPlaying = playingSnapshot.data ?? false;
-        return StreamBuilder<bool>(
-          stream: _engine.player.stream.buffering,
-          initialData: _engine.player.state.buffering,
-          builder: (context, bufferingSnapshot) {
-            final isBuffering = bufferingSnapshot.data ?? false;
-            return StreamBuilder<Duration>(
-              stream: _engine.player.stream.position,
-              initialData: _engine.player.state.position,
-              builder: (context, positionSnapshot) {
-                final position = positionSnapshot.data ?? Duration.zero;
-                final duration = _engine.player.state.duration;
-                final maximum = duration.inMilliseconds > 0
-                    ? duration.inMilliseconds.toDouble()
-                    : 1.0;
-                final value = position.inMilliseconds
-                    .clamp(0, maximum.toInt())
-                    .toDouble();
-                return Semantics(
-                  label: 'Media controls',
-                  container: true,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: theme.obsidianGlass,
-                      borderRadius: BorderRadius.circular(theme.radiusPill),
-                      border: Border.all(
-                        color: theme.textMuted.withValues(alpha: 0.28),
-                      ),
-                      boxShadow: theme.glassShadow,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _ControlButton(
-                          tooltip: _volume == 0 ? 'Unmute' : 'Mute',
-                          icon: _volume == 0
-                              ? Icons.volume_off_rounded
-                              : Icons.volume_up_rounded,
-                          onPressed: _toggleMute,
-                        ),
-                        SizedBox(
-                          width: 150,
-                          child: Slider(
-                            min: 0,
-                            max: maximum,
-                            value: value,
-                            onChanged: duration == Duration.zero
-                                ? null
-                                : (next) => _engine.seek(
-                                      Duration(milliseconds: next.round()),
-                                    ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: _engine.playing,
+      builder: (context, isPlaying, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: _engine.buffering,
+          builder: (context, isBuffering, _) {
+            return ValueListenableBuilder<Duration>(
+              valueListenable: _engine.durationListenable,
+              builder: (context, duration, _) {
+                return ValueListenableBuilder<Duration>(
+                  valueListenable: _engine.positionListenable,
+                  builder: (context, position, _) {
+                    final maximum = duration.inMilliseconds > 0 ? duration.inMilliseconds.toDouble() : 1.0;
+                    final value = position.inMilliseconds.clamp(0, maximum.toInt()).toDouble();
+                    return Semantics(
+                      label: 'Media controls',
+                      container: true,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: theme.obsidianGlass,
+                          borderRadius: BorderRadius.circular(theme.radiusPill),
+                          border: Border.all(
+                            color: theme.textMuted.withValues(alpha: 0.28),
                           ),
+                          boxShadow: theme.glassShadow,
                         ),
-                        _ControlButton(
-                          tooltip: isPlaying ? 'Pause' : 'Play',
-                          icon: isBuffering
-                              ? Icons.hourglass_top_rounded
-                              : (isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded),
-                          onPressed: _engine.player.playOrPause,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _ControlButton(
+                              tooltip: _volume == 0 ? 'Unmute' : 'Mute',
+                              icon: _volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                              onPressed: _toggleMute,
+                            ),
+                            SizedBox(
+                              width: 150,
+                              child: Slider(
+                                min: 0,
+                                max: maximum,
+                                value: value,
+                                onChanged: duration == Duration.zero
+                                    ? null
+                                    : (next) => _engine.seek(
+                                          Duration(milliseconds: next.round()),
+                                        ),
+                              ),
+                            ),
+                            _ControlButton(
+                              tooltip: isPlaying ? 'Pause' : 'Play',
+                              icon: isBuffering
+                                  ? Icons.hourglass_top_rounded
+                                  : (isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                              onPressed: _engine.playOrPause,
+                            ),
+                            const SizedBox(width: 6),
+                            _ControlButton(
+                              tooltip: 'Settings',
+                              icon: Icons.tune_rounded,
+                              onPressed: _openSettings,
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        _ControlButton(
-                          tooltip: 'Settings',
-                          icon: Icons.tune_rounded,
-                          onPressed: _openSettings,
-                        ),
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  },
                 );
               },
             );

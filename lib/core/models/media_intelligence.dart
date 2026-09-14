@@ -18,8 +18,8 @@ class MediaIntelligence {
   List<StreamIntelligence> get audioStreams => streams.where((s) => s.type == 'Audio').toList(growable: false);
   List<StreamIntelligence> get subtitleStreams => streams.where((s) => s.type == 'Subtitle').toList(growable: false);
   StreamIntelligence? get video => _firstOrNull(videoStreams);
-  StreamIntelligence? get audio => audioStreams.firstWhere((s) => s.isDefault == true, orElse: () => _firstOrNull(audioStreams) ?? StreamIntelligence.empty);
-  StreamIntelligence? get subtitle => subtitleStreams.firstWhere((s) => s.isDefault == true, orElse: () => _firstOrNull(subtitleStreams) ?? StreamIntelligence.empty);
+  StreamIntelligence? get audio => _defaultOrFirst(audioStreams);
+  StreamIntelligence? get subtitle => _defaultOrFirst(subtitleStreams);
 
   factory MediaIntelligence.fromJson(Map<String, dynamic> json) {
     final values = (json['MediaStreams'] ?? json['Streams'] ?? const <dynamic>[]) as List<dynamic>? ?? const <dynamic>[];
@@ -160,3 +160,9 @@ class StreamIntelligence {
 
 int? _int(dynamic value) => value is num ? value.toInt() : int.tryParse('$value');
 T? _firstOrNull<T>(List<T> values) => values.isEmpty ? null : values.first;
+StreamIntelligence? _defaultOrFirst(List<StreamIntelligence> values) {
+  for (final value in values) {
+    if (value.isDefault == true) return value;
+  }
+  return _firstOrNull(values);
+}

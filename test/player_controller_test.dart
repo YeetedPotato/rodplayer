@@ -1,8 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 
 void main() {
   group('MediaKitPlaybackEngine', () {
+    setUpAll(MediaKit.ensureInitialized);
+
     test('starts with the default playback state', () {
       final engine = MediaKitPlaybackEngine();
       addTearDown(engine.dispose);
@@ -12,6 +15,7 @@ void main() {
     });
 
     test('exposes the resilience-focused mpv properties', () {
+      // TODO(phase-2): make these PlaybackEnvironment/backend/output-dependent.
       expect(MediaKitPlaybackEngine.mpvProperties['cache'], 'yes');
       expect(MediaKitPlaybackEngine.mpvProperties['network-timeout'], '15');
       expect(MediaKitPlaybackEngine.mpvProperties['demuxer-max-bytes'], '512MiB');
@@ -19,6 +23,7 @@ void main() {
     });
 
     test('configures passthrough and libass subtitle fallback', () {
+      // TODO(phase-2): make passthrough/subtitle behavior depend on environment capabilities.
       expect(MediaKitPlaybackEngine.mpvProperties['audio-spdif'], 'ac3,eac3,dts,dts-hd,truehd');
       expect(MediaKitPlaybackEngine.mpvProperties['audio-passthrough'], 'yes');
       expect(MediaKitPlaybackEngine.mpvProperties['audio-fallback-to-null'], 'no');

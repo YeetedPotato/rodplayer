@@ -54,25 +54,77 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
           child: InkWell(
             onTap: widget.onTap, borderRadius: radius, focusColor: Colors.transparent, hoverColor: Colors.transparent,
             splashColor: theme.gold.withValues(alpha: 0.16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              AspectRatio(aspectRatio: widget.aspectRatio, child: Stack(fit: StackFit.expand, children: [
-                _MediaImage(imageUrl: widget.imageUrl, theme: theme),
-                if (widget.mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: widget.mediaInfo!)),
-                if (widget.badge != null) Positioned(top: 10, right: 10, child: widget.badge!),
-              ])),
-              Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
-                if (widget.subtitle != null) ...[
-                  const SizedBox(height: 4),
-                  Text(widget.subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textSecondary)),
-                ],
-              ])),
-            ]),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final poster = _Poster(
+                aspectRatio: widget.aspectRatio,
+                imageUrl: widget.imageUrl,
+                mediaInfo: widget.mediaInfo,
+                badge: widget.badge,
+                theme: theme,
+              );
+              final metadata = _Metadata(title: widget.title, subtitle: widget.subtitle, theme: theme);
+              if (!constraints.hasBoundedHeight) {
+                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [poster, metadata]);
+              }
+              return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Expanded(flex: 3, child: poster),
+                Flexible(flex: 1, child: metadata),
+              ]);
+            }),
           ),
         ),
       ),
     );
   }
+}
+
+class _Poster extends StatelessWidget {
+  const _Poster({required this.aspectRatio, required this.imageUrl, required this.mediaInfo, required this.badge, required this.theme});
+  final double aspectRatio;
+  final String? imageUrl;
+  final MediaIntelligence? mediaInfo;
+  final Widget? badge;
+  final RodPlayerTheme theme;
+
+  @override
+  Widget build(BuildContext context) => AspectRatio(
+        aspectRatio: aspectRatio,
+        child: Stack(fit: StackFit.expand, children: [
+          _MediaImage(imageUrl: imageUrl, theme: theme),
+          if (mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
+          if (badge != null) Positioned(top: 10, right: 10, child: badge!),
+        ]),
+      );
+}
+
+class _Metadata extends StatelessWidget {
+  const _Metadata({required this.title, required this.subtitle, required this.theme});
+  final String title;
+  final String? subtitle;
+  final RodPlayerTheme theme;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.hasBoundedHeight && constraints.maxHeight < 44) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
+            );
+          }
+          final showSubtitle = subtitle != null && (!constraints.hasBoundedHeight || constraints.maxHeight >= 58);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(title, maxLines: showSubtitle ? 2 : 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
+              if (showSubtitle) ...[
+                const SizedBox(height: 3),
+                Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textSecondary)),
+              ],
+            ]),
+          );
+        },
+      );
 }
 
 class _MediaImage extends StatelessWidget {

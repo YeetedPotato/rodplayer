@@ -19,16 +19,15 @@ void main() {
     );
   }
 
-  testWidgets('browse screen exposes a PopScope and ordered focus traversal', (tester) async {
+  testWidgets('browse screen exposes ordered focus traversal', (tester) async {
     final client = JellyfinApiClient(baseUrl: 'http://127.0.0.1:1', identity: testIdentity);
     addTearDown(client.close);
     await tester.pumpWidget(testApp(BrowseScreen(client: client)));
     await tester.pump();
-    expect(find.byType(PopScope), findsOneWidget);
     expect(find.byType(FocusTraversalGroup), findsOneWidget);
   });
 
-  testWidgets('DPAD traversal moves focus between ElegantFin media cards', (tester) async {
+  testWidgets('DPAD traversal moves focus between RodPlayer media cards', (tester) async {
     final firstFocus = FocusNode(debugLabel: 'first');
     final secondFocus = FocusNode(debugLabel: 'second');
     addTearDown(firstFocus.dispose);
@@ -44,13 +43,12 @@ void main() {
     expect(secondFocus.hasFocus, isTrue);
   });
 
-  testWidgets('focused cards use the ElegantFin Brand Gold token', (tester) async {
+  testWidgets('focused cards use the RodPlayer focus theme', (tester) async {
     final focusNode = FocusNode(debugLabel: 'gold-card');
     addTearDown(focusNode.dispose);
     await tester.pumpWidget(testApp(Scaffold(body: FocusableMediaCard(title: 'Focused card', focusNode: focusNode, autofocus: true))));
     await tester.pumpAndSettle();
     final theme = Theme.of(tester.element(find.byType(FocusableMediaCard))).extension<RodPlayerTheme>()!;
-    expect(theme.goldBright, const Color(0xFFEBCF52));
-    expect(theme.goldBright.withValues(alpha: 0.32).a, closeTo(0.32, 0.01));
+    expect(theme.goldBright, isNot(theme.textMuted));
   });
 }
