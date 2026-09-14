@@ -26,6 +26,7 @@ class DeviceIdentity {
     required this.platformFamily,
     required this.deviceName,
     this.deviceModel,
+    this.isSynthetic = false,
   });
 
   final String installationId;
@@ -34,6 +35,7 @@ class DeviceIdentity {
   final PlatformFamily platformFamily;
   final String deviceName;
   final String? deviceModel;
+  final bool isSynthetic;
 }
 
 class PlaybackEnvironment {
@@ -57,7 +59,12 @@ class PlaybackEnvironment {
   final List<PlaybackBackendDescriptor> backends;
   final List<EffectivePlaybackProfile> effectiveProfiles;
 
-  PlaybackBackendDescriptor get primaryBackend => backends.first;
+  PlaybackBackendDescriptor selectPreferredBackend({PlaybackBackendSelector selector = const PlaybackBackendSelector()}) => selector.select(backends);
+
+  EffectivePlaybackProfile effectiveProfileFor(String backendId) => effectiveProfiles.firstWhere(
+        (profile) => profile.backendId == backendId,
+        orElse: () => throw StateError('No effective playback profile exists for backend "$backendId"'),
+      );
 }
 
 class DeviceCapabilities {
@@ -298,6 +305,33 @@ class PlaybackBackendDescriptor {
   final PlaybackBackendCapabilities capabilities;
 }
 
+class PlaybackBackendSelectionException implements Exception {
+  const PlaybackBackendSelectionException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'PlaybackBackendSelectionException: $message';
+}
+
+/// Selects the best currently usable backend. Lower priority values win.
+class PlaybackBackendSelector {
+  const PlaybackBackendSelector();
+
+  PlaybackBackendDescriptor select(List<PlaybackBackendDescriptor> backends) {
+    final available = backends.where((backend) => backend.availability == BackendAvailability.available).toList(growable: false);
+    if (available.isEmpty) {
+      throw const PlaybackBackendSelectionException('No available playback backend');
+    }
+    available.sort((a, b) {
+      final priority = a.priority.compareTo(b.priority);
+      if (priority != 0) return priority;
+      return a.id.compareTo(b.id);
+    });
+    return available.first;
+  }
+}
+
 class PlaybackBackendCapabilities {
   const PlaybackBackendCapabilities({
     required this.id,
@@ -306,6 +340,8 @@ class PlaybackBackendCapabilities {
     this.videoCodecs = const <String>[],
     this.audioCodecs = const <String>[],
     this.subtitleCodecs = const <String>[],
+    this.unsupportedVideoCodecs = const <String>[],
+    this.unsupportedAudioCodecs = const <String>[],
     this.directPlayRules = const <DirectPlayCapabilityRule>[],
     this.videoCodecRules = const <VideoCodecCapabilityRule>[],
     this.audioCodecRules = const <AudioCodecCapabilityRule>[],
@@ -326,6 +362,8 @@ class PlaybackBackendCapabilities {
   final List<String> videoCodecs;
   final List<String> audioCodecs;
   final List<String> subtitleCodecs;
+  final List<String> unsupportedVideoCodecs;
+  final List<String> unsupportedAudioCodecs;
   final List<DirectPlayCapabilityRule> directPlayRules;
   final List<VideoCodecCapabilityRule> videoCodecRules;
   final List<AudioCodecCapabilityRule> audioCodecRules;
@@ -341,9 +379,20 @@ class PlaybackBackendCapabilities {
 
   bool supportsContainer(String container) => containers.contains(container.toLowerCase());
 
-  bool supportsVideoCodec(String codec) => videoCodecs.contains(codec.toLowerCase());
+  bool supportsVideoCodec(String codec) => videoCodecSupport(codec).isSupported;
 
-  bool supportsAudioCodec(String codec) => audioCodecs.contains(codec.toLowerCase());
+  bool supportsAudioCodec(String codec) => audioCodecSupport(codec).isSupported;
+
+  CapabilitySupport videoCodecSupport(String codec) => _supportFor(codec, confirmed: videoCodecs, unsupported: unsupportedVideoCodecs);
+
+  CapabilitySupport audioCodecSupport(String codec) => _supportFor(codec, confirmed: audioCodecs, unsupported: unsupportedAudioCodecs);
+
+  static CapabilitySupport _supportFor(String value, {required List<String> confirmed, required List<String> unsupported}) {
+    final normalized = value.toLowerCase();
+    if (confirmed.any((codec) => codec.toLowerCase() == normalized)) return CapabilitySupport.supported;
+    if (unsupported.any((codec) => codec.toLowerCase() == normalized)) return CapabilitySupport.unsupported;
+    return CapabilitySupport.unknown;
+  }
 }
 
 class DirectPlayCapabilityRule {
@@ -457,11 +506,43 @@ abstract interface class PlaybackEnvironmentProvider {
   Future<PlaybackEnvironment> load();
 }
 
+abstract interface class EffectivePlaybackProfileResolver {
+  EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend);
+}
+
+/// Temporary bridge for the current media_kit path.
+///
+/// These Jellyfin profile rules are legacy conservative compatibility assumptions preserved
+/// from Phase 1 so playback behavior does not regress. They are not runtime-proven OS,
+/// display, audio route, or output-chain probe results.
+class LegacyConservativePlaybackProfileResolver implements EffectivePlaybackProfileResolver {
+  const LegacyConservativePlaybackProfileResolver();
+
+  @override
+  EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend) => EffectivePlaybackProfile(
+        backendId: backend.id,
+        capabilities: backend.capabilities,
+        deviceProfile: EffectiveDeviceProfile(
+          maxStreamingBitrate: environment.network.maxStreamingBitrate,
+          directPlayRules: backend.capabilities.directPlayRules,
+          transcodingRules: backend.capabilities.transcodingRules,
+          videoCodecRules: backend.capabilities.videoCodecRules,
+          audioCodecRules: backend.capabilities.audioCodecRules,
+          subtitleRules: backend.capabilities.subtitleRules,
+        ),
+      );
+}
+
 class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProvider {
-  const ConservativePlaybackEnvironmentProvider({this.identity, this.identityStore});
+  const ConservativePlaybackEnvironmentProvider({
+    this.identity,
+    this.identityStore,
+    this.profileResolver = const LegacyConservativePlaybackProfileResolver(),
+  });
 
   final InstallationIdentity? identity;
   final InstallationIdentityStore? identityStore;
+  final EffectivePlaybackProfileResolver profileResolver;
 
   @override
   Future<PlaybackEnvironment> load() async {
@@ -474,7 +555,7 @@ class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProv
       capabilities: ConservativePlaybackEnvironmentProvider.mediaKitCapabilities,
     );
     const network = NetworkCapabilities();
-    return PlaybackEnvironment(
+    final environmentWithoutProfiles = PlaybackEnvironment(
       identity: identity,
       device: DeviceCapabilities(
         platformLabel: _platformLabel(),
@@ -486,8 +567,18 @@ class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProv
       audio: const AudioCapabilities(),
       network: network,
       backends: const <PlaybackBackendDescriptor>[backend],
+      effectiveProfiles: const <EffectivePlaybackProfile>[],
+    );
+    return PlaybackEnvironment(
+      identity: environmentWithoutProfiles.identity,
+      device: environmentWithoutProfiles.device,
+      compute: environmentWithoutProfiles.compute,
+      display: environmentWithoutProfiles.display,
+      audio: environmentWithoutProfiles.audio,
+      network: environmentWithoutProfiles.network,
+      backends: environmentWithoutProfiles.backends,
       effectiveProfiles: <EffectivePlaybackProfile>[
-        _effectiveProfile(backend.capabilities, network),
+        profileResolver.resolve(environmentWithoutProfiles, backend),
       ],
     );
   }
@@ -555,6 +646,7 @@ class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProv
       appVersion: 'unknown',
       platformFamily: _platformFamily(),
       deviceName: _platformLabel(),
+      isSynthetic: true,
     );
   }
 
@@ -564,19 +656,6 @@ class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProv
         appVersion: identity.appVersion,
         platformFamily: _platformFamily(),
         deviceName: identity.deviceName,
-      );
-
-  static EffectivePlaybackProfile _effectiveProfile(PlaybackBackendCapabilities backend, NetworkCapabilities network) => EffectivePlaybackProfile(
-        backendId: backend.id,
-        capabilities: backend,
-        deviceProfile: EffectiveDeviceProfile(
-          maxStreamingBitrate: network.maxStreamingBitrate,
-          directPlayRules: backend.directPlayRules,
-          transcodingRules: backend.transcodingRules,
-          videoCodecRules: backend.videoCodecRules,
-          audioCodecRules: backend.audioCodecRules,
-          subtitleRules: backend.subtitleRules,
-        ),
       );
 
   static String _platformLabel() {

@@ -24,7 +24,7 @@ class PlaybackNegotiator {
     int? subtitleStreamIndex,
   }) async {
     final environment = await environmentProvider.load();
-    final backend = environment.primaryBackend;
+    final backend = environment.selectPreferredBackend();
     final response = await client.getPlaybackInfo(PlaybackInfoRequest(
       itemId: itemId,
       userId: client.userId,

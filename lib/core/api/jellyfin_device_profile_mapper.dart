@@ -20,17 +20,7 @@ class JellyfinDeviceProfileMapper {
   }
 
   EffectiveDeviceProfile _effectiveProfile(PlaybackEnvironment environment, PlaybackBackendCapabilities backend) {
-    for (final profile in environment.effectiveProfiles) {
-      if (profile.backendId == backend.id) return profile.deviceProfile;
-    }
-    return EffectiveDeviceProfile(
-      maxStreamingBitrate: environment.network.maxStreamingBitrate,
-      directPlayRules: backend.directPlayRules,
-      transcodingRules: backend.transcodingRules,
-      videoCodecRules: backend.videoCodecRules,
-      audioCodecRules: backend.audioCodecRules,
-      subtitleRules: backend.subtitleRules,
-    );
+    return environment.effectiveProfileFor(backend.id).deviceProfile;
   }
 
   List<Map<String, dynamic>> _directPlayProfiles(PlaybackBackendCapabilities backend, EffectiveDeviceProfile profile) {
