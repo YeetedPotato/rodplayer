@@ -192,37 +192,33 @@ void main() {
 }
 
 class _FakeBridge implements NativePlaybackCapabilityBridge {
-  const _FakeBridge({this.compute, this.display, this.audio});
+  const _FakeBridge({this.compute});
 
   final Object? compute;
-  final Object? display;
-  final Object? audio;
 
   @override
   Future<NativeComputeProbeResult?> probeCompute() async => NativeComputeProbeResult.fromJson(compute);
 
   @override
-  Future<NativeDisplayProbeResult?> probeDisplay() async => NativeDisplayProbeResult.fromJson(display);
+  Future<NativeDisplayProbeResult?> probeDisplay() async => null;
 
   @override
-  Future<NativeAudioProbeResult?> probeAudio() async => NativeAudioProbeResult.fromJson(audio);
+  Future<NativeAudioProbeResult?> probeAudio() async => null;
 }
 
 class _MutableBridge implements NativePlaybackCapabilityBridge {
-  _MutableBridge({this.compute, this.display, this.audio});
+  _MutableBridge({this.compute});
 
   Object? compute;
-  Object? display;
-  Object? audio;
 
   @override
   Future<NativeComputeProbeResult?> probeCompute() async => NativeComputeProbeResult.fromJson(compute);
 
   @override
-  Future<NativeDisplayProbeResult?> probeDisplay() async => NativeDisplayProbeResult.fromJson(display);
+  Future<NativeDisplayProbeResult?> probeDisplay() async => null;
 
   @override
-  Future<NativeAudioProbeResult?> probeAudio() async => NativeAudioProbeResult.fromJson(audio);
+  Future<NativeAudioProbeResult?> probeAudio() async => null;
 }
 
 class _IdentityProbe implements DeviceIdentityProbe {
