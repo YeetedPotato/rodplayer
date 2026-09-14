@@ -20,8 +20,8 @@ void main() {
     final direct = (profile['DirectPlayProfiles'] as List<dynamic>).cast<Map<String, dynamic>>();
     expect(direct.length, greaterThan(2));
     expect(
-      direct,
-      contains(<String, dynamic>{'Container': 'webm', 'Type': 'Video', 'VideoCodec': 'vp9,av1', 'AudioCodec': 'opus,vorbis'}),
+      direct.any((entry) => entry['Container'] == 'webm' && entry['Type'] == 'Video' && entry['VideoCodec'] == 'vp9,av1' && entry['AudioCodec'] == 'opus,vorbis'),
+      isTrue,
     );
     expect(
       direct.any((entry) => entry['Container'] == 'webm' && '${entry['VideoCodec']}'.contains('hevc')),
@@ -33,8 +33,8 @@ void main() {
     final environment = await const ConservativePlaybackEnvironmentProvider().load();
     final profile = const JellyfinDeviceProfileMapper().map(environment, environment.primaryBackend);
     final subtitles = (profile['SubtitleProfiles'] as List<dynamic>).cast<Map<String, dynamic>>();
-    expect(subtitles, contains(<String, dynamic>{'Format': 'pgssub', 'Method': 'Embed'}));
-    expect(subtitles, contains(<String, dynamic>{'Format': 'ass', 'Method': 'External'}));
+    expect(subtitles.any((entry) => entry['Format'] == 'pgssub' && entry['Method'] == 'Embed'), isTrue);
+    expect(subtitles.any((entry) => entry['Format'] == 'ass' && entry['Method'] == 'External'), isTrue);
   });
 
   test('codec profile conditions serialize when capabilities express truthful limits', () {

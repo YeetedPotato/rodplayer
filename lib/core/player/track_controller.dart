@@ -40,6 +40,8 @@ class TrackServerIndexMappings {
     required List<String> subtitleEngineTrackIds,
   }) =>
       TrackServerIndexMappings(
+        // TODO(phase-2): replace positional correlation with stronger metadata
+        // matching when playback backends expose enough stable track metadata.
         audioServerIndexesByEngineTrackId: _mapEngineIdsToServerIndexes(audioEngineTrackIds, plan.source.audioStreams.map((stream) => stream.index).whereType<int>().toList(growable: false)),
         subtitleServerIndexesByEngineTrackId: _mapEngineIdsToServerIndexes(subtitleEngineTrackIds, plan.source.subtitleStreams.map((stream) => stream.index).whereType<int>().toList(growable: false)),
       );
