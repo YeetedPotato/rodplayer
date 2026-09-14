@@ -40,6 +40,78 @@ void main() {
     expect(second.display.currentWidth, 101);
   });
 
+  test('unreported probe field preserves previous known state', () async {
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      networkProbe: const ContextNetworkCapabilityProbe(),
+      networkContext: const RuntimeNetworkContext(route: NetworkRoute.localLan),
+    );
+    final first = await provider.load();
+    provider.networkContext = null;
+
+    final second = await provider.refresh(PlaybackEnvironmentRefreshReason.manual);
+
+    expect(first.network.route, NetworkRoute.localLan);
+    expect(second.network.route, NetworkRoute.localLan);
+  });
+
+  test('probe can explicitly replace known state with unknown', () async {
+    final probe = _MutableNetworkProbe(const PlaybackProbeUpdate<NetworkCapabilities>.reported(NetworkCapabilities(route: NetworkRoute.localLan)));
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      networkProbe: probe,
+    );
+    final first = await provider.load();
+    probe.update = const PlaybackProbeUpdate<NetworkCapabilities>.reported(NetworkCapabilities(route: NetworkRoute.unknown));
+
+    final second = await provider.refresh(PlaybackEnvironmentRefreshReason.networkChanged);
+
+    expect(first.network.route, NetworkRoute.localLan);
+    expect(second.network.route, NetworkRoute.unknown);
+  });
+
+  test('supported and unsupported are explicitly replaceable', () async {
+    final probe = _MutableComputeProbe(
+      const PlaybackProbeUpdate<ComputeCapabilities>.reported(
+        ComputeCapabilities(hardwareVideoDecoding: CapabilitySupport.supported),
+      ),
+    );
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      computeProbe: probe,
+    );
+    final first = await provider.load();
+    probe.update = const PlaybackProbeUpdate<ComputeCapabilities>.reported(
+      ComputeCapabilities(hardwareVideoDecoding: CapabilitySupport.unsupported),
+    );
+
+    final second = await provider.refresh(PlaybackEnvironmentRefreshReason.manual);
+
+    expect(first.compute.hardwareVideoDecoding, CapabilitySupport.supported);
+    expect(second.compute.hardwareVideoDecoding, CapabilitySupport.unsupported);
+  });
+
+  test('one domain update does not mutate unrelated domains', () async {
+    final displayProbe = _MutableDisplayProbe(
+      const PlaybackProbeUpdate<DisplayCapabilities>.reported(DisplayCapabilities(currentWidth: 100)),
+    );
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      computeProbe: const _ComputeProbe(
+        ComputeCapabilities(hardwareVideoDecoding: CapabilitySupport.supported),
+      ),
+      displayProbe: displayProbe,
+    );
+    final first = await provider.load();
+    displayProbe.update = const PlaybackProbeUpdate<DisplayCapabilities>.reported(DisplayCapabilities(currentWidth: 200));
+
+    final second = await provider.refresh(PlaybackEnvironmentRefreshReason.displayChanged);
+
+    expect(first.compute.hardwareVideoDecoding, CapabilitySupport.supported);
+    expect(second.compute.hardwareVideoDecoding, CapabilitySupport.supported);
+    expect(second.display.currentWidth, 200);
+  });
+
   test('failed one-domain probe does not prevent environment creation', () async {
     final diagnostics = <PlaybackProbeDiagnostic>[];
     final provider = RuntimePlaybackEnvironmentProvider(
@@ -109,6 +181,38 @@ void main() {
     expect(environment.effectiveProfileFor('media_kit').deviceProfile.maxStreamingBitrate, 1234);
   });
 
+  test('resolver failure on second refresh retains previous effective profile', () async {
+    final resolver = _FailingAfterFirstResolver();
+    final diagnostics = <PlaybackProbeDiagnostic>[];
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      profileResolver: resolver,
+      onDiagnostic: diagnostics.add,
+    );
+
+    final first = await provider.load();
+    final second = await provider.refresh(PlaybackEnvironmentRefreshReason.manual);
+
+    expect(first.effectiveProfileFor('media_kit').deviceProfile.maxStreamingBitrate, 4321);
+    expect(second.effectiveProfileFor('media_kit').deviceProfile.maxStreamingBitrate, 4321);
+    expect(diagnostics.single.domain, PlaybackProbeDomain.effectiveProfile);
+  });
+
+  test('resolver failure on first load fabricates no effective profile', () async {
+    final diagnostics = <PlaybackProbeDiagnostic>[];
+    final provider = RuntimePlaybackEnvironmentProvider(
+      identityProbe: const _IdentityProbe('device-1'),
+      profileResolver: const _AlwaysFailingResolver(),
+      onDiagnostic: diagnostics.add,
+    );
+
+    final environment = await provider.load();
+
+    expect(environment.effectiveProfiles, isEmpty);
+    expect(() => environment.effectiveProfileFor('media_kit'), throwsA(isA<StateError>()));
+    expect(diagnostics.single.domain, PlaybackProbeDomain.effectiveProfile);
+  });
+
   test('legacy conservative profile remains compatible', () async {
     final environment = await RuntimePlaybackEnvironmentProvider(identityProbe: const _IdentityProbe('device-1')).load();
     final profile = environment.effectiveProfileFor('media_kit').deviceProfile;
@@ -176,11 +280,11 @@ class _ComputeProbe implements ComputeCapabilityProbe {
   final ComputeCapabilities capabilities;
 
   @override
-  Future<ComputeCapabilities> probe({
+  Future<PlaybackProbeUpdate<ComputeCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      capabilities;
+      PlaybackProbeUpdate<ComputeCapabilities>.reported(capabilities);
 }
 
 class _DisplayProbe implements DisplayCapabilityProbe {
@@ -189,23 +293,23 @@ class _DisplayProbe implements DisplayCapabilityProbe {
   final DisplayCapabilities capabilities;
 
   @override
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      capabilities;
+      PlaybackProbeUpdate<DisplayCapabilities>.reported(capabilities);
 }
 
 class _ChangingDisplayProbe implements DisplayCapabilityProbe {
   int _count = 0;
 
   @override
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async {
     _count += 1;
-    return DisplayCapabilities(currentWidth: 99 + _count, currentHeight: 200);
+    return PlaybackProbeUpdate<DisplayCapabilities>.reported(DisplayCapabilities(currentWidth: 99 + _count, currentHeight: 200));
   }
 }
 
@@ -213,7 +317,7 @@ class _ThrowingDisplayProbe implements DisplayCapabilityProbe {
   const _ThrowingDisplayProbe();
 
   @override
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async {
@@ -227,11 +331,51 @@ class _AudioProbe implements AudioCapabilityProbe {
   final AudioCapabilities capabilities;
 
   @override
-  Future<AudioCapabilities> probe({
+  Future<PlaybackProbeUpdate<AudioCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      capabilities;
+      PlaybackProbeUpdate<AudioCapabilities>.reported(capabilities);
+}
+
+class _MutableComputeProbe implements ComputeCapabilityProbe {
+  _MutableComputeProbe(this.update);
+
+  PlaybackProbeUpdate<ComputeCapabilities> update;
+
+  @override
+  Future<PlaybackProbeUpdate<ComputeCapabilities>> probe({
+    PlaybackEnvironment? previous,
+    required PlaybackEnvironmentRefreshReason reason,
+  }) async =>
+      update;
+}
+
+class _MutableDisplayProbe implements DisplayCapabilityProbe {
+  _MutableDisplayProbe(this.update);
+
+  PlaybackProbeUpdate<DisplayCapabilities> update;
+
+  @override
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
+    PlaybackEnvironment? previous,
+    required PlaybackEnvironmentRefreshReason reason,
+  }) async =>
+      update;
+}
+
+class _MutableNetworkProbe implements NetworkCapabilityProbe {
+  _MutableNetworkProbe(this.update);
+
+  PlaybackProbeUpdate<NetworkCapabilities> update;
+
+  @override
+  Future<PlaybackProbeUpdate<NetworkCapabilities>> probe({
+    PlaybackEnvironment? previous,
+    required PlaybackEnvironmentRefreshReason reason,
+    RuntimeNetworkContext? context,
+  }) async =>
+      update;
 }
 
 class _RecordingResolver implements EffectivePlaybackProfileResolver {
@@ -254,3 +398,36 @@ class _RecordingResolver implements EffectivePlaybackProfileResolver {
     );
   }
 }
+
+class _FailingAfterFirstResolver implements EffectivePlaybackProfileResolver {
+  var _calls = 0;
+
+  @override
+  EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend) {
+    _calls += 1;
+    if (_calls > 1) throw StateError('profile unavailable');
+    return _profile(backend, 4321);
+  }
+}
+
+class _AlwaysFailingResolver implements EffectivePlaybackProfileResolver {
+  const _AlwaysFailingResolver();
+
+  @override
+  EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend) {
+    throw StateError('profile unavailable');
+  }
+}
+
+EffectivePlaybackProfile _profile(PlaybackBackendDescriptor backend, int maxStreamingBitrate) => EffectivePlaybackProfile(
+      backendId: backend.id,
+      capabilities: backend.capabilities,
+      deviceProfile: EffectiveDeviceProfile(
+        maxStreamingBitrate: maxStreamingBitrate,
+        directPlayRules: const <DirectPlayCapabilityRule>[],
+        transcodingRules: const <TranscodingCapabilityRule>[],
+        videoCodecRules: const <VideoCodecCapabilityRule>[],
+        audioCodecRules: const <AudioCodecCapabilityRule>[],
+        subtitleRules: const <SubtitleCapabilityRule>[],
+      ),
+    );

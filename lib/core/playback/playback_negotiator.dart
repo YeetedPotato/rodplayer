@@ -12,6 +12,8 @@ class PlaybackNegotiator {
     required this.client,
     PlaybackEnvironmentProvider? environmentProvider,
     JellyfinDeviceProfileMapper? profileMapper,
+    // TODO(phase-2): app composition should inject the platform runtime provider
+    // from lib/platform/playback so display probes do not create a core->platform dependency.
   })  : environmentProvider = environmentProvider ?? RuntimePlaybackEnvironmentProvider(identityProbe: PersistentDeviceIdentityProbe(identity: client.identity)),
         profileMapper = profileMapper ?? const JellyfinDeviceProfileMapper();
 

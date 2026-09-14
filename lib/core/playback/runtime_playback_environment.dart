@@ -54,6 +54,17 @@ class PlaybackProbeDiagnostic {
 
 typedef PlaybackProbeDiagnosticSink = void Function(PlaybackProbeDiagnostic diagnostic);
 
+class PlaybackProbeUpdate<T> {
+  const PlaybackProbeUpdate.reported(this.value) : isReported = true;
+
+  const PlaybackProbeUpdate.unreported()
+      : isReported = false,
+        value = null;
+
+  final bool isReported;
+  final T? value;
+}
+
 abstract interface class DeviceIdentityProbe {
   Future<DeviceIdentity> probe({
     PlaybackEnvironment? previous,
@@ -62,28 +73,28 @@ abstract interface class DeviceIdentityProbe {
 }
 
 abstract interface class ComputeCapabilityProbe {
-  Future<ComputeCapabilities> probe({
+  Future<PlaybackProbeUpdate<ComputeCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   });
 }
 
 abstract interface class DisplayCapabilityProbe {
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   });
 }
 
 abstract interface class AudioCapabilityProbe {
-  Future<AudioCapabilities> probe({
+  Future<PlaybackProbeUpdate<AudioCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   });
 }
 
 abstract interface class NetworkCapabilityProbe {
-  Future<NetworkCapabilities> probe({
+  Future<PlaybackProbeUpdate<NetworkCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
     RuntimeNetworkContext? context,
@@ -128,52 +139,54 @@ class UnknownComputeCapabilityProbe implements ComputeCapabilityProbe {
   const UnknownComputeCapabilityProbe();
 
   @override
-  Future<ComputeCapabilities> probe({
+  Future<PlaybackProbeUpdate<ComputeCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      const ComputeCapabilities();
+      const PlaybackProbeUpdate<ComputeCapabilities>.unreported();
 }
 
 class UnknownDisplayCapabilityProbe implements DisplayCapabilityProbe {
   const UnknownDisplayCapabilityProbe();
 
   @override
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      const DisplayCapabilities();
+      const PlaybackProbeUpdate<DisplayCapabilities>.unreported();
 }
 
 class UnknownAudioCapabilityProbe implements AudioCapabilityProbe {
   const UnknownAudioCapabilityProbe();
 
   @override
-  Future<AudioCapabilities> probe({
+  Future<PlaybackProbeUpdate<AudioCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async =>
-      const AudioCapabilities();
+      const PlaybackProbeUpdate<AudioCapabilities>.unreported();
 }
 
 class ContextNetworkCapabilityProbe implements NetworkCapabilityProbe {
   const ContextNetworkCapabilityProbe();
 
   @override
-  Future<NetworkCapabilities> probe({
+  Future<PlaybackProbeUpdate<NetworkCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
     RuntimeNetworkContext? context,
-  }) async =>
-      NetworkCapabilities(
+  }) async {
+    if (context == null) return const PlaybackProbeUpdate<NetworkCapabilities>.unreported();
+    return PlaybackProbeUpdate<NetworkCapabilities>.reported(NetworkCapabilities(
         route: context?.route ?? NetworkRoute.unknown,
         metering: context?.metering ?? MeteringState.unknown,
         estimatedBandwidthBitsPerSecond: context?.estimatedBandwidthBitsPerSecond,
         latencyMillis: context?.latencyMillis,
         activeServerEndpointType: context?.activeServerEndpointType,
         maxStreamingBitrate: context?.maxStreamingBitrate ?? previous?.network.maxStreamingBitrate ?? const NetworkCapabilities().maxStreamingBitrate,
-      );
+      ));
+  }
 }
 
 class MediaKitPlaybackBackendProbe implements PlaybackBackendProbe {
@@ -215,8 +228,8 @@ class RuntimePlaybackEnvironmentProvider implements PlaybackEnvironmentProvider 
   final NetworkCapabilityProbe networkProbe;
   final PlaybackBackendProbe backendProbe;
   final EffectivePlaybackProfileResolver profileResolver;
-  final RuntimeNetworkContext? networkContext;
   final PlaybackProbeDiagnosticSink? onDiagnostic;
+  RuntimeNetworkContext? networkContext;
 
   PlaybackEnvironment? _lastEnvironment;
 
@@ -230,22 +243,22 @@ class RuntimePlaybackEnvironmentProvider implements PlaybackEnvironmentProvider 
       previous?.identity ?? _syntheticIdentity(),
       () => identityProbe.probe(previous: previous, reason: reason),
     );
-    final compute = await _probe(
+    final compute = await _probeUpdate(
       PlaybackProbeDomain.compute,
       previous?.compute ?? const ComputeCapabilities(),
       () => computeProbe.probe(previous: previous, reason: reason),
     );
-    final display = await _probe(
+    final display = await _probeUpdate(
       PlaybackProbeDomain.display,
       previous?.display ?? const DisplayCapabilities(),
       () => displayProbe.probe(previous: previous, reason: reason),
     );
-    final audio = await _probe(
+    final audio = await _probeUpdate(
       PlaybackProbeDomain.audio,
       previous?.audio ?? const AudioCapabilities(),
       () => audioProbe.probe(previous: previous, reason: reason),
     );
-    final network = await _probe(
+    final network = await _probeUpdate(
       PlaybackProbeDomain.network,
       previous?.network ?? const NetworkCapabilities(),
       () => networkProbe.probe(previous: previous, reason: reason, context: networkContext),
@@ -273,6 +286,10 @@ class RuntimePlaybackEnvironmentProvider implements PlaybackEnvironmentProvider 
         effectiveProfiles.add(profileResolver.resolve(environmentWithoutProfiles, backend));
       } on Object catch (error) {
         _diagnose(PlaybackProbeDomain.effectiveProfile, 'Effective playback profile resolution failed for ${backend.id}', error);
+        final previousProfile = _previousEffectiveProfile(previous, backend.id);
+        if (previousProfile != null) {
+          effectiveProfiles.add(previousProfile);
+        }
       }
     }
     final environment = environmentWithoutProfiles.copyWith(effectiveProfiles: effectiveProfiles);
@@ -287,6 +304,24 @@ class RuntimePlaybackEnvironmentProvider implements PlaybackEnvironmentProvider 
       _diagnose(domain, 'Runtime playback probe failed; retaining previous value or unknown fallback', error);
       return fallback;
     }
+  }
+
+  Future<T> _probeUpdate<T>(PlaybackProbeDomain domain, T fallback, Future<PlaybackProbeUpdate<T>> Function() run) async {
+    try {
+      final update = await run();
+      return update.isReported ? update.value as T : fallback;
+    } on Object catch (error) {
+      _diagnose(domain, 'Runtime playback probe failed; retaining previous value or unknown fallback', error);
+      return fallback;
+    }
+  }
+
+  EffectivePlaybackProfile? _previousEffectiveProfile(PlaybackEnvironment? previous, String backendId) {
+    if (previous == null) return null;
+    for (final profile in previous.effectiveProfiles) {
+      if (profile.backendId == backendId) return profile;
+    }
+    return null;
   }
 
   void _diagnose(PlaybackProbeDomain domain, String message, Object error) {

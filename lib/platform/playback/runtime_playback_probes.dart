@@ -8,18 +8,18 @@ class FlutterDisplayCapabilityProbe implements DisplayCapabilityProbe {
   const FlutterDisplayCapabilityProbe();
 
   @override
-  Future<DisplayCapabilities> probe({
+  Future<PlaybackProbeUpdate<DisplayCapabilities>> probe({
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   }) async {
     final views = ui.PlatformDispatcher.instance.views;
-    if (views.isEmpty) return previous?.display ?? const DisplayCapabilities();
+    if (views.isEmpty) return const PlaybackProbeUpdate<DisplayCapabilities>.unreported();
     final view = views.first;
     final pixelRatio = view.devicePixelRatio;
     final physicalSize = view.physicalSize;
     final logicalWidth = physicalSize.width / pixelRatio;
     final logicalHeight = physicalSize.height / pixelRatio;
-    return DisplayCapabilities(
+    return PlaybackProbeUpdate<DisplayCapabilities>.reported(DisplayCapabilities(
       currentWidth: logicalWidth.round(),
       currentHeight: logicalHeight.round(),
       pixelRatio: pixelRatio,
@@ -29,7 +29,7 @@ class FlutterDisplayCapabilityProbe implements DisplayCapabilityProbe {
       outputColorCapability: CapabilitySupport.unknown,
       output: const HdrOutputCapabilities(),
       toneMapping: const ToneMappingCapabilities(),
-    );
+    ));
   }
 }
 
