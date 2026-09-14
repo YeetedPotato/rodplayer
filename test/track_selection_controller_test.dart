@@ -27,6 +27,27 @@ void main() {
     expect(result.mode, TrackSwitchMode.serverRenegotiation);
     expect(session.selectedAudio, 1);
   });
+
+  test('nonnumeric engine IDs map to Jellyfin server stream indexes explicitly', () {
+    final mappings = TrackServerIndexMappings.fromPlan(
+      plan: _planWithStreams(),
+      audioEngineTrackIds: <String>['audio/main', 'audio/commentary'],
+      subtitleEngineTrackIds: <String>['subtitle/cc'],
+    );
+    expect(mappings.audioIndexFor('audio/main'), 4);
+    expect(mappings.audioIndexFor('audio/commentary'), 9);
+    expect(mappings.subtitleIndexFor('subtitle/cc'), 12);
+  });
+
+  test('unmapped engine IDs do not fabricate server stream indexes', () {
+    final mappings = TrackServerIndexMappings.fromPlan(
+      plan: _planWithStreams(),
+      audioEngineTrackIds: <String>['audio/main'],
+      subtitleEngineTrackIds: const <String>[],
+    );
+    expect(mappings.audioIndexFor('unmapped-7'), isNull);
+    expect(mappings.subtitleIndexFor('12'), isNull);
+  });
 }
 
 PlaybackPlan _plan({int? audio, int? subtitle}) => PlaybackPlan(
@@ -39,6 +60,24 @@ PlaybackPlan _plan({int? audio, int? subtitle}) => PlaybackPlan(
       selectedAudioStreamIndex: audio,
       selectedSubtitleStreamIndex: subtitle,
       source: MediaSourceInfo.fromJson(<String, dynamic>{'Id': 'source', 'MediaStreams': <dynamic>[]}),
+    );
+
+PlaybackPlan _planWithStreams() => PlaybackPlan(
+      itemId: 'item',
+      mediaSourceId: 'source',
+      playSessionId: 'play',
+      playMethod: PlayMethod.directPlay,
+      playbackUri: Uri.parse('https://media/Videos/item/stream'),
+      engineId: 'test',
+      source: MediaSourceInfo.fromJson(<String, dynamic>{
+        'Id': 'source',
+        'MediaStreams': <Map<String, dynamic>>[
+          <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': 'h264'},
+          <String, dynamic>{'Index': 4, 'Type': 'Audio', 'Codec': 'aac'},
+          <String, dynamic>{'Index': 9, 'Type': 'Audio', 'Codec': 'ac3'},
+          <String, dynamic>{'Index': 12, 'Type': 'Subtitle', 'Codec': 'subrip'},
+        ],
+      }),
     );
 
 class _FakeTrackSelectionController implements TrackSelectionController {

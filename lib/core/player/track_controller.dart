@@ -1,5 +1,6 @@
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_plan.dart';
 
 enum TrackSwitchMode { local, externalAttach, serverRenegotiation }
 
@@ -22,6 +23,38 @@ class TrackSwitchResult {
   const TrackSwitchResult({required this.mode, this.serverStreamIndex});
   final TrackSwitchMode mode;
   final int? serverStreamIndex;
+}
+
+class TrackServerIndexMappings {
+  const TrackServerIndexMappings({
+    this.audioServerIndexesByEngineTrackId = const <String, int>{},
+    this.subtitleServerIndexesByEngineTrackId = const <String, int>{},
+  });
+
+  final Map<String, int> audioServerIndexesByEngineTrackId;
+  final Map<String, int> subtitleServerIndexesByEngineTrackId;
+
+  factory TrackServerIndexMappings.fromPlan({
+    required PlaybackPlan plan,
+    required List<String> audioEngineTrackIds,
+    required List<String> subtitleEngineTrackIds,
+  }) =>
+      TrackServerIndexMappings(
+        audioServerIndexesByEngineTrackId: _mapEngineIdsToServerIndexes(audioEngineTrackIds, plan.source.audioStreams.map((stream) => stream.index).whereType<int>().toList(growable: false)),
+        subtitleServerIndexesByEngineTrackId: _mapEngineIdsToServerIndexes(subtitleEngineTrackIds, plan.source.subtitleStreams.map((stream) => stream.index).whereType<int>().toList(growable: false)),
+      );
+
+  int? audioIndexFor(String engineTrackId) => audioServerIndexesByEngineTrackId[engineTrackId];
+  int? subtitleIndexFor(String engineTrackId) => subtitleServerIndexesByEngineTrackId[engineTrackId];
+}
+
+Map<String, int> _mapEngineIdsToServerIndexes(List<String> engineTrackIds, List<int> serverIndexes) {
+  final mapped = <String, int>{};
+  final count = engineTrackIds.length < serverIndexes.length ? engineTrackIds.length : serverIndexes.length;
+  for (var i = 0; i < count; i += 1) {
+    mapped[engineTrackIds[i]] = serverIndexes[i];
+  }
+  return Map<String, int>.unmodifiable(mapped);
 }
 
 abstract interface class TrackSelectionController {
@@ -64,15 +97,28 @@ class LogicalSessionTrackSelectionController implements TrackSelectionController
 }
 
 class MediaKitTrackSelectionController implements TrackSelectionController {
-  MediaKitTrackSelectionController(this.player);
+  MediaKitTrackSelectionController(
+    this.player, {
+    this.serverIndexMappings = const TrackServerIndexMappings(),
+  });
+
+  factory MediaKitTrackSelectionController.forPlan(Player player, PlaybackPlan plan) => MediaKitTrackSelectionController(
+        player,
+        serverIndexMappings: TrackServerIndexMappings.fromPlan(
+          plan: plan,
+          audioEngineTrackIds: player.state.tracks.audio.map((track) => track.id).toList(growable: false),
+          subtitleEngineTrackIds: player.state.tracks.subtitle.map((track) => track.id).toList(growable: false),
+        ),
+      );
 
   final Player player;
+  final TrackServerIndexMappings serverIndexMappings;
 
   @override
-  List<RodPlayerTrack> get audioTracks => player.state.tracks.audio.map((track) => RodPlayerTrack(engineTrackId: track.id, serverStreamIndex: _serverIndex(track.id), label: _label(track.title, track.language), raw: track)).toList(growable: false);
+  List<RodPlayerTrack> get audioTracks => player.state.tracks.audio.map((track) => RodPlayerTrack(engineTrackId: track.id, serverStreamIndex: serverIndexMappings.audioIndexFor(track.id), label: _label(track.title, track.language), raw: track)).toList(growable: false);
 
   @override
-  List<RodPlayerTrack> get subtitleTracks => player.state.tracks.subtitle.map((track) => RodPlayerTrack(engineTrackId: track.id, serverStreamIndex: _serverIndex(track.id), label: _label(track.title, track.language), raw: track)).toList(growable: false);
+  List<RodPlayerTrack> get subtitleTracks => player.state.tracks.subtitle.map((track) => RodPlayerTrack(engineTrackId: track.id, serverStreamIndex: serverIndexMappings.subtitleIndexFor(track.id), label: _label(track.title, track.language), raw: track)).toList(growable: false);
 
   @override
   RodPlayerTrack? get selectedAudio {
@@ -81,7 +127,7 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
         ? null
         : RodPlayerTrack(
             engineTrackId: selected.id,
-            serverStreamIndex: _serverIndex(selected.id),
+            serverStreamIndex: serverIndexMappings.audioIndexFor(selected.id),
             label: _label(selected.title, selected.language),
             raw: selected,
           );
@@ -94,7 +140,7 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
         ? null
         : RodPlayerTrack(
             engineTrackId: selected.id,
-            serverStreamIndex: _serverIndex(selected.id),
+            serverStreamIndex: serverIndexMappings.subtitleIndexFor(selected.id),
             label: _label(selected.title, selected.language),
             raw: selected,
           );
@@ -113,8 +159,6 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
     await player.setSubtitleTrack(track == null ? SubtitleTrack.no() : track.raw! as SubtitleTrack);
     return TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: track?.serverStreamIndex);
   }
-
-  int? _serverIndex(String id) => int.tryParse(id);
 
   String _label(String? title, String? language) {
     final parts = <String?>[title, language].whereType<String>().where((value) => value.isNotEmpty).toList();
