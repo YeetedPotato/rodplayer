@@ -27,10 +27,10 @@ void main() {
     ));
     await tester.pump();
     expect(find.text('surface'), findsOneWidget);
-    final focus = find.byType(Focus).first;
-    Focus.of(tester.element(focus)).requestFocus();
+    final playerContext = tester.element(find.byType(Scaffold));
+    Focus.of(playerContext).requestFocus();
     await tester.pump();
-    expect(Focus.of(tester.element(focus)).hasFocus, isTrue);
+    expect(Focus.of(playerContext).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.mediaPlayPause);
     await tester.pump();
     expect(engine.playing.value, isFalse);
