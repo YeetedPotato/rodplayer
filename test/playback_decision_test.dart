@@ -1,31 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rodplayer/core/playback/platform_capabilities.dart';
+import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/playback_decision.dart';
+import 'package:rodplayer/core/playback/playback_environment.dart';
 
 void main() {
-  const capabilities = DeviceCapabilities(
-    profile: PlatformProfile.fireTv4kMax,
-    videoCodecs: ['h264', 'hevc'],
-    audioCodecs: ['aac', 'eac3'],
-    containers: ['mp4', 'mkv'],
-  );
-  final engine = PlaybackDecisionEngine(capabilities);
+  const backend = PlaybackBackendCapabilities(id: 'media_kit', name: 'media_kit', containers: <String>['mkv'], videoCodecs: <String>['h264'], audioCodecs: <String>['aac'], subtitleCodecs: <String>['srt']);
+  final engine = PlaybackDecisionEngine(backend);
 
-  test('selects direct play for supported source', () {
-    final decision = engine.decide({'Container': 'mkv', 'VideoCodec': 'h264', 'AudioCodec': 'aac', 'DirectStreamUrl': 'https://media/video'});
-    expect(decision.method, PlayMethod.directPlay);
-    expect(decision.url.toString(), 'https://media/video');
+  test('uses only Jellyfin play methods', () {
+    expect(PlayMethod.values.map((m) => m.jellyfinName), <String>['DirectPlay', 'DirectStream', 'Transcode']);
   });
 
-  test('selects direct stream when direct play is unavailable', () {
-    final decision = engine.decide({'Container': 'mkv', 'VideoCodec': 'h264', 'AudioCodec': 'dts', 'TranscodingUrl': 'https://media/transcode'});
-    expect(decision.method, PlayMethod.directStream);
-    expect(decision.reason, contains('server supplied'));
-  });
-
-  test('explains transcode requirements', () {
-    final decision = engine.decide({'Container': 'avi', 'VideoCodec': 'vp9', 'AudioCodec': 'dts'});
+  test('accepts server-provided transcode URL', () {
+    final decision = engine.decide(<String, dynamic>{'TranscodingUrl': 'https://media/transcode'});
     expect(decision.method, PlayMethod.transcode);
-    expect(decision.reason, contains('unsupported'));
+    expect(decision.url.toString(), 'https://media/transcode');
   });
 }

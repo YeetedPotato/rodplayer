@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class MediaBadgeOverlay extends StatelessWidget {
   const MediaBadgeOverlay({required this.mediaInfo, super.key});
@@ -9,7 +9,7 @@ class MediaBadgeOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final labels = <String>[
       mediaInfo.is4K ? '4K' : _resolutionLabel(mediaInfo),
       if (mediaInfo.video != null && mediaInfo.video!.displayHdr != 'SDR') mediaInfo.video!.displayHdr,
@@ -39,7 +39,7 @@ class _Badge extends StatelessWidget {
   const _Badge({required this.label, required this.theme});
 
   final String label;
-  final RemuxTheme theme;
+  final RodPlayerTheme theme;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(

@@ -1,16 +1,16 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/player/track_controller.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class TrackSelectorSheet extends StatefulWidget {
-  const TrackSelectorSheet({super.key, required this.player});
-  final Player player;
+  const TrackSelectorSheet({super.key, required this.controller});
+  final TrackSelectionController controller;
 
-  static Future<void> show(BuildContext context, {required Player player}) => showModalBottomSheet<void>(
+  static Future<void> show(BuildContext context, {required TrackSelectionController controller}) => showModalBottomSheet<void>(
     context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.62), builder: (_) => TrackSelectorSheet(player: player),
+    barrierColor: Colors.black.withValues(alpha: 0.62), builder: (_) => TrackSelectorSheet(controller: controller),
   );
 
   @override
@@ -18,20 +18,15 @@ class TrackSelectorSheet extends StatefulWidget {
 }
 
 class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
-  void _selectAudio(AudioTrack track) { widget.player.setAudioTrack(track); setState(() {}); }
-  void _selectSubtitle(SubtitleTrack track) { widget.player.setSubtitleTrack(track); setState(() {}); }
-
-  String _trackLabel(String? title, String? language) {
-    final parts = <String?>[title, language].whereType<String>().where((value) => value.isNotEmpty).toList();
-    return parts.isEmpty ? 'Unknown track' : parts.join(' • ');
-  }
+  Future<void> _selectAudio(RodPlayerTrack track) async { await widget.controller.selectAudio(track); setState(() {}); }
+  Future<void> _selectSubtitle(RodPlayerTrack? track) async { await widget.controller.selectSubtitle(track); setState(() {}); }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
-    final state = widget.player.state;
-    final selectedAudio = state.track.audio;
-    final selectedSubtitle = state.track.subtitle;
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final controller = widget.controller;
+    final selectedAudio = controller.selectedAudio;
+    final selectedSubtitle = controller.selectedSubtitle;
     return SafeArea(child: ClipRRect(
       borderRadius: BorderRadius.vertical(top: Radius.circular(theme.radiusLarge)),
       child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18), child: Material(
@@ -42,9 +37,9 @@ class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Row(children: <Widget>[Text('Tracks', style: Theme.of(context).textTheme.titleLarge), const Spacer(), IconButton(autofocus: true, tooltip: 'Close', onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]),
-              _TrackGroup<AudioTrack>(title: 'Audio', tracks: state.tracks.audio, selected: selectedAudio, label: (track) => _trackLabel(track.title, track.language), onSelected: _selectAudio),
+              _TrackGroup<RodPlayerTrack>(title: 'Audio', tracks: controller.audioTracks, selected: selectedAudio, label: (track) => track.label, onSelected: _selectAudio),
               const SizedBox(height: 20),
-              _TrackGroup<SubtitleTrack>(title: 'Subtitles', tracks: state.tracks.subtitle, selected: selectedSubtitle, label: (track) => _trackLabel(track.title, track.language), onSelected: _selectSubtitle, onOff: () => _selectSubtitle(SubtitleTrack.no())),
+              _TrackGroup<RodPlayerTrack>(title: 'Subtitles', tracks: controller.subtitleTracks, selected: selectedSubtitle, label: (track) => track.label, onSelected: _selectSubtitle, onOff: () => _selectSubtitle(null)),
             ],
           ))),
         )),
@@ -64,7 +59,7 @@ class _TrackGroup<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
       Text(title.toUpperCase(), style: TextStyle(color: theme.goldBright, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
       const SizedBox(height: 8),
@@ -82,7 +77,7 @@ class _TrackTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return Focus(autofocus: selected, child: Builder(builder: (context) {
       final focused = Focus.of(context).hasFocus;
       return Semantics(button: true, selected: selected, label: label, child: InkWell(

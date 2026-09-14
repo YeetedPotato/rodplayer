@@ -4,7 +4,7 @@ import 'package:rodplayer/core/player/player_controller.dart';
 
 void main() {
   test('dispose cancels subscriptions and disposes state notifiers', () async {
-    final engine = RemuxEngine();
+    final engine = MediaKitPlaybackEngine();
     final playingValues = <bool>[];
     final bufferingValues = <bool>[];
     final errors = <String?>[];

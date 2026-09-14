@@ -1,0 +1,43 @@
+import 'package:rodplayer/core/api/models/play_method.dart';
+import 'package:rodplayer/core/playback/playback_plan.dart';
+
+class ServerPlaybackSession {
+  const ServerPlaybackSession({required this.playSessionId, required this.mediaSourceId, required this.playMethod});
+
+  final String? playSessionId;
+  final String mediaSourceId;
+  final PlayMethod playMethod;
+
+  factory ServerPlaybackSession.fromPlan(PlaybackPlan plan) => ServerPlaybackSession(
+        playSessionId: plan.playSessionId,
+        mediaSourceId: plan.mediaSourceId,
+        playMethod: plan.playMethod,
+      );
+}
+
+class LogicalPlaybackSession {
+  LogicalPlaybackSession({
+    required this.id,
+    required this.itemId,
+    required PlaybackPlan activePlan,
+    this.position = Duration.zero,
+  })  : activePlan = activePlan,
+        activeServerSession = ServerPlaybackSession.fromPlan(activePlan),
+        selectedAudio = activePlan.selectedAudioStreamIndex,
+        selectedSubtitle = activePlan.selectedSubtitleStreamIndex;
+
+  final String id;
+  final String itemId;
+  PlaybackPlan activePlan;
+  ServerPlaybackSession activeServerSession;
+  Duration position;
+  int? selectedAudio;
+  int? selectedSubtitle;
+
+  void activatePlan(PlaybackPlan plan) {
+    activePlan = plan;
+    activeServerSession = ServerPlaybackSession.fromPlan(plan);
+    selectedAudio = plan.selectedAudioStreamIndex;
+    selectedSubtitle = plan.selectedSubtitleStreamIndex;
+  }
+}

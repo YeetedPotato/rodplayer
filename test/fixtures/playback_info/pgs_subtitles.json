@@ -1,0 +1,1 @@
+{"PlaySessionId":"play-pgs","MediaSources":[{"Id":"pgs","Container":"mkv","DirectStreamUrl":"/pgs.mkv","PlayMethod":"DirectPlay","MediaStreams":[{"Index":0,"Type":"Video","Codec":"h264"},{"Index":3,"Type":"Subtitle","Codec":"pgssub","Language":"eng","IsForced":true}]}]}

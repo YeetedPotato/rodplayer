@@ -1,0 +1,22 @@
+{
+  "PlaySessionId": "play-transcode",
+  "MediaSources": [
+    {
+      "Id": "source-transcode",
+      "Container": "ts",
+      "TranscodingUrl": "/Videos/source-transcode/master.m3u8",
+      "SupportsDirectPlay": false,
+      "SupportsDirectStream": false,
+      "SupportsTranscoding": true,
+      "PlayMethod": "Transcode",
+      "VideoStreamCopy": true,
+      "AudioStreamCopy": false,
+      "ContainerChanged": true,
+      "TranscodingReasons": ["AudioCodecNotSupported"],
+      "MediaStreams": [
+        {"Index": 0, "Type": "Video", "Codec": "hevc", "Width": 3840, "Height": 2160},
+        {"Index": 1, "Type": "Audio", "Codec": "aac", "Channels": 6, "Language": "eng", "IsDefault": true}
+      ]
+    }
+  ]
+}

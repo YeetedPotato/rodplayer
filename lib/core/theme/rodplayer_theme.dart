@@ -3,8 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 @immutable
-class RemuxTheme extends ThemeExtension<RemuxTheme> {
-  const RemuxTheme({
+class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
+  const RodPlayerTheme({
     this.obsidian = const Color(0xFF000000),
     this.surface1 = const Color(0xFF08090B),
     this.surface2 = const Color(0xFF0D0F12),
@@ -52,7 +52,7 @@ class RemuxTheme extends ThemeExtension<RemuxTheme> {
   BorderRadius radius(double value) => BorderRadius.circular(value);
 
   @override
-  RemuxTheme copyWith({
+  RodPlayerTheme copyWith({
     Color? obsidian,
     Color? surface1,
     Color? surface2,
@@ -75,7 +75,7 @@ class RemuxTheme extends ThemeExtension<RemuxTheme> {
     double? radiusXLarge,
     double? glassBlur,
     Color? shadowColor,
-  }) => RemuxTheme(
+  }) => RodPlayerTheme(
         obsidian: obsidian ?? this.obsidian,
         surface1: surface1 ?? this.surface1,
         surface2: surface2 ?? this.surface2,
@@ -101,7 +101,7 @@ class RemuxTheme extends ThemeExtension<RemuxTheme> {
       );
 
   @override
-  RemuxTheme lerp(covariant RemuxTheme? other, double t) {
+  RodPlayerTheme lerp(covariant RodPlayerTheme? other, double t) {
     if (other == null) return this;
     return copyWith(
       obsidian: Color.lerp(obsidian, other.obsidian, t),
@@ -112,8 +112,8 @@ class RemuxTheme extends ThemeExtension<RemuxTheme> {
   }
 }
 
-ThemeData remuxThemeData() {
-  const t = RemuxTheme();
+ThemeData rodPlayerThemeData() {
+  const t = RodPlayerTheme();
   final scheme = ColorScheme.fromSeed(
     seedColor: t.gold,
     brightness: Brightness.dark,
@@ -173,8 +173,8 @@ ThemeData remuxThemeData() {
   );
 }
 
-class RemuxGlass extends StatelessWidget {
-  const RemuxGlass({required this.child, this.padding, this.margin, super.key});
+class RodPlayerGlass extends StatelessWidget {
+  const RodPlayerGlass({required this.child, this.padding, this.margin, super.key});
 
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -182,7 +182,7 @@ class RemuxGlass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return Container(
       margin: margin,
       decoration: BoxDecoration(

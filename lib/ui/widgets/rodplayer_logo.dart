@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 
-class RemuxLogo extends StatelessWidget {
-  const RemuxLogo({this.size = 42, this.glow = false, super.key});
+class RodPlayerLogo extends StatelessWidget {
+  const RodPlayerLogo({this.size = 42, this.glow = false, super.key});
   final double size;
   final bool glow;
   @override
   Widget build(BuildContext context) => Container(
     width: size, height: size,
     decoration: BoxDecoration(color: const Color(0xFF000000), borderRadius: BorderRadius.circular(size * .24), boxShadow: glow ? [BoxShadow(color: const Color(0xFFEBCF52).withValues(alpha: .28), blurRadius: 18)] : null),
-    child: CustomPaint(painter: _RemuxLogoPainter()),
+    child: CustomPaint(painter: _RodPlayerLogoPainter()),
   );
 }
-class _RemuxLogoPainter extends CustomPainter {
+class _RodPlayerLogoPainter extends CustomPainter {
   @override void paint(Canvas canvas, Size size) {
     final p = Paint()..color = const Color(0xFFEBCF52)..style = PaintingStyle.stroke..strokeWidth = size.width * .12..strokeCap = StrokeCap.round..strokeJoin = StrokeJoin.round;
     final x = size.width * .24; final y = size.height * .2; final w = size.width * .52; final h = size.height * .6;

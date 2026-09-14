@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/media_badge_overlay.dart';
 
 class FocusableMediaCard extends StatefulWidget {
@@ -33,7 +33,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final focused = _effectiveFocusNode.hasFocus;
     final radius = BorderRadius.circular(theme.radiusMedium);
     return Focus(
@@ -78,7 +78,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
 class _MediaImage extends StatelessWidget {
   const _MediaImage({required this.imageUrl, required this.theme});
   final String? imageUrl;
-  final RemuxTheme theme;
+  final RodPlayerTheme theme;
   @override
   Widget build(BuildContext context) {
     final url = imageUrl?.trim();

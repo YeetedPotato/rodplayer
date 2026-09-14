@@ -22,7 +22,7 @@ void main() {
 
   test('reports start, progress, stop, and watched callbacks', () async {
     final events = <String>[];
-    final reporter = PlaybackReporter(
+    final reporter = PlaybackSessionReporter(
       start: (item, session) async => events.add('start:$item:$session'),
       progress: (item, session, position, duration, paused) async => events.add('progress:${position.inMinutes}:$paused'),
       stop: (item, session, position) async => events.add('stop:${position.inMinutes}'),

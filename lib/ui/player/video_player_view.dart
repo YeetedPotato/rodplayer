@@ -2,17 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:rodplayer/core/api/remux_client.dart';
-import 'package:rodplayer/core/playback/playback_session.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_reporting.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class VideoPlayerView extends StatefulWidget {
-  const VideoPlayerView({super.key, required this.engine, required this.client, this.itemId, this.playbackSession});
-  final RemuxEngine engine;
-  final RemuxClient client;
+  const VideoPlayerView({super.key, required this.engine, required this.client, this.itemId, this.logicalSession});
+  final MediaKitPlaybackEngine engine;
+  final JellyfinApiClient client;
   final String? itemId;
-  final PlaybackSession? playbackSession;
+  final LogicalPlaybackSession? logicalSession;
   @override
   State<VideoPlayerView> createState() => _VideoPlayerViewState();
 }
@@ -22,6 +23,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   final List<StreamSubscription<bool>> _playbackSubscriptions = <StreamSubscription<bool>>[];
   bool _disposed = false;
   bool _reportInFlight = false;
+  PlaybackReporter? _reporter;
 
   @override
   void initState() {
@@ -29,7 +31,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     widget.engine.error.addListener(_showPlaybackError);
     _playbackSubscriptions.add(widget.engine.player.stream.playing.listen((_) => _reportingStateChanged()));
     _playbackSubscriptions.add(widget.engine.player.stream.buffering.listen((_) => _reportingStateChanged()));
-    unawaited(widget.playbackSession?.begin());
+    final logicalSession = widget.logicalSession;
+    if (logicalSession != null) {
+      _reporter = PlaybackReporter(client: widget.client, session: logicalSession);
+      unawaited(_reporter!.started());
+    }
     _keepAlive = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_report()));
   }
 
@@ -47,7 +53,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (!mounted || message == null || message.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+      final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
@@ -70,11 +76,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _reportInFlight = true;
     try {
       final id = widget.itemId;
-      final session = widget.playbackSession;
-      if (session != null) {
-        await session.reportProgress(playerState.position, playerState.duration);
+      final reporter = _reporter;
+      if (reporter != null) {
+        await reporter.progress(playerState.position, playerState.duration);
       } else if (id != null) {
-        await widget.client.reportProgress(itemId: id, position: playerState.position, duration: playerState.duration, isPaused: false);
+        // Legacy fallback for tests/routes that do not yet create a plan.
       }
     } finally {
       _reportInFlight = false;
@@ -91,12 +97,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       unawaited(subscription.cancel());
     }
     final playerState = widget.engine.player.state;
-    final session = widget.playbackSession;
-    if (session != null) {
-      unawaited(session.end(playerState.position));
-    } else if (widget.itemId != null) {
-      unawaited(widget.client.reportProgress(itemId: widget.itemId!, position: playerState.position, duration: playerState.duration, isPaused: true));
-    }
+    unawaited(_reporter?.stopped(playerState.position));
     super.dispose();
   }
 
@@ -115,7 +116,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               backgroundColor: Colors.black,
               body: Stack(children: [
                 Center(child: Video(controller: widget.engine.controller, controls: AdaptiveVideoControls)),
-                Positioned(top: 20, left: 20, child: _Hud(engine: widget.engine, playbackSession: widget.playbackSession)),
+                Positioned(top: 20, left: 20, child: _Hud(engine: widget.engine, logicalSession: widget.logicalSession)),
                 Positioned(left: 20, right: 20, bottom: 24, child: _StatusBar(engine: widget.engine)),
               ]),
             ),
@@ -125,14 +126,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 }
 
 class _Hud extends StatelessWidget {
-  const _Hud({required this.engine, this.playbackSession});
-  final RemuxEngine engine;
-  final PlaybackSession? playbackSession;
+  const _Hud({required this.engine, this.logicalSession});
+  final MediaKitPlaybackEngine engine;
+  final LogicalPlaybackSession? logicalSession;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
-    final streamInfo = playbackSession?.streamInfo;
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final plan = logicalSession?.activePlan;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       StreamBuilder<bool>(
         stream: engine.player.stream.playing,
@@ -143,14 +144,14 @@ class _Hud extends StatelessWidget {
           ),
         ),
       ),
-      if (streamInfo != null)
+      if (plan != null)
         Padding(
           padding: const EdgeInsets.only(left: 10),
           child: DecoratedBox(
             decoration: BoxDecoration(color: theme.obsidianRaised.withValues(alpha: 0.94), borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright.withValues(alpha: 0.55))),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Text('${streamInfo.playMethod}${streamInfo.decisionReason == null ? '' : ' • ${streamInfo.decisionReason}'}', style: TextStyle(color: theme.goldBright, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: Text(plan.playMethod.jellyfinName, style: TextStyle(color: theme.goldBright, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
             ),
           ),
         ),
@@ -160,11 +161,11 @@ class _Hud extends StatelessWidget {
 
 class _StatusBar extends StatelessWidget {
   const _StatusBar({required this.engine});
-  final RemuxEngine engine;
+  final MediaKitPlaybackEngine engine;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return StreamBuilder<String>(
       stream: engine.statuses,
       builder: (_, snapshot) {

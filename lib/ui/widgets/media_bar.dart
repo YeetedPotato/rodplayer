@@ -3,12 +3,12 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class MediaBar extends StatefulWidget {
   const MediaBar({super.key, this.engine, this.initialVolume = 0.8});
 
-  final RemuxEngine? engine;
+  final MediaKitPlaybackEngine? engine;
   final double initialVolume;
 
   @override
@@ -16,15 +16,15 @@ class MediaBar extends StatefulWidget {
 }
 
 class _MediaBarState extends State<MediaBar> {
-  late final RemuxEngine _ownedEngine;
-  RemuxEngine get _engine => widget.engine ?? _ownedEngine;
+  late final MediaKitPlaybackEngine _ownedEngine;
+  MediaKitPlaybackEngine get _engine => widget.engine ?? _ownedEngine;
   late double _volume;
   late double _savedVolume;
 
   @override
   void initState() {
     super.initState();
-    if (widget.engine == null) _ownedEngine = RemuxEngine();
+    if (widget.engine == null) _ownedEngine = MediaKitPlaybackEngine();
     _volume = widget.initialVolume.clamp(0.0, 1.0);
     _savedVolume = _volume == 0 ? 0.8 : _volume;
     unawaited(_engine.player.setVolume(_volume * 100));
@@ -49,7 +49,7 @@ class _MediaBarState extends State<MediaBar> {
       );
 
   void _openSettings() {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.62),
@@ -96,7 +96,7 @@ class _MediaBarState extends State<MediaBar> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return StreamBuilder<bool>(
       stream: _engine.player.stream.playing,
       initialData: _engine.player.state.playing,

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/media_bar.dart';
 
 void main() {
-  late RemuxEngine engine;
-  Widget harness({RemuxEngine? suppliedEngine, double initialVolume = 0.8}) => MaterialApp(theme: remuxThemeData(), home: Scaffold(body: MediaBar(engine: suppliedEngine, initialVolume: initialVolume)));
-  setUp(() { engine = RemuxEngine(); });
+  late MediaKitPlaybackEngine engine;
+  Widget harness({MediaKitPlaybackEngine? suppliedEngine, double initialVolume = 0.8}) => MaterialApp(theme: rodPlayerThemeData(), home: Scaffold(body: MediaBar(engine: suppliedEngine, initialVolume: initialVolume)));
+  setUp(() { engine = MediaKitPlaybackEngine(); });
   tearDown(() async { await engine.dispose(); });
   testWidgets('updates play and pause controls from engine playing stream', (tester) async { await tester.pumpWidget(harness(suppliedEngine: engine)); expect(find.byTooltip('Play'), findsOneWidget); await engine.player.play(); await tester.pump(); expect(find.byTooltip('Pause'), findsOneWidget); await engine.player.pause(); await tester.pump(); expect(find.byTooltip('Play'), findsOneWidget); });
   testWidgets('updates the seek bar from the engine position stream', (tester) async { await tester.pumpWidget(harness(suppliedEngine: engine)); final slider = tester.widget<Slider>(find.byType(Slider).first); expect(slider.value, 0); expect(slider.onChanged, isNull); await engine.player.seek(const Duration(seconds: 12)); await tester.pump(); final updatedSlider = tester.widget<Slider>(find.byType(Slider).first); expect(updatedSlider.value, 0); });

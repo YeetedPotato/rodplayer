@@ -1,0 +1,23 @@
+{
+  "PlaySessionId": "play-direct",
+  "MediaSources": [
+    {
+      "Id": "source-direct",
+      "Container": "mkv",
+      "Path": "/Videos/movie.mkv",
+      "DirectStreamUrl": "/Videos/source-direct/stream.mkv",
+      "SupportsDirectPlay": true,
+      "SupportsDirectStream": true,
+      "SupportsTranscoding": true,
+      "PlayMethod": "DirectPlay",
+      "DefaultAudioStreamIndex": 1,
+      "DefaultSubtitleStreamIndex": 2,
+      "MediaStreams": [
+        {"Index": 0, "Type": "Video", "Codec": "hevc", "Width": 3840, "Height": 2160, "VideoRange": "HDR10", "BitDepth": 10},
+        {"Index": 1, "Type": "Audio", "Codec": "truehd", "Channels": 8, "ChannelLayout": "7.1", "AudioSpatialFormat": "Dolby Atmos", "Language": "eng", "IsDefault": true},
+        {"Index": 2, "Type": "Subtitle", "Codec": "subrip", "Language": "eng", "IsDefault": true, "IsForced": false}
+      ],
+      "UnknownFutureField": {"kept": true}
+    }
+  ]
+}

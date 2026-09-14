@@ -6,7 +6,7 @@ void main() {
   final fallback = PlaybackDecision(
     method: PlayMethod.directStream,
     reason: 'server supplied fallback',
-    url: Uri.parse('https://remux.example.com/fallback'),
+    url: Uri.parse('https://media.example.com/fallback'),
   );
 
   test('retries with exponential backoff and recovers', () async {
