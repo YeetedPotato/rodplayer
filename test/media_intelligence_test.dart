@@ -61,9 +61,9 @@ void main() {
       }
     });
 
-    test('falls back to localized title, localized codec, raw codec, or Unknown', () {
-      expect(_stream(localizedDisplayTitle: 'Custom HEVC').displayCodec, 'Custom HEVC');
-      expect(_stream(localizedCodec: 'MPEG-4').displayCodec, 'MPEG-4');
+    test('falls back to display title, raw codec, or Unknown', () {
+      expect(_stream(displayTitle: 'Custom HEVC').displayCodec, 'Custom HEVC');
+      expect(_stream(codec: 'MPEG-4').displayCodec, 'MPEG-4');
       expect(_stream(codec: 'vp9').displayCodec, 'vp9');
       expect(_stream().displayCodec, 'Unknown');
     });
