@@ -34,35 +34,62 @@ class PlaybackNegotiator {
       maxStreamingBitrate: environment.network.maxStreamingBitrate,
     ));
     for (final source in response.mediaSources) {
-      final plan = _planFor(itemId: itemId, playSessionId: response.playSessionId, source: source, engineId: backend.id);
+      final plan = _planFor(
+        itemId: itemId,
+        playSessionId: response.playSessionId,
+        source: source,
+        engineId: backend.id,
+        audioStreamIndex: audioStreamIndex,
+        subtitleStreamIndex: subtitleStreamIndex,
+      );
       if (plan != null) return plan;
     }
     throw ServerConnectionException('Server returned no playable media source');
   }
 
-  PlaybackPlan? _planFor({required String itemId, required String? playSessionId, required MediaSourceInfo source, required String engineId}) {
+  PlaybackPlan? _planFor({
+    required String itemId,
+    required String? playSessionId,
+    required MediaSourceInfo source,
+    required String engineId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) {
     final method = source.playMethod ?? _methodFromSource(source);
-    final uriText = switch (method) {
-      PlayMethod.directPlay => source.directStreamUrl ?? source.path,
-      PlayMethod.directStream => source.directStreamUrl ?? source.transcodingUrl,
-      PlayMethod.transcode => source.transcodingUrl,
+    final selectedAudio = audioStreamIndex ?? source.defaultAudioStreamIndex;
+    final selectedSubtitle = subtitleStreamIndex ?? source.defaultSubtitleStreamIndex;
+    final playbackUri = switch (method) {
+      PlayMethod.directPlay => client.buildDirectPlayUri(
+          itemId: itemId,
+          mediaSourceId: source.id.isEmpty ? itemId : source.id,
+          playSessionId: playSessionId,
+          audioStreamIndex: selectedAudio,
+          subtitleStreamIndex: selectedSubtitle,
+        ),
+      PlayMethod.directStream => _resolvedTransformedUri(source.directStreamUrl ?? source.transcodingUrl),
+      PlayMethod.transcode => _resolvedTransformedUri(source.transcodingUrl),
     };
-    if (uriText == null || uriText.isEmpty) return null;
+    if (playbackUri == null) return null;
     return PlaybackPlan(
       itemId: itemId,
       mediaSourceId: source.id.isEmpty ? itemId : source.id,
       playSessionId: playSessionId,
       playMethod: method,
-      playbackUri: client.resolvePlaybackUri(uriText),
+      playbackUri: playbackUri,
       engineId: engineId,
       source: source,
-      selectedAudioStreamIndex: source.defaultAudioStreamIndex,
-      selectedSubtitleStreamIndex: source.defaultSubtitleStreamIndex,
+      selectedAudioStreamIndex: selectedAudio,
+      selectedSubtitleStreamIndex: selectedSubtitle,
       transcodeReasons: source.transcodingReasons,
       videoCopied: source.videoCopied ?? false,
       audioCopied: source.audioCopied ?? false,
       containerChanged: source.containerChanged ?? false,
     );
+  }
+
+  Uri? _resolvedTransformedUri(String? uriText) {
+    if (uriText == null || uriText.isEmpty) return null;
+    return client.resolvePlaybackUri(uriText);
   }
 
   PlayMethod _methodFromSource(MediaSourceInfo source) {

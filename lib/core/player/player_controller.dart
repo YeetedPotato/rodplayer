@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_coordinator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
+import 'package:rodplayer/core/player/playback_video_surface.dart';
 
 /// The media_kit/mpv playback backend. mpv options are deliberately centralized
 /// so platform views and the HUD remain independent of transport details.
@@ -56,6 +58,7 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   @override
   Duration get duration => player.state.duration;
 
+  @override
   Stream<String> get statuses => coordinator?.statuses ?? const Stream<String>.empty();
 
   static const Map<String, String> mpvProperties = {
@@ -124,6 +127,7 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
     unawaited(coordinator?.handleStreamFailure(networkDrop: true) ?? Future<void>.value());
   }
 
+  @override
   Future<void> retry() async {
     if (_disposed || _uri == null) return;
     try {
@@ -199,4 +203,13 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
     volume.dispose();
     await player.dispose();
   }
+}
+
+class MediaKitPlaybackVideoSurface implements PlaybackVideoSurface {
+  const MediaKitPlaybackVideoSurface(this.engine);
+
+  final MediaKitPlaybackEngine engine;
+
+  @override
+  Widget build(BuildContext context) => Video(controller: engine.controller, controls: AdaptiveVideoControls);
 }

@@ -9,6 +9,7 @@ abstract interface class PlaybackEngine {
   ValueListenable<Duration> get positionListenable;
   ValueListenable<Duration> get durationListenable;
   ValueListenable<double> get volume;
+  Stream<String> get statuses;
   Duration get position;
   Duration get duration;
 
@@ -18,6 +19,7 @@ abstract interface class PlaybackEngine {
   Future<void> playOrPause();
   Future<void> seek(Duration position);
   Future<void> setVolume(double value);
+  Future<void> retry();
   Future<void> stop();
   Future<void> dispose();
 }

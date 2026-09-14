@@ -51,6 +51,7 @@ class _PlayerRouteState extends State<PlayerRoute> {
           final prepared = snapshot.data!;
           return VideoPlayerView(
             engine: engine,
+            surface: MediaKitPlaybackVideoSurface(engine),
             client: widget.client,
             itemId: widget.itemId,
             logicalSession: prepared.session,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
@@ -18,6 +20,8 @@ class TestPlaybackEngine implements PlaybackEngine {
   final ValueNotifier<Duration> durationListenable = ValueNotifier<Duration>(Duration.zero);
   @override
   final ValueNotifier<double> volume = ValueNotifier<double>(100);
+  @override
+  final Stream<String> statuses = const Stream<String>.empty();
 
   PlaybackPlan? loadedPlan;
   bool stopped = false;
@@ -62,6 +66,9 @@ class TestPlaybackEngine implements PlaybackEngine {
   Future<void> setVolume(double value) async {
     volume.value = value.clamp(0, 100).toDouble();
   }
+
+  @override
+  Future<void> retry() async {}
 
   @override
   Future<void> stop() async {

@@ -102,6 +102,25 @@ class JellyfinApiClient {
     return PlaybackInfoResponse.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
+  Uri buildDirectPlayUri({
+    required String itemId,
+    required String mediaSourceId,
+    String? playSessionId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) {
+    final query = <String, String>{
+      'static': 'true',
+      'mediaSourceId': mediaSourceId,
+      if (playSessionId != null && playSessionId.isNotEmpty) 'playSessionId': playSessionId,
+      if (audioStreamIndex != null) 'audioStreamIndex': '$audioStreamIndex',
+      if (subtitleStreamIndex != null) 'subtitleStreamIndex': '$subtitleStreamIndex',
+    };
+    final token = cleanToken(accessToken);
+    if (token != null) query['api_key'] = token;
+    return Uri.parse('$baseUrl/Videos/${Uri.encodeComponent(itemId)}/stream').replace(queryParameters: query);
+  }
+
   Uri resolvePlaybackUri(String path) {
     final uri = Uri.parse(path);
     final resolved = uri.hasScheme ? uri : Uri.parse(baseUrl).resolve(path);

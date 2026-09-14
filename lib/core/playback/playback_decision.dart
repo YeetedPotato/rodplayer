@@ -18,7 +18,7 @@ class PlaybackDecisionEngine {
   final PlaybackBackendCapabilities backend;
 
   PlaybackDecision decide(Map<String, dynamic> source) {
-    final directUrl = source['DirectStreamUrl'] ?? source['Path'];
+    final directUrl = source['DirectStreamUrl'];
     if (source['SupportsDirectPlay'] == true && directUrl is String && directUrl.isNotEmpty) {
       return PlaybackDecision(method: PlayMethod.directPlay, reason: 'Server allows direct play', url: Uri.tryParse(directUrl));
     }

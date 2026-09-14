@@ -57,4 +57,16 @@ void main() {
     expect(response.playSessionId, 'play');
     expect(response.mediaSources.single.id, 'source');
   });
+
+  test('buildDirectPlayUri uses Jellyfin stream endpoint with auth and session query', () {
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((_) async => http.Response('', 200)))..accessToken = 'Bearer token';
+    final uri = client.buildDirectPlayUri(itemId: 'item', mediaSourceId: 'source', playSessionId: 'play', audioStreamIndex: 4, subtitleStreamIndex: 6);
+    expect(uri.path, '/Videos/item/stream');
+    expect(uri.queryParameters, containsPair('static', 'true'));
+    expect(uri.queryParameters, containsPair('mediaSourceId', 'source'));
+    expect(uri.queryParameters, containsPair('playSessionId', 'play'));
+    expect(uri.queryParameters, containsPair('audioStreamIndex', '4'));
+    expect(uri.queryParameters, containsPair('subtitleStreamIndex', '6'));
+    expect(uri.queryParameters, containsPair('api_key', 'token'));
+  });
 }

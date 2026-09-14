@@ -101,4 +101,4 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 }
 
-Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client, String itemId) => VideoPlayerView(engine: engine, client: client, itemId: itemId);
+Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client, String itemId) => VideoPlayerView(engine: engine, surface: MediaKitPlaybackVideoSurface(engine), client: client, itemId: itemId);

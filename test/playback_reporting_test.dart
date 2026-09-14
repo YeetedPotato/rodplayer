@@ -1,9 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
+
+import 'test_support.dart';
 
 void main() {
   PlaybackPlan plan(String id, PlayMethod method) => PlaybackPlan(
@@ -41,4 +48,34 @@ void main() {
     expect(state.toJson(), containsPair('MediaSourceId', 'B'));
     expect(state.toJson(), containsPair('PlayMethod', 'Transcode'));
   });
+
+  test('reporting after track switch emits updated Jellyfin stream index', () async {
+    late Map<String, dynamic> payload;
+    final client = JellyfinApiClient(
+      baseUrl: 'https://media.example.com',
+      identity: testIdentity,
+      client: _CaptureClient((request, body) {
+        payload = jsonDecode(body) as Map<String, dynamic>;
+        return http.Response('', 204);
+      }),
+    );
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay));
+    session.selectedAudio = 4;
+    session.selectedSubtitle = 8;
+    await PlaybackReporter(client: client, session: session).progress(const Duration(seconds: 5), const Duration(minutes: 1));
+    expect(payload, containsPair('AudioStreamIndex', 4));
+    expect(payload, containsPair('SubtitleStreamIndex', 8));
+  });
+}
+
+class _CaptureClient extends http.BaseClient {
+  _CaptureClient(this.handler);
+  final FutureOr<http.Response> Function(http.BaseRequest request, String body) handler;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final bytes = await request.finalize().toBytes();
+    final response = await handler(request, utf8.decode(bytes));
+    return http.StreamedResponse(Stream.value(response.bodyBytes), response.statusCode, request: request);
+  }
 }

@@ -13,4 +13,21 @@ void main() {
     expect(session.activeServerSession.mediaSourceId, 'B');
     expect(session.activeServerSession.playMethod, PlayMethod.transcode);
   });
+
+  test('logical session initializes selected indexes from playback plan', () {
+    final plan = PlaybackPlan(
+      itemId: 'item',
+      mediaSourceId: 'source',
+      playSessionId: 'play',
+      playMethod: PlayMethod.directPlay,
+      playbackUri: Uri.parse('https://media/Videos/item/stream'),
+      engineId: 'media_kit',
+      selectedAudioStreamIndex: 4,
+      selectedSubtitleStreamIndex: 7,
+      source: MediaSourceInfo.fromJson(<String, dynamic>{'Id': 'source', 'MediaStreams': <dynamic>[]}),
+    );
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan);
+    expect(session.selectedAudio, 4);
+    expect(session.selectedSubtitle, 7);
+  });
 }

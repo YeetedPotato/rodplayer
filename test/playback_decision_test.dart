@@ -15,4 +15,9 @@ void main() {
     expect(decision.method, PlayMethod.transcode);
     expect(decision.url.toString(), 'https://media/transcode');
   });
+
+  test('legacy helper does not treat filesystem Path as playback URL', () {
+    final decision = engine.decide(<String, dynamic>{'SupportsDirectPlay': true, 'Path': '/media/Movie.mkv'});
+    expect(decision.url, isNull);
+  });
 }

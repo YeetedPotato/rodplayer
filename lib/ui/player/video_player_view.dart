@@ -1,16 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/core/player/playback_engine.dart';
+import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class VideoPlayerView extends StatefulWidget {
-  const VideoPlayerView({super.key, required this.engine, required this.client, this.itemId, this.logicalSession});
-  final MediaKitPlaybackEngine engine;
+  const VideoPlayerView({super.key, required this.engine, required this.surface, required this.client, this.itemId, this.logicalSession});
+  final PlaybackEngine engine;
+  final PlaybackVideoSurface surface;
   final JellyfinApiClient client;
   final String? itemId;
   final LogicalPlaybackSession? logicalSession;
@@ -20,7 +23,6 @@ class VideoPlayerView extends StatefulWidget {
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
   Timer? _keepAlive;
-  final List<StreamSubscription<bool>> _playbackSubscriptions = <StreamSubscription<bool>>[];
   bool _disposed = false;
   bool _reportInFlight = false;
   PlaybackReporter? _reporter;
@@ -29,8 +31,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   void initState() {
     super.initState();
     widget.engine.error.addListener(_showPlaybackError);
-    _playbackSubscriptions.add(widget.engine.player.stream.playing.listen((_) => _reportingStateChanged()));
-    _playbackSubscriptions.add(widget.engine.player.stream.buffering.listen((_) => _reportingStateChanged()));
+    widget.engine.playing.addListener(_reportingStateChanged);
+    widget.engine.buffering.addListener(_reportingStateChanged);
     final logicalSession = widget.logicalSession;
     if (logicalSession != null) {
       _reporter = PlaybackReporter(client: widget.client, session: logicalSession);
@@ -40,7 +42,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _reportingStateChanged() {
-    if (!_disposed && !widget.engine.player.state.playing && !widget.engine.player.state.buffering) {
+    if (!_disposed && !widget.engine.playing.value && !widget.engine.buffering.value) {
       _keepAlive?.cancel();
       _keepAlive = null;
     } else if (!_disposed && _keepAlive == null) {
@@ -71,14 +73,13 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   Future<void> _report() async {
     if (_disposed || _reportInFlight) return;
-    final playerState = widget.engine.player.state;
-    if (!playerState.playing || playerState.buffering) return;
+    if (!widget.engine.playing.value || widget.engine.buffering.value) return;
     _reportInFlight = true;
     try {
       final id = widget.itemId;
       final reporter = _reporter;
       if (reporter != null) {
-        await reporter.progress(playerState.position, playerState.duration);
+        await reporter.progress(widget.engine.position, widget.engine.duration);
       } else if (id != null) {
         // Legacy fallback for tests/routes that do not yet create a plan.
       }
@@ -93,11 +94,9 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     widget.engine.error.removeListener(_showPlaybackError);
     _keepAlive?.cancel();
     _keepAlive = null;
-    for (final subscription in _playbackSubscriptions) {
-      unawaited(subscription.cancel());
-    }
-    final playerState = widget.engine.player.state;
-    unawaited(_reporter?.stopped(playerState.position));
+    widget.engine.playing.removeListener(_reportingStateChanged);
+    widget.engine.buffering.removeListener(_reportingStateChanged);
+    unawaited(_reporter?.stopped(widget.engine.position));
     super.dispose();
   }
 
@@ -109,13 +108,13 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           child: Focus(
             autofocus: true,
             onKeyEvent: (_, event) {
-              if (event.logicalKey.keyLabel == 'Media Play Pause') widget.engine.player.playOrPause();
+              if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause) unawaited(widget.engine.playOrPause());
               return KeyEventResult.ignored;
             },
             child: Scaffold(
               backgroundColor: Colors.black,
               body: Stack(children: [
-                Center(child: Video(controller: widget.engine.controller, controls: AdaptiveVideoControls)),
+                Center(child: widget.surface.build(context)),
                 Positioned(top: 20, left: 20, child: _Hud(engine: widget.engine, logicalSession: widget.logicalSession)),
                 Positioned(left: 20, right: 20, bottom: 24, child: _StatusBar(engine: widget.engine)),
               ]),
@@ -127,7 +126,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
 class _Hud extends StatelessWidget {
   const _Hud({required this.engine, this.logicalSession});
-  final MediaKitPlaybackEngine engine;
+  final PlaybackEngine engine;
   final LogicalPlaybackSession? logicalSession;
 
   @override
@@ -135,12 +134,12 @@ class _Hud extends StatelessWidget {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final plan = logicalSession?.activePlan;
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      StreamBuilder<bool>(
-        stream: engine.player.stream.playing,
-        builder: (_, snapshot) => Focus(
+      ValueListenableBuilder<bool>(
+        valueListenable: engine.playing,
+        builder: (_, isPlaying, __) => Focus(
           child: DecoratedBox(
             decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow),
-            child: IconButton(color: theme.goldBright, icon: Icon(snapshot.data == true ? Icons.pause : Icons.play_arrow), onPressed: engine.player.playOrPause),
+            child: IconButton(color: theme.goldBright, icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow), onPressed: () => unawaited(engine.playOrPause())),
           ),
         ),
       ),
@@ -161,7 +160,7 @@ class _Hud extends StatelessWidget {
 
 class _StatusBar extends StatelessWidget {
   const _StatusBar({required this.engine});
-  final MediaKitPlaybackEngine engine;
+  final PlaybackEngine engine;
 
   @override
   Widget build(BuildContext context) {

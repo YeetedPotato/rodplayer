@@ -1,3 +1,5 @@
+// Legacy fixed-session helper retained for ResumeManager compatibility.
+// New playback uses LogicalPlaybackSession + PlaybackReporter.
 typedef PlaybackStart = Future<void> Function(String itemId, String sessionId);
 typedef PlaybackProgress = Future<void> Function(String itemId, String sessionId, Duration position, Duration duration, bool paused);
 typedef PlaybackStop = Future<void> Function(String itemId, String sessionId, Duration position);
