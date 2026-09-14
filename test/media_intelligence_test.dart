@@ -3,7 +3,7 @@ import 'package:rodplayer/core/models/media_intelligence.dart';
 
 void main() {
   group('MediaIntelligence.fromJson', () {
-    test('parses MediaStreams and selects the first stream of each type', () {
+    test('parses MediaStreams and preserves every stream by type', () {
       final media = MediaIntelligence.fromJson({
         'MediaStreams': [
           {'Type': 'Video', 'Codec': 'hevc'},
@@ -18,6 +18,7 @@ void main() {
       });
 
       expect(media.video?.codec, 'hevc');
+      expect(media.videoStreams.map((stream) => stream.codec), ['hevc', 'avc']);
       expect(media.audio?.codec, 'flac');
       expect(media.subtitle?.codec, 'subrip');
       expect(media.width, 3840);
@@ -61,9 +62,9 @@ void main() {
       }
     });
 
-    test('falls back to localized title, localized codec, raw codec, or Unknown', () {
-      expect(_stream(localizedDisplayTitle: 'Custom HEVC').displayCodec, 'Custom HEVC');
-      expect(_stream(localizedCodec: 'MPEG-4').displayCodec, 'MPEG-4');
+    test('falls back to display title, raw codec, or Unknown', () {
+      expect(_stream(displayTitle: 'Custom HEVC').displayCodec, 'Custom HEVC');
+      expect(_stream(codec: 'MPEG-4').displayCodec, 'MPEG-4');
       expect(_stream(codec: 'vp9').displayCodec, 'vp9');
       expect(_stream().displayCodec, 'Unknown');
     });
@@ -89,16 +90,16 @@ void main() {
   group('audio formatting', () {
     test('formats named codecs and spatial formats', () {
       expect(_stream(codec: 'TrueHD').displayAudio, 'TrueHD');
-      expect(_stream(audioSpatialFormat: 'Dolby Atmos').displayAudio, 'Atmos');
-      expect(_stream(codec: 'DTS:X').displayAudio, 'DTS:X');
+      expect(_stream(codec: 'TrueHD', audioSpatialFormat: 'Dolby Atmos').displayAudio, 'TrueHD Atmos');
+      expect(_stream(codec: 'DTS-HD MA', audioSpatialFormat: 'DTS:X').displayAudio, 'DTS-HD MA DTS:X');
       expect(_stream(codec: 'DTS-HD MA').displayAudio, 'DTS-HD MA');
       expect(_stream(codec: 'FLAC').displayAudio, 'FLAC');
     });
 
     test('formats channel counts and preserves explicit channel layouts', () {
-      expect(_stream(codec: 'aac', channels: 8).displayAudio, 'aac 7.1');
-      expect(_stream(codec: 'aac', channels: 6).displayAudio, 'aac 5.1');
-      expect(_stream(codec: 'aac', channels: 2, channelLayout: 'L R').displayAudio, 'aac L R');
+      expect(_stream(codec: 'aac', channels: 8).displayAudio, 'AAC 7.1');
+      expect(_stream(codec: 'aac', channels: 6).displayAudio, 'AAC 5.1');
+      expect(_stream(codec: 'aac', channels: 2, channelLayout: 'L R').displayAudio, 'AAC L R');
     });
   });
 
@@ -142,8 +143,7 @@ StreamIntelligence _stream({
   String? profile,
   String? videoRange,
   String? videoRangeType,
-  String? localizedCodec,
-  String? localizedDisplayTitle,
+  String? displayTitle,
   int? channels,
   String? channelLayout,
   String? audioSpatialFormat,
@@ -154,8 +154,7 @@ StreamIntelligence _stream({
     profile: profile,
     videoRange: videoRange,
     videoRangeType: videoRangeType,
-    localizedCodec: localizedCodec,
-    localizedDisplayTitle: localizedDisplayTitle,
+    displayTitle: displayTitle,
     channels: channels,
     channelLayout: channelLayout,
     audioSpatialFormat: audioSpatialFormat,

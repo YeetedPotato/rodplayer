@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class FocusHud extends StatelessWidget {
   const FocusHud({required this.child, required this.visible, this.alignment = Alignment.bottomCenter, super.key});
@@ -9,7 +9,7 @@ class FocusHud extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return Align(
       alignment: alignment,
       child: IgnorePointer(

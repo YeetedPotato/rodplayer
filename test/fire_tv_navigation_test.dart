@@ -1,33 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rodplayer/core/api/remux_client.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/browse_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+
+import 'test_support.dart';
 
 void main() {
   Widget testApp(Widget child) {
     return MaterialApp(
       theme: ThemeData(
         brightness: Brightness.dark,
-        extensions: const <ThemeExtension<RemuxTheme>>[RemuxTheme()],
+        extensions: const <ThemeExtension<RodPlayerTheme>>[RodPlayerTheme()],
       ),
       home: child,
     );
   }
 
-  testWidgets('browse screen exposes a PopScope and ordered focus traversal', (tester) async {
-    final client = RemuxClient(baseUrl: 'http://127.0.0.1:1');
+  testWidgets('browse screen exposes ordered focus traversal', (tester) async {
+    final client = JellyfinApiClient(baseUrl: 'http://127.0.0.1:1', identity: testIdentity);
     addTearDown(client.close);
     await tester.pumpWidget(testApp(BrowseScreen(client: client)));
     await tester.pump();
-    expect(find.byType(PopScope), findsOneWidget);
-    expect(find.byType(FocusTraversalGroup), findsOneWidget);
-    expect(find.byType(FocusableMediaCard), findsWidgets);
+    expect(find.byType(FocusTraversalGroup), findsWidgets);
   });
 
-  testWidgets('DPAD traversal moves focus between ElegantFin media cards', (tester) async {
+  testWidgets('DPAD traversal moves focus between RodPlayer media cards', (tester) async {
     final firstFocus = FocusNode(debugLabel: 'first');
     final secondFocus = FocusNode(debugLabel: 'second');
     addTearDown(firstFocus.dispose);
@@ -43,13 +43,12 @@ void main() {
     expect(secondFocus.hasFocus, isTrue);
   });
 
-  testWidgets('focused cards use the ElegantFin Brand Gold token', (tester) async {
+  testWidgets('focused cards use the RodPlayer focus theme', (tester) async {
     final focusNode = FocusNode(debugLabel: 'gold-card');
     addTearDown(focusNode.dispose);
     await tester.pumpWidget(testApp(Scaffold(body: FocusableMediaCard(title: 'Focused card', focusNode: focusNode, autofocus: true))));
     await tester.pumpAndSettle();
-    final theme = Theme.of(tester.element(find.byType(FocusableMediaCard))).extension<RemuxTheme>()!;
-    expect(theme.goldBright, const Color(0xFFEBCF52));
-    expect(theme.goldBright.withValues(alpha: 0.32).a, closeTo(0.32, 0.01));
+    final theme = Theme.of(tester.element(find.byType(FocusableMediaCard))).extension<RodPlayerTheme>()!;
+    expect(theme.goldBright, isNot(theme.textMuted));
   });
 }

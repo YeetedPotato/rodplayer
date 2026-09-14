@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:rodplayer/core/api/remux_client.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({required this.client, super.key});
-  final RemuxClient client;
+  final JellyfinApiClient client;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -32,7 +32,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _loadRecent() async {
     final preferences = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _recent = preferences.getStringList('remux_recent_searches') ?? const []);
+    if (mounted) setState(() => _recent = preferences.getStringList('rodplayer_recent_searches') ?? const []);
   }
 
   void _onChanged(String value) {
@@ -61,7 +61,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _saveRecent(String query) async {
     final updated = [query, ..._recent.where((item) => item.toLowerCase() != query.toLowerCase())].take(6).toList();
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setStringList('remux_recent_searches', updated);
+    await preferences.setStringList('rodplayer_recent_searches', updated);
     if (mounted) setState(() => _recent = updated);
   }
 
@@ -86,7 +86,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final width = MediaQuery.sizeOf(context).width;
     final columns = width >= 1200 ? 6 : width >= 850 ? 4 : width >= 560 ? 3 : 2;
     return Scaffold(
@@ -99,7 +99,7 @@ class _SearchScreenState extends State<SearchScreen> {
           decoration: InputDecoration(hintText: 'Search movies, shows, and music...', prefixIcon: const Icon(Icons.search), suffixIcon: _controller.text.isEmpty ? null : IconButton(icon: const Icon(Icons.clear), onPressed: () { _controller.clear(); _onChanged(''); setState(() {}); })),
         ))),
         if (_loading) const SliverFillRemaining(hasScrollBody: false, child: Center(child: CircularProgressIndicator()))
-        else if (_error != null) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.cloud_off_outlined, title: 'Search unavailable', detail: 'Check your Remux connection and try again.'))
+        else if (_error != null) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.cloud_off_outlined, title: 'Search unavailable', detail: 'Check your RodPlayer connection and try again.'))
         else if (_query.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _RecentSearches(items: _recent, onSelect: (value) { _controller.text = value; _search(value); }))
         else if (_results.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.search_off, title: 'No results', detail: 'Try a different title, artist, or keyword.'))
         else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: _subtitle(item), imageUrl: _image(item), onTap: () => _showDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),

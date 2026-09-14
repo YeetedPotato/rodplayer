@@ -1,0 +1,1 @@
+{"PlaySessionId":"play-dv","MediaSources":[{"Id":"dv","Container":"mkv","DirectStreamUrl":"/dv.mkv","PlayMethod":"DirectPlay","MediaStreams":[{"Index":0,"Type":"Video","Codec":"hevc","Profile":"Dolby Vision 8.1","VideoRange":"Dolby Vision","DOVIProfile":8}]}]}

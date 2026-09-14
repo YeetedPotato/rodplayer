@@ -53,7 +53,7 @@ class PlaybackRecoveryController {
         }
       }
       if (!_isActive(generation)) return;
-      _emit(RecoveryState(phase: RecoveryPhase.fallingBack, reason: 'Direct play failed after $maxRetries retries; selecting fallback'));
+      _emit(RecoveryState(phase: RecoveryPhase.fallingBack, reason: 'Playback failed after $maxRetries retries; selecting fallback'));
       final decision = await fallback();
       if (!_isActive(generation)) return;
       if (decision.method != PlayMethod.directPlay || decision.url != null) {

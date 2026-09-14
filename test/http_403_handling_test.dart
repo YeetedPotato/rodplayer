@@ -3,8 +3,10 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:rodplayer/core/api/remux_client.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+
+import 'fakes/test_playback_engine.dart';
+import 'test_support.dart';
 
 class _ForbiddenClient extends http.BaseClient {
   @override
@@ -15,16 +17,16 @@ class _ForbiddenClient extends http.BaseClient {
 }
 
 void main() {
-  test('RemuxClient maps HTTP 403 to a connection exception with status', () async {
-    final client = RemuxClient(baseUrl: 'https://remux.example.com', client: _ForbiddenClient());
+  test('JellyfinApiClient maps HTTP 403 to a connection exception with status', () async {
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _ForbiddenClient());
     addTearDown(client.close);
-    await expectLater(client.healthCheck(), throwsA(isA<RemuxConnectionException>().having((exception) => exception.statusCode, 'statusCode', 403)));
+    await expectLater(client.healthCheck(), throwsA(isA<ServerConnectionException>().having((exception) => exception.statusCode, 'statusCode', 403)));
   });
 
-  test('RemuxEngine exposes a transport failure through its error state', () async {
-    final engine = RemuxEngine();
+  test('PlaybackEngine exposes a transport failure through its error state', () async {
+    final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
-    engine.error.value = 'Remux request failed (403)';
-    expect(engine.error.value, 'Remux request failed (403)');
+    engine.error.value = 'Server request failed (403)';
+    expect(engine.error.value, 'Server request failed (403)');
   });
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 class SmartShelf extends StatelessWidget {
   const SmartShelf({required this.title, required this.itemBuilder, required this.itemCount, this.subtitle, this.itemCountBadge = false, this.action, this.aspectRatio = 2 / 3, this.itemWidth, this.padding, this.itemSpacing = 14, this.autofocusFirstItem = false, super.key});
@@ -17,7 +17,7 @@ class SmartShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme();
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final shelfPadding = padding ?? const EdgeInsets.symmetric(horizontal: 24);
     final resolvedItemWidth = itemWidth ?? _defaultItemWidth(aspectRatio);
     return FocusTraversalGroup(
@@ -81,7 +81,7 @@ class _ShelfItem extends StatelessWidget {
 class _CountBadge extends StatelessWidget {
   const _CountBadge({required this.count, required this.theme});
   final int count;
-  final RemuxTheme theme;
+  final RodPlayerTheme theme;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(

@@ -53,7 +53,7 @@ class PlaybackCoordinator {
     return _recoveryInFlight ??= _runRecovery(reason).whenComplete(() => _recoveryInFlight = null);
   }
   Future<void> _runRecovery(String reason) async {
-    await recoveryController.handleFailure(reason: reason, retryCurrent: retryCurrent, fallback: () async { _emit('Falling back to transcode...'); return fallback(); });
+    await recoveryController.handleFailure(reason: reason, retryCurrent: retryCurrent, fallback: () async { _emit('Selecting fallback playback plan...'); return fallback(); });
   }
   void _emit(String message) { if (!_status.isClosed) _status.add(message); }
   Future<void> dispose() async { if (_disposed) return; _disposed = true; recoveryController.cancel(); detach(); await _status.close(); }

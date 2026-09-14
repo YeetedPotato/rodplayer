@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:rodplayer/core/api/remux_client.dart';
-import 'package:rodplayer/core/theme/remux_theme.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
@@ -8,7 +8,7 @@ import 'package:rodplayer/ui/widgets/smart_shelf.dart';
 
 class BrowseScreen extends StatefulWidget {
   const BrowseScreen({required this.client, this.onLogout = _defaultLogout, super.key});
-  final RemuxClient client;
+  final JellyfinApiClient client;
   final Future<void> Function() onLogout;
   static Future<void> _defaultLogout() async {}
   @override State<BrowseScreen> createState() => _BrowseScreenState();
@@ -27,5 +27,5 @@ class _BrowseScreenState extends State<BrowseScreen> {
     Navigator.of(context).pop();
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
   }
-  @override Widget build(BuildContext context) { final theme = Theme.of(context).extension<RemuxTheme>() ?? const RemuxTheme(); return Scaffold(backgroundColor: theme.obsidian, appBar: AppBar(title: const Text('Remux'), actions: [IconButton(tooltip: 'Search', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SearchScreen(client: widget.client))), icon: const Icon(Icons.search)), IconButton(onPressed: widget.onLogout, icon: const Icon(Icons.logout))]), body: ListView(children: [_feed('Continue Watching', _resumeItems), _feed('Next Up', _nextUp)])); }
+  @override Widget build(BuildContext context) { final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme(); return Scaffold(backgroundColor: theme.obsidian, appBar: AppBar(title: const Text('RodPlayer'), actions: [IconButton(tooltip: 'Search', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SearchScreen(client: widget.client))), icon: const Icon(Icons.search)), IconButton(onPressed: widget.onLogout, icon: const Icon(Icons.logout))]), body: ListView(children: [_feed('Continue Watching', _resumeItems), _feed('Next Up', _nextUp)])); }
 }

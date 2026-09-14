@@ -1,31 +1,22 @@
-import 'package:rodplayer/core/api/remux_client.dart';
-
+// Legacy fixed-session helper retained for ResumeManager compatibility.
+// New playback uses LogicalPlaybackSession + PlaybackReporter.
 typedef PlaybackStart = Future<void> Function(String itemId, String sessionId);
 typedef PlaybackProgress = Future<void> Function(String itemId, String sessionId, Duration position, Duration duration, bool paused);
 typedef PlaybackStop = Future<void> Function(String itemId, String sessionId, Duration position);
 
-class PlaybackReporter {
-  const PlaybackReporter({required this.start, required this.progress, required this.stop});
+class PlaybackSessionReporter {
+  const PlaybackSessionReporter({required this.start, required this.progress, required this.stop});
   final PlaybackStart start;
   final PlaybackProgress progress;
   final PlaybackStop stop;
-
-  factory PlaybackReporter.fromRemuxClient(RemuxClient client, {PlaybackStreamInfo? streamInfo}) => PlaybackReporter(
-        start: (itemId, sessionId) => client.reportPlaybackStarted(itemId: itemId, sessionId: sessionId, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
-        progress: (itemId, _, position, duration, paused) => client.reportPlaybackProgress(itemId: itemId, position: position, duration: duration, isPaused: paused, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
-        stop: (itemId, _, position) => client.reportPlaybackStopped(itemId: itemId, position: position, playMethod: streamInfo?.playMethod ?? 'DirectPlay', mediaSourceId: streamInfo?.mediaSourceId),
-      );
 }
 
 class PlaybackSession {
-  PlaybackSession({required this.itemId, required this.sessionId, required this.reporter, this.streamInfo});
-
-  factory PlaybackSession.fromRemuxClient({required String itemId, required String sessionId, required RemuxClient client, PlaybackStreamInfo? streamInfo}) => PlaybackSession(itemId: itemId, sessionId: sessionId, reporter: PlaybackReporter.fromRemuxClient(client, streamInfo: streamInfo), streamInfo: streamInfo);
+  PlaybackSession({required this.itemId, required this.sessionId, required this.reporter});
 
   final String itemId;
   final String sessionId;
-  final PlaybackReporter reporter;
-  final PlaybackStreamInfo? streamInfo;
+  final PlaybackSessionReporter reporter;
   bool _started = false;
   bool _ended = false;
 
