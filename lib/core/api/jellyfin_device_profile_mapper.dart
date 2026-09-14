@@ -3,22 +3,39 @@ import 'package:rodplayer/core/playback/playback_environment.dart';
 class JellyfinDeviceProfileMapper {
   const JellyfinDeviceProfileMapper();
 
-  Map<String, dynamic> map(PlaybackEnvironment environment, PlaybackBackendCapabilities backend) => <String, dynamic>{
-        'Name': 'RodPlayer',
-        'MaxStreamingBitrate': environment.network.maxStreamingBitrate,
-        'MaxStaticBitrate': environment.network.maxStreamingBitrate,
-        'DirectPlayProfiles': _directPlayProfiles(backend),
-        'TranscodingProfiles': _transcodingProfiles(backend),
-        'CodecProfiles': <Map<String, dynamic>>[
-          ...backend.videoCodecRules.map(_videoCodecProfile),
-          ...backend.audioCodecRules.map(_audioCodecProfile),
-        ],
-        'SubtitleProfiles': _subtitleProfiles(backend),
-      };
+  Map<String, dynamic> map(PlaybackEnvironment environment, PlaybackBackendCapabilities backend) {
+    final profile = _effectiveProfile(environment, backend);
+    return <String, dynamic>{
+      'Name': environment.identity.clientName,
+      'MaxStreamingBitrate': profile.maxStreamingBitrate,
+      'MaxStaticBitrate': profile.maxStreamingBitrate,
+      'DirectPlayProfiles': _directPlayProfiles(backend, profile),
+      'TranscodingProfiles': _transcodingProfiles(profile),
+      'CodecProfiles': <Map<String, dynamic>>[
+        ...profile.videoCodecRules.map(_videoCodecProfile),
+        ...profile.audioCodecRules.map(_audioCodecProfile),
+      ],
+      'SubtitleProfiles': _subtitleProfiles(backend, profile),
+    };
+  }
 
-  List<Map<String, dynamic>> _directPlayProfiles(PlaybackBackendCapabilities backend) {
-    if (backend.directPlayRules.isNotEmpty) {
-      return backend.directPlayRules
+  EffectiveDeviceProfile _effectiveProfile(PlaybackEnvironment environment, PlaybackBackendCapabilities backend) {
+    for (final profile in environment.effectiveProfiles) {
+      if (profile.backendId == backend.id) return profile.deviceProfile;
+    }
+    return EffectiveDeviceProfile(
+      maxStreamingBitrate: environment.network.maxStreamingBitrate,
+      directPlayRules: backend.directPlayRules,
+      transcodingRules: backend.transcodingRules,
+      videoCodecRules: backend.videoCodecRules,
+      audioCodecRules: backend.audioCodecRules,
+      subtitleRules: backend.subtitleRules,
+    );
+  }
+
+  List<Map<String, dynamic>> _directPlayProfiles(PlaybackBackendCapabilities backend, EffectiveDeviceProfile profile) {
+    if (profile.directPlayRules.isNotEmpty) {
+      return profile.directPlayRules
           .map((rule) => <String, dynamic>{
                 'Container': rule.containers.join(','),
                 'Type': rule.type,
@@ -42,8 +59,8 @@ class JellyfinDeviceProfileMapper {
     ];
   }
 
-  List<Map<String, dynamic>> _transcodingProfiles(PlaybackBackendCapabilities backend) {
-    final rules = backend.transcodingRules;
+  List<Map<String, dynamic>> _transcodingProfiles(EffectiveDeviceProfile profile) {
+    final rules = profile.transcodingRules;
     if (rules.isEmpty) {
       return const <Map<String, dynamic>>[
         <String, dynamic>{'Container': 'ts', 'Type': 'Video', 'VideoCodec': 'h264', 'AudioCodec': 'aac,ac3,eac3', 'Protocol': 'http', 'Context': 'Streaming'},
@@ -93,9 +110,9 @@ class JellyfinDeviceProfileMapper {
         if (rule.maxFrameRate != null) <String, dynamic>{'Condition': 'LessThanEqual', 'Property': 'VideoFramerate', 'Value': '${rule.maxFrameRate}', 'IsRequired': false},
       ];
 
-  List<Map<String, dynamic>> _subtitleProfiles(PlaybackBackendCapabilities backend) {
-    if (backend.subtitleRules.isNotEmpty) {
-      return backend.subtitleRules.map((rule) => <String, dynamic>{'Format': rule.codec, 'Method': rule.deliveryMethod}).toList(growable: false);
+  List<Map<String, dynamic>> _subtitleProfiles(PlaybackBackendCapabilities backend, EffectiveDeviceProfile profile) {
+    if (profile.subtitleRules.isNotEmpty) {
+      return profile.subtitleRules.map((rule) => <String, dynamic>{'Format': rule.codec, 'Method': rule.deliveryMethod}).toList(growable: false);
     }
     return backend.subtitleCodecs.map((codec) => <String, dynamic>{'Format': codec, 'Method': 'External'}).toList(growable: false);
   }

@@ -26,14 +26,3 @@ class MediaRepository {
 
   Uri? streamUri(Map<String, dynamic> playbackInfo) => selectStream(playbackInfo).url;
 }
-
-extension on ConservativePlaybackEnvironmentProvider {
-  PlaybackBackendCapabilities loadBackend() => const PlaybackBackendCapabilities(
-        id: 'media_kit',
-        name: 'media_kit',
-        containers: <String>['mp4', 'mkv', 'mov', 'webm', 'ts', 'm2ts'],
-        videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1'],
-        audioCodecs: <String>['aac', 'ac3', 'eac3', 'flac', 'opus', 'vorbis', 'mp3'],
-        subtitleCodecs: <String>['srt', 'ass', 'ssa', 'subrip', 'webvtt', 'pgssub'],
-      );
-}

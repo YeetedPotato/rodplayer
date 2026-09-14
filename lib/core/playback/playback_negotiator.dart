@@ -11,7 +11,7 @@ class PlaybackNegotiator {
     required this.client,
     PlaybackEnvironmentProvider? environmentProvider,
     JellyfinDeviceProfileMapper? profileMapper,
-  })  : environmentProvider = environmentProvider ?? const ConservativePlaybackEnvironmentProvider(),
+  })  : environmentProvider = environmentProvider ?? ConservativePlaybackEnvironmentProvider(identity: client.identity),
         profileMapper = profileMapper ?? const JellyfinDeviceProfileMapper();
 
   final JellyfinApiClient client;
@@ -28,7 +28,7 @@ class PlaybackNegotiator {
     final response = await client.getPlaybackInfo(PlaybackInfoRequest(
       itemId: itemId,
       userId: client.userId,
-      deviceProfile: profileMapper.map(environment, backend),
+      deviceProfile: profileMapper.map(environment, backend.capabilities),
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
       maxStreamingBitrate: environment.network.maxStreamingBitrate,
@@ -38,7 +38,7 @@ class PlaybackNegotiator {
         itemId: itemId,
         playSessionId: response.playSessionId,
         source: source,
-        engineId: backend.id,
+        engineId: backend.capabilities.id,
         audioStreamIndex: audioStreamIndex,
         subtitleStreamIndex: subtitleStreamIndex,
       );
