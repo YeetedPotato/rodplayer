@@ -37,15 +37,25 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
   @override
   RodPlayerTrack? get selectedAudio {
     final selected = player.state.track.audio;
-    if (selected == null) return null;
-    return RodPlayerTrack(id: selected.id, label: _label(selected.title, selected.language), raw: selected);
+    return selected.id.isEmpty
+        ? null
+        : RodPlayerTrack(
+            id: selected.id,
+            label: _label(selected.title, selected.language),
+            raw: selected,
+          );
   }
 
   @override
   RodPlayerTrack? get selectedSubtitle {
     final selected = player.state.track.subtitle;
-    if (selected == null) return null;
-    return RodPlayerTrack(id: selected.id, label: _label(selected.title, selected.language), raw: selected);
+    return selected.id.isEmpty
+        ? null
+        : RodPlayerTrack(
+            id: selected.id,
+            label: _label(selected.title, selected.language),
+            raw: selected,
+          );
   }
 
   @override
