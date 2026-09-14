@@ -179,12 +179,12 @@ class ContextNetworkCapabilityProbe implements NetworkCapabilityProbe {
   }) async {
     if (context == null) return const PlaybackProbeUpdate<NetworkCapabilities>.unreported();
     return PlaybackProbeUpdate<NetworkCapabilities>.reported(NetworkCapabilities(
-        route: context?.route ?? NetworkRoute.unknown,
-        metering: context?.metering ?? MeteringState.unknown,
-        estimatedBandwidthBitsPerSecond: context?.estimatedBandwidthBitsPerSecond,
-        latencyMillis: context?.latencyMillis,
-        activeServerEndpointType: context?.activeServerEndpointType,
-        maxStreamingBitrate: context?.maxStreamingBitrate ?? previous?.network.maxStreamingBitrate ?? const NetworkCapabilities().maxStreamingBitrate,
+        route: context.route ?? NetworkRoute.unknown,
+        metering: context.metering ?? MeteringState.unknown,
+        estimatedBandwidthBitsPerSecond: context.estimatedBandwidthBitsPerSecond,
+        latencyMillis: context.latencyMillis,
+        activeServerEndpointType: context.activeServerEndpointType,
+        maxStreamingBitrate: context.maxStreamingBitrate ?? previous?.network.maxStreamingBitrate ?? const NetworkCapabilities().maxStreamingBitrate,
       ));
   }
 }
