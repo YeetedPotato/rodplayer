@@ -107,7 +107,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           child: Focus(
             autofocus: true,
             onKeyEvent: (_, event) {
-              if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause) unawaited(widget.engine.playOrPause());
+              if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
+                unawaited(widget.engine.playOrPause());
+                return KeyEventResult.handled;
+              }
               return KeyEventResult.ignored;
             },
             child: Scaffold(

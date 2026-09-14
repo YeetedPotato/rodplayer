@@ -34,6 +34,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.mediaPlayPause);
     await tester.pump();
     expect(engine.playing.value, isFalse);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.mediaPlayPause);
+    await tester.pump();
+    expect(engine.playing.value, isFalse);
   });
 }
 
