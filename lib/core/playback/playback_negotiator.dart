@@ -5,13 +5,14 @@ import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 
 class PlaybackNegotiator {
   PlaybackNegotiator({
     required this.client,
     PlaybackEnvironmentProvider? environmentProvider,
     JellyfinDeviceProfileMapper? profileMapper,
-  })  : environmentProvider = environmentProvider ?? ConservativePlaybackEnvironmentProvider(identity: client.identity),
+  })  : environmentProvider = environmentProvider ?? RuntimePlaybackEnvironmentProvider(identityProbe: PersistentDeviceIdentityProbe(identity: client.identity)),
         profileMapper = profileMapper ?? const JellyfinDeviceProfileMapper();
 
   final JellyfinApiClient client;

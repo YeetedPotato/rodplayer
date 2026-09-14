@@ -59,6 +59,27 @@ class PlaybackEnvironment {
   final List<PlaybackBackendDescriptor> backends;
   final List<EffectivePlaybackProfile> effectiveProfiles;
 
+  PlaybackEnvironment copyWith({
+    DeviceIdentity? identity,
+    DeviceCapabilities? device,
+    ComputeCapabilities? compute,
+    DisplayCapabilities? display,
+    AudioCapabilities? audio,
+    NetworkCapabilities? network,
+    List<PlaybackBackendDescriptor>? backends,
+    List<EffectivePlaybackProfile>? effectiveProfiles,
+  }) =>
+      PlaybackEnvironment(
+        identity: identity ?? this.identity,
+        device: device ?? this.device,
+        compute: compute ?? this.compute,
+        display: display ?? this.display,
+        audio: audio ?? this.audio,
+        network: network ?? this.network,
+        backends: backends ?? this.backends,
+        effectiveProfiles: effectiveProfiles ?? this.effectiveProfiles,
+      );
+
   PlaybackBackendDescriptor selectPreferredBackend({PlaybackBackendSelector selector = const PlaybackBackendSelector()}) => selector.select(backends);
 
   EffectivePlaybackProfile effectiveProfileFor(String backendId) => effectiveProfiles.firstWhere(
@@ -136,6 +157,7 @@ class DisplayCapabilities {
   const DisplayCapabilities({
     this.currentWidth,
     this.currentHeight,
+    this.pixelRatio,
     this.refreshRate,
     this.displayId,
     this.displayName,
@@ -147,6 +169,7 @@ class DisplayCapabilities {
 
   final int? currentWidth;
   final int? currentHeight;
+  final double? pixelRatio;
   final double? refreshRate;
   final String? displayId;
   final String? displayName;
@@ -154,6 +177,31 @@ class DisplayCapabilities {
   final CapabilitySupport outputColorCapability;
   final HdrOutputCapabilities output;
   final ToneMappingCapabilities toneMapping;
+
+  DisplayCapabilities copyWith({
+    int? currentWidth,
+    int? currentHeight,
+    double? pixelRatio,
+    double? refreshRate,
+    String? displayId,
+    String? displayName,
+    CapabilitySupport? activeHdr,
+    CapabilitySupport? outputColorCapability,
+    HdrOutputCapabilities? output,
+    ToneMappingCapabilities? toneMapping,
+  }) =>
+      DisplayCapabilities(
+        currentWidth: currentWidth ?? this.currentWidth,
+        currentHeight: currentHeight ?? this.currentHeight,
+        pixelRatio: pixelRatio ?? this.pixelRatio,
+        refreshRate: refreshRate ?? this.refreshRate,
+        displayId: displayId ?? this.displayId,
+        displayName: displayName ?? this.displayName,
+        activeHdr: activeHdr ?? this.activeHdr,
+        outputColorCapability: outputColorCapability ?? this.outputColorCapability,
+        output: output ?? this.output,
+        toneMapping: toneMapping ?? this.toneMapping,
+      );
 }
 
 class HdrOutputCapabilities {
