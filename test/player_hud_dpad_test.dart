@@ -64,8 +64,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     expect(Focus.of(tester.element(slider)).hasFocus, isTrue);
-    Focus.of(tester.element(play)).requestFocus();
+    FocusTraversalGroup.of(tester.element(slider)).next(tester.element(slider));
     await tester.pump();
+    expect(Focus.of(tester.element(play)).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(engine.playing.value, isFalse);
