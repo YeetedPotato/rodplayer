@@ -23,10 +23,9 @@ class ServerConnectionException implements Exception {
 class JellyfinApiClient {
   JellyfinApiClient({
     required String baseUrl,
-    required InstallationIdentity identity,
+    required this.identity,
     http.Client? client,
   })  : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
-        identity = identity,
         _client = client ?? http.Client();
 
   final String baseUrl;

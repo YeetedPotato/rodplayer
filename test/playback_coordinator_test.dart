@@ -49,8 +49,16 @@ void main() {
   });
 
   test('stall flows through the recovery controller to recovered state', () async {
+    await recovery.dispose();
+    recovery = PlaybackRecoveryController(maxRetries: 1, sleep: (_) async {});
     final states = <RecoveryState>[];
-    final c = coordinator();
+    final c = PlaybackCoordinator(
+      stallDetector: detector,
+      recoveryController: recovery,
+      tokenProvider: StreamTokenProvider(refreshToken: () async => 'token'),
+      retryCurrent: () async => false,
+      fallback: () async => const PlaybackDecision(method: PlayMethod.transcode, reason: 'fallback'),
+    );
     final subscription = recovery.states.listen(states.add);
     c.attach();
     detector.update(position: Duration.zero, isPlaying: true);

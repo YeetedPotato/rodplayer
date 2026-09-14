@@ -128,18 +128,23 @@ class _MediaBarState extends State<MediaBar> {
                               tooltip: _volume == 0 ? 'Unmute' : 'Mute',
                               icon: _volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                               onPressed: _toggleMute,
+                              autofocus: true,
+                              order: 1,
                             ),
                             SizedBox(
                               width: 150,
-                              child: Slider(
-                                min: 0,
-                                max: maximum,
-                                value: value,
-                                onChanged: duration == Duration.zero
-                                    ? null
-                                    : (next) => _engine.seek(
-                                          Duration(milliseconds: next.round()),
-                                        ),
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(2),
+                                child: Slider(
+                                  min: 0,
+                                  max: maximum,
+                                  value: value,
+                                  onChanged: duration == Duration.zero
+                                      ? null
+                                      : (next) => _engine.seek(
+                                            Duration(milliseconds: next.round()),
+                                          ),
+                                ),
                               ),
                             ),
                             _ControlButton(
@@ -148,12 +153,14 @@ class _MediaBarState extends State<MediaBar> {
                                   ? Icons.hourglass_top_rounded
                                   : (isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
                               onPressed: _engine.playOrPause,
+                              order: 3,
                             ),
                             const SizedBox(width: 6),
                             _ControlButton(
                               tooltip: 'Settings',
                               icon: Icons.tune_rounded,
                               onPressed: _openSettings,
+                              order: 4,
                             ),
                           ],
                         ),
@@ -175,21 +182,29 @@ class _ControlButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    required this.order,
+    this.autofocus = false,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback onPressed;
+  final double order;
+  final bool autofocus;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-        width: 36,
-        height: 36,
-        child: IconButton(
-          padding: EdgeInsets.zero,
-          tooltip: tooltip,
-          onPressed: onPressed,
-          icon: Icon(icon, size: 20),
+  Widget build(BuildContext context) => FocusTraversalOrder(
+        order: NumericFocusOrder(order),
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: IconButton(
+            autofocus: autofocus,
+            padding: EdgeInsets.zero,
+            tooltip: tooltip,
+            onPressed: onPressed,
+            icon: Icon(icon, size: 20),
+          ),
         ),
       );
 }

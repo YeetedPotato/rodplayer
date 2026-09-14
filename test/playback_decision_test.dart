@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/playback_decision.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 

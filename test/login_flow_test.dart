@@ -14,7 +14,10 @@ void main() {
 }
 
 class _NoopStore implements CredentialStore {
+  @override
   Future<void> writeToken(String key, String token) async {}
+  @override
   Future<String?> readToken(String key) async => null;
+  @override
   Future<void> deleteToken(String key) async {}
 }

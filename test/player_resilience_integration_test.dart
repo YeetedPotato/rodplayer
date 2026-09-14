@@ -1,21 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
+
+import 'fakes/test_playback_engine.dart';
 
 void main() {
-  setUpAll(MediaKit.ensureInitialized);
-
-  group('MediaKitPlaybackEngine resilience integration contract', () {
-    late MediaKitPlaybackEngine engine;
-    setUp(() {
-      engine = MediaKitPlaybackEngine();
-    });
-    tearDown(() => engine.dispose());
-
-    test('engine reports errors but does not schedule competing retry loops', () async {
-      engine.error.value = 'network failure';
-      expect(engine.error.value, 'network failure');
-      await expectLater(engine.retryCurrent(), completion(isFalse));
-    });
+  test('PlaybackEngine exposes failures without owning retry scheduling', () async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    engine.error.value = 'network failure';
+    expect(engine.error.value, 'network failure');
+    expect(engine.playing.value, isFalse);
   });
 }

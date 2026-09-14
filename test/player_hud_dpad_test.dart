@@ -30,7 +30,7 @@ void main() {
 
   testWidgets('traverses volume, seek, play, and settings controls', (tester) async {
     await tester.pumpWidget(harness());
-    await tester.pump();
+    await tester.pumpAndSettle();
     final volume = find.byTooltip('Mute');
     final seek = find.byType(Slider);
     final play = find.byTooltip('Play');
@@ -40,13 +40,13 @@ void main() {
     expect(play, findsOneWidget);
     expect(settings, findsOneWidget);
     Focus.of(tester.element(volume)).requestFocus();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(Focus.of(tester.element(volume)).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(Focus.of(tester.element(seek)).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(Focus.of(tester.element(play)).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -92,8 +92,6 @@ void main() {
     await tester.pumpWidget(harness());
     await tester.pump();
     final volume = find.byTooltip('Mute');
-    Focus.of(tester.element(volume)).requestFocus();
-    await tester.pump();
     expect(Focus.of(tester.element(volume)).hasFocus, isTrue);
     expect(find.bySemanticsLabel('Media controls'), findsOneWidget);
   });

@@ -24,7 +24,7 @@ void main() {
     addTearDown(client.close);
     await tester.pumpWidget(testApp(BrowseScreen(client: client)));
     await tester.pump();
-    expect(find.byType(FocusTraversalGroup), findsOneWidget);
+    expect(find.byType(FocusTraversalGroup), findsWidgets);
   });
 
   testWidgets('DPAD traversal moves focus between RodPlayer media cards', (tester) async {

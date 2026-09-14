@@ -71,6 +71,7 @@ class TestPlaybackEngine implements PlaybackEngine {
 
   @override
   Future<void> dispose() async {
+    if (disposed) return;
     disposed = true;
     error.dispose();
     playing.dispose();
