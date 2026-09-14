@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
@@ -106,6 +108,21 @@ abstract interface class PlaybackBackendProbe {
     PlaybackEnvironment? previous,
     required PlaybackEnvironmentRefreshReason reason,
   });
+}
+
+abstract interface class PlaybackEnvironmentEventSource {
+  Stream<PlaybackEnvironmentRefreshReason> get refreshReasons;
+  Future<void> dispose();
+}
+
+class EmptyPlaybackEnvironmentEventSource implements PlaybackEnvironmentEventSource {
+  const EmptyPlaybackEnvironmentEventSource();
+
+  @override
+  Stream<PlaybackEnvironmentRefreshReason> get refreshReasons => const Stream<PlaybackEnvironmentRefreshReason>.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class PersistentDeviceIdentityProbe implements DeviceIdentityProbe {
@@ -339,6 +356,9 @@ class PlaybackEnvironmentController {
   final RuntimePlaybackEnvironmentProvider provider;
   final ValueNotifier<PlaybackEnvironment> environment;
   PlaybackEnvironmentRefreshReason lastRefreshReason;
+  StreamSubscription<PlaybackEnvironmentRefreshReason>? _eventSubscription;
+  Future<void>? _refreshInFlight;
+  PlaybackEnvironmentRefreshReason? _pendingRefreshReason;
 
   PlaybackEnvironment get current => environment.value;
 
@@ -350,11 +370,31 @@ class PlaybackEnvironmentController {
   }
 
   Future<void> refresh(PlaybackEnvironmentRefreshReason reason) async {
+    if (_refreshInFlight != null) {
+      _pendingRefreshReason = reason;
+      await _refreshInFlight;
+      return;
+    }
     lastRefreshReason = reason;
-    environment.value = await provider.refresh(reason);
+    _refreshInFlight = provider.refresh(reason).then((value) {
+      environment.value = value;
+    });
+    await _refreshInFlight;
+    _refreshInFlight = null;
+    final pending = _pendingRefreshReason;
+    _pendingRefreshReason = null;
+    if (pending != null) await refresh(pending);
+  }
+
+  void attachEventSource(PlaybackEnvironmentEventSource source) {
+    _eventSubscription?.cancel();
+    _eventSubscription = source.refreshReasons.listen((reason) {
+      unawaited(refresh(reason));
+    });
   }
 
   void dispose() {
+    _eventSubscription?.cancel();
     environment.dispose();
   }
 }

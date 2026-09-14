@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
@@ -165,6 +167,41 @@ void main() {
     expect(snapshots, hasLength(1));
     expect(snapshots.single.display.currentWidth, 101);
     expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.displayChanged);
+    controller.dispose();
+  });
+
+  test('event source refreshes with mapped reason', () async {
+    final source = _TestEventSource();
+    final controller = await PlaybackEnvironmentController.create(
+      provider: RuntimePlaybackEnvironmentProvider(identityProbe: const _IdentityProbe('device-1')),
+    );
+    controller.attachEventSource(source);
+
+    source.add(PlaybackEnvironmentRefreshReason.resume);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.resume);
+    await source.dispose();
+    controller.dispose();
+  });
+
+  test('overlapping refreshes are serialized with the latest pending reason', () async {
+    final provider = _SlowRuntimeProvider();
+    final controller = await PlaybackEnvironmentController.create(provider: provider);
+
+    final first = controller.refresh(PlaybackEnvironmentRefreshReason.displayChanged);
+    final second = controller.refresh(PlaybackEnvironmentRefreshReason.audioRouteChanged);
+    provider.completeOne();
+    await Future<void>.delayed(Duration.zero);
+    provider.completeOne();
+    await Future.wait(<Future<void>>[first, second]);
+
+    expect(provider.reasons, <PlaybackEnvironmentRefreshReason>[
+      PlaybackEnvironmentRefreshReason.initialLoad,
+      PlaybackEnvironmentRefreshReason.displayChanged,
+      PlaybackEnvironmentRefreshReason.audioRouteChanged,
+    ]);
+    expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.audioRouteChanged);
     controller.dispose();
   });
 
@@ -396,6 +433,40 @@ class _RecordingResolver implements EffectivePlaybackProfileResolver {
         subtitleRules: <SubtitleCapabilityRule>[],
       ),
     );
+  }
+}
+
+class _TestEventSource implements PlaybackEnvironmentEventSource {
+  final _controller = StreamController<PlaybackEnvironmentRefreshReason>.broadcast();
+
+  void add(PlaybackEnvironmentRefreshReason reason) => _controller.add(reason);
+
+  @override
+  Stream<PlaybackEnvironmentRefreshReason> get refreshReasons => _controller.stream;
+
+  @override
+  Future<void> dispose() => _controller.close();
+}
+
+class _SlowRuntimeProvider extends RuntimePlaybackEnvironmentProvider {
+  _SlowRuntimeProvider() : super(identityProbe: const _IdentityProbe('device-1'));
+
+  final reasons = <PlaybackEnvironmentRefreshReason>[];
+  final _completers = <Completer<void>>[];
+
+  @override
+  Future<PlaybackEnvironment> refresh(PlaybackEnvironmentRefreshReason reason) async {
+    reasons.add(reason);
+    if (reason != PlaybackEnvironmentRefreshReason.initialLoad) {
+      final completer = Completer<void>();
+      _completers.add(completer);
+      await completer.future;
+    }
+    return super.refresh(reason);
+  }
+
+  void completeOne() {
+    _completers.removeAt(0).complete();
   }
 }
 
