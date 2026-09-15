@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({required this.client, super.key});
+  const SearchScreen({required this.client, this.embedded = false, this.focusNode, this.autofocus = true, super.key});
   final JellyfinApiClient client;
+  final bool embedded;
+  final FocusNode? focusNode;
+  final bool autofocus;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -16,9 +20,10 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  late final FocusNode _focusNode;
+  bool get _ownsFocusNode => widget.focusNode == null;
   Timer? _debounce;
-  List<dynamic> _results = const [];
+  List<JellyfinSearchHint> _results = const [];
   List<String> _recent = const [];
   String _query = '';
   Object? _error;
@@ -27,6 +32,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    _focusNode = widget.focusNode ?? FocusNode();
     _loadRecent();
   }
 
@@ -65,36 +71,19 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) setState(() => _recent = updated);
   }
 
-  String _title(dynamic item) => item is Map<String, dynamic> && item['Name'] is String ? item['Name'] as String : 'Untitled';
-  String _subtitle(dynamic item) {
-    if (item is! Map<String, dynamic>) return 'Media';
-    final year = item['ProductionYear'];
-    final type = item['Type'] is String ? item['Type'] as String : 'Media';
-    return year is int ? '$year · $type' : type;
-  }
-  String? _image(dynamic item) {
-    if (item is! Map<String, dynamic>) return null;
-    final id = item['Id'];
-    final tags = item['ImageTags'];
-    final tag = tags is Map<String, dynamic> ? tags['Primary'] : null;
-    if (id is! String || tag is! String) return null;
-    return '${widget.client.baseUrl}/Items/$id/Images/Primary?tag=$tag&quality=90';
-  }
+  String _title(JellyfinSearchHint item) => item.title.isEmpty ? 'Untitled' : item.title;
 
   @override
-  void dispose() { _debounce?.cancel(); _controller.dispose(); _focusNode.dispose(); super.dispose(); }
+  void dispose() { _debounce?.cancel(); _controller.dispose(); if (_ownsFocusNode) _focusNode.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final width = MediaQuery.sizeOf(context).width;
     final columns = width >= 1200 ? 6 : width >= 850 ? 4 : width >= 560 ? 3 : 2;
-    return Scaffold(
-      backgroundColor: theme.obsidian,
-      appBar: AppBar(title: const Text('Search'), centerTitle: false),
-      body: CustomScrollView(slivers: [
+    final content = CustomScrollView(key: const PageStorageKey<String>('search-scroll'), slivers: [
         SliverPadding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 12), sliver: SliverToBoxAdapter(child: TextField(
-          controller: _controller, focusNode: _focusNode, autofocus: true, textInputAction: TextInputAction.search,
+          controller: _controller, focusNode: _focusNode, autofocus: widget.autofocus, textInputAction: TextInputAction.search,
           onChanged: _onChanged, onSubmitted: (value) { _debounce?.cancel(); if (value.trim().isNotEmpty) _search(value.trim()); },
           decoration: InputDecoration(hintText: 'Search movies, shows, and music...', prefixIcon: const Icon(Icons.search), suffixIcon: _controller.text.isEmpty ? null : IconButton(icon: const Icon(Icons.clear), onPressed: () { _controller.clear(); _onChanged(''); setState(() {}); })),
         ))),
@@ -102,12 +91,13 @@ class _SearchScreenState extends State<SearchScreen> {
         else if (_error != null) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.cloud_off_outlined, title: 'Search unavailable', detail: 'Check your RodPlayer connection and try again.'))
         else if (_query.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _RecentSearches(items: _recent, onSelect: (value) { _controller.text = value; _search(value); }))
         else if (_results.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.search_off, title: 'No results', detail: 'Try a different title, artist, or keyword.'))
-        else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: _subtitle(item), imageUrl: _image(item), onTap: () => _showDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),
-      ]),
-    );
+        else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), onTap: () => _showDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),
+      ]);
+    if (widget.embedded) return ColoredBox(color: theme.obsidian, child: content);
+    return Scaffold(backgroundColor: theme.obsidian, appBar: AppBar(title: const Text('Search'), centerTitle: false), body: content);
   }
 
-  void _showDetails(dynamic item) { final id = item is Map<String, dynamic> && item['Id'] is String ? item['Id'] as String : null; showModalBottomSheet<void>(context: context, builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(_subtitle(item)), const SizedBox(height: 20), FilledButton.icon(onPressed: id == null ? null : () => Navigator.pop(context), icon: const Icon(Icons.play_arrow), label: const Text('Play'))])))); }
+  void _showDetails(JellyfinSearchHint item) { final id = item.id.isEmpty ? null : item.id; showModalBottomSheet<void>(context: context, builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(item.subtitle()), const SizedBox(height: 20), FilledButton.icon(onPressed: id == null ? null : () => Navigator.pop(context), icon: const Icon(Icons.play_arrow), label: const Text('Play'))])))); }
 }
 
 class _Message extends StatelessWidget { const _Message({required this.icon, required this.title, required this.detail}); final IconData icon; final String title, detail; @override Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: Colors.white38), const SizedBox(height: 16), Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(detail, style: const TextStyle(color: Colors.white60))])); }
