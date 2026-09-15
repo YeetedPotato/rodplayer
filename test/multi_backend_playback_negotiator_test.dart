@@ -49,26 +49,26 @@ void main() {
 
   test('video-copy audio-transcode beats video transcode', () {
     final scorer = const PlaybackPlanScorer();
-    final backend = _backend('media_kit');
+    final profile = _profile(_backend('media_kit'));
 
-    final copyVideo = scorer.score(_plan('a', PlayMethod.transcode, videoCopied: true, audioCopied: false), backend);
-    final videoTranscode = scorer.score(_plan('b', PlayMethod.transcode, videoCopied: false, audioCopied: true), backend);
+    final copyVideo = scorer.score(_plan('a', PlayMethod.transcode, videoCopied: true, audioCopied: false), profile);
+    final videoTranscode = scorer.score(_plan('b', PlayMethod.transcode, videoCopied: false, audioCopied: true), profile);
 
     expect(copyVideo.total, greaterThan(videoTranscode.total));
   });
 
   test('subtitle external/native beats burn-in', () {
     final scorer = const PlaybackPlanScorer();
-    final backend = _backend('media_kit');
+    final profile = _profile(_backend('media_kit'));
 
-    expect(scorer.score(_plan('external', PlayMethod.directPlay, subtitle: SubtitleOperation.external), backend).total, greaterThan(scorer.score(_plan('burn', PlayMethod.directPlay, subtitle: SubtitleOperation.burnIn), backend).total));
+    expect(scorer.score(_plan('external', PlayMethod.directPlay, subtitle: SubtitleOperation.external), profile).total, greaterThan(scorer.score(_plan('burn', PlayMethod.directPlay, subtitle: SubtitleOperation.burnIn), profile).total));
   });
 
   test('HDR-preserving plan beats HDR to SDR', () {
     final scorer = const PlaybackPlanScorer();
-    final backend = _backend('media_kit');
+    final profile = _profile(_backend('media_kit'));
 
-    expect(scorer.score(_plan('hdr', PlayMethod.directPlay, hdr: HdrHandling.preserve), backend).total, greaterThan(scorer.score(_plan('sdr', PlayMethod.directPlay, hdr: HdrHandling.toneMapToSdr), backend).total));
+    expect(scorer.score(_plan('hdr', PlayMethod.directPlay, hdr: HdrHandling.preserve), profile).total, greaterThan(scorer.score(_plan('sdr', PlayMethod.directPlay, hdr: HdrHandling.toneMapToSdr), profile).total));
   });
 
   test('deterministic ties use backend id then source id', () async {
@@ -135,9 +135,68 @@ void main() {
   });
 
   test('unknown capability does not get treated as supported', () {
-    final score = const PlaybackPlanScorer().score(_plan('direct', PlayMethod.directPlay), _backend('unknown', hardwareDecode: CapabilitySupport.unknown));
+    final score = const PlaybackPlanScorer().score(_plan('direct', PlayMethod.directPlay), _profile(_backend('unknown', hardwareDecode: CapabilitySupport.unknown)));
 
     expect(score.components['hardwareDecode'], 0);
+  });
+
+  test('effective profile controls hardware and passthrough scoring', () {
+    final rawSupported = _backend('raw', hardwareDecode: CapabilitySupport.supported, passthrough: CapabilitySupport.supported);
+    final effectiveUnknown = _profile(_backend('raw', hardwareDecode: CapabilitySupport.unknown, passthrough: CapabilitySupport.unsupported));
+    final score = const PlaybackPlanScorer().score(_plan('direct', PlayMethod.directPlay), effectiveUnknown);
+
+    expect(rawSupported.capabilities.hardwareDecode, CapabilitySupport.supported);
+    expect(score.components['hardwareDecode'], 0);
+    expect(score.components['audioPreservation'], 0);
+  });
+
+  test('direct play beats video-copy audio-transcode', () {
+    final scorer = const PlaybackPlanScorer();
+    final profile = _profile(_backend('media_kit'));
+
+    expect(scorer.score(_plan('direct', PlayMethod.directPlay), profile).total, greaterThan(scorer.score(_plan('copy-audio-transcode', PlayMethod.transcode, videoCopied: true, audioCopied: false), profile).total));
+  });
+
+  test('video-copy audio-transcode beats container-only direct stream', () {
+    final scorer = const PlaybackPlanScorer();
+    final profile = _profile(_backend('media_kit'));
+
+    expect(scorer.score(_plan('copy-audio-transcode', PlayMethod.transcode, videoCopied: true, audioCopied: false), profile).total, greaterThan(scorer.score(_plan('container-stream', PlayMethod.directStream), profile).total));
+  });
+
+  test('container-only direct stream beats video transcode', () {
+    final scorer = const PlaybackPlanScorer();
+    final profile = _profile(_backend('media_kit'));
+
+    expect(scorer.score(_plan('container-stream', PlayMethod.directStream), profile).total, greaterThan(scorer.score(_plan('video-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: true), profile).total));
+  });
+
+  test('video-transcode audio-copy beats full transcode', () {
+    final scorer = const PlaybackPlanScorer();
+    final profile = _profile(_backend('media_kit'));
+
+    expect(scorer.score(_plan('video-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: true), profile).total, greaterThan(scorer.score(_plan('full-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: false), profile).total));
+  });
+
+  test('fallback prefers direct play support over transcode URL', () async {
+    final decision = await _negotiate(_Requester(<String, PlaybackInfoResponse>{
+      'media_kit': PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[
+        _sourceWithFlags('flags', supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true, transcodingUrl: '/server-built/flags.m3u8'),
+      ], raw: const <String, dynamic>{}),
+    }));
+
+    expect(decision.plan.playMethod, PlayMethod.directPlay);
+  });
+
+  test('fallback prefers direct stream support before transcode URL', () async {
+    final decision = await _negotiate(_Requester(<String, PlaybackInfoResponse>{
+      'media_kit': PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[
+        _sourceWithFlags('flags', supportsDirectPlay: false, supportsDirectStream: true, supportsTranscoding: true, directStreamUrl: '/Videos/flags/stream.mkv', transcodingUrl: '/server-built/flags.m3u8'),
+      ], raw: const <String, dynamic>{}),
+    }));
+
+    expect(decision.plan.playMethod, PlayMethod.directStream);
+    expect(decision.plan.playbackUri.path, '/Videos/flags/stream.mkv');
   });
 }
 
@@ -156,14 +215,7 @@ PlaybackEnvironment _environment(List<PlaybackBackendDescriptor> backends) {
       EffectivePlaybackProfile(
         backendId: backend.id,
         capabilities: backend.capabilities,
-        deviceProfile: const EffectiveDeviceProfile(
-          maxStreamingBitrate: 120000000,
-          directPlayRules: <DirectPlayCapabilityRule>[],
-          transcodingRules: <TranscodingCapabilityRule>[],
-          videoCodecRules: <VideoCodecCapabilityRule>[],
-          audioCodecRules: <AudioCodecCapabilityRule>[],
-          subtitleRules: <SubtitleCapabilityRule>[],
-        ),
+        deviceProfile: _deviceProfile(),
       ),
   ];
   return PlaybackEnvironment(
@@ -178,12 +230,23 @@ PlaybackEnvironment _environment(List<PlaybackBackendDescriptor> backends) {
   );
 }
 
-PlaybackBackendDescriptor _backend(String id, {BackendAvailability availability = BackendAvailability.available, int priority = 0, CapabilitySupport hardwareDecode = CapabilitySupport.unknown}) => PlaybackBackendDescriptor(
+PlaybackBackendDescriptor _backend(String id, {BackendAvailability availability = BackendAvailability.available, int priority = 0, CapabilitySupport hardwareDecode = CapabilitySupport.unknown, CapabilitySupport passthrough = CapabilitySupport.unknown}) => PlaybackBackendDescriptor(
       id: id,
       displayName: id,
       availability: availability,
       priority: priority,
-      capabilities: PlaybackBackendCapabilities(id: id, name: id, hardwareDecode: hardwareDecode),
+      capabilities: PlaybackBackendCapabilities(id: id, name: id, hardwareDecode: hardwareDecode, passthrough: passthrough),
+    );
+
+EffectivePlaybackProfile _profile(PlaybackBackendDescriptor backend) => EffectivePlaybackProfile(backendId: backend.id, capabilities: backend.capabilities, deviceProfile: _deviceProfile());
+
+EffectiveDeviceProfile _deviceProfile() => const EffectiveDeviceProfile(
+      maxStreamingBitrate: 120000000,
+      directPlayRules: <DirectPlayCapabilityRule>[],
+      transcodingRules: <TranscodingCapabilityRule>[],
+      videoCodecRules: <VideoCodecCapabilityRule>[],
+      audioCodecRules: <AudioCodecCapabilityRule>[],
+      subtitleRules: <SubtitleCapabilityRule>[],
     );
 
 PlaybackInfoResponse _response(String sourceId, PlayMethod method) => PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[_source(sourceId, method)], playSessionId: 'play-$sourceId', raw: const <String, dynamic>{});
@@ -195,6 +258,27 @@ MediaSourceInfo _source(String id, PlayMethod method) => MediaSourceInfo.fromJso
       if (method == PlayMethod.transcode) 'TranscodingUrl': '/server-built/$id.m3u8',
       if (method == PlayMethod.transcode) 'VideoStreamCopy': id.contains('copy'),
       if (method == PlayMethod.transcode) 'AudioStreamCopy': id.contains('audio-copy'),
+      'MediaStreams': <Map<String, dynamic>>[
+        <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': 'h264'},
+        <String, dynamic>{'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},
+      ],
+    });
+
+MediaSourceInfo _sourceWithFlags(
+  String id, {
+  required bool supportsDirectPlay,
+  required bool supportsDirectStream,
+  required bool supportsTranscoding,
+  String? directStreamUrl,
+  String? transcodingUrl,
+}) =>
+    MediaSourceInfo.fromJson(<String, dynamic>{
+      'Id': id,
+      'SupportsDirectPlay': supportsDirectPlay,
+      'SupportsDirectStream': supportsDirectStream,
+      'SupportsTranscoding': supportsTranscoding,
+      if (directStreamUrl != null) 'DirectStreamUrl': directStreamUrl,
+      if (transcodingUrl != null) 'TranscodingUrl': transcodingUrl,
       'MediaStreams': <Map<String, dynamic>>[
         <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': 'h264'},
         <String, dynamic>{'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},

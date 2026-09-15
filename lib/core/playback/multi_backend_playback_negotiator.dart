@@ -90,22 +90,22 @@ class PlaybackPlanDecision {
 class PlaybackPlanScorer {
   const PlaybackPlanScorer();
 
-  PlaybackPlanScore score(PlaybackPlan plan, PlaybackBackendDescriptor backend) {
+  PlaybackPlanScore score(PlaybackPlan plan, EffectivePlaybackProfile effectiveProfile) {
     final c = <String, int>{};
     c['delivery'] = switch (plan.deliveryMode ?? _deliveryMode(plan.playMethod)) {
       PlaybackDeliveryMode.directPlay => 1000,
-      PlaybackDeliveryMode.directStream => 800,
+      PlaybackDeliveryMode.directStream => 620,
       PlaybackDeliveryMode.transcode => 500,
     };
     c['video'] = switch (plan.videoOperation) {
-      VideoOperation.copy => 200,
-      VideoOperation.transcode => -300,
+      VideoOperation.copy => 300,
+      VideoOperation.transcode => -220,
       VideoOperation.none => 0,
       VideoOperation.unknown => 0,
     };
     c['audio'] = switch (plan.audioOperation) {
-      AudioOperation.copy => 100,
-      AudioOperation.transcode => -80,
+      AudioOperation.copy => 120,
+      AudioOperation.transcode => -70,
       AudioOperation.none => 0,
       AudioOperation.unknown => 0,
     };
@@ -123,12 +123,12 @@ class PlaybackPlanScorer {
       HdrHandling.unknown => 0,
     };
     c['container'] = plan.containerChanged ? -30 : 0;
-    c['hardwareDecode'] = switch (backend.capabilities.hardwareDecode) {
+    c['hardwareDecode'] = switch (effectiveProfile.capabilities.hardwareDecode) {
       CapabilitySupport.supported => 20,
       CapabilitySupport.unsupported => -20,
       CapabilitySupport.unknown => 0,
     };
-    c['audioPreservation'] = backend.capabilities.passthrough == CapabilitySupport.supported ? 20 : 0;
+    c['audioPreservation'] = effectiveProfile.capabilities.passthrough == CapabilitySupport.supported ? 20 : 0;
     return PlaybackPlanScore(total: c.values.fold<int>(0, (sum, value) => sum + value), components: Map<String, int>.unmodifiable(c));
   }
 }
@@ -230,7 +230,7 @@ class MultiBackendPlaybackNegotiator {
         response: response,
         source: source,
         plan: plan,
-        score: plan == null ? null : scorer.score(plan, backend),
+        score: plan == null ? null : scorer.score(plan, profile),
         rejectionReason: plan == null ? 'Server response had no authoritative playback URL' : null,
       ));
     }
@@ -291,8 +291,11 @@ class MultiBackendPlaybackNegotiator {
   }
 
   PlayMethod _methodFromSource(MediaSourceInfo source) {
+    if (source.supportsDirectPlay == true) return PlayMethod.directPlay;
+    if (source.supportsDirectStream == true) return PlayMethod.directStream;
+    if (source.supportsTranscoding == true) return PlayMethod.transcode;
+    if (source.directStreamUrl != null && source.directStreamUrl!.isNotEmpty) return PlayMethod.directStream;
     if (source.transcodingUrl != null && source.transcodingUrl!.isNotEmpty) return PlayMethod.transcode;
-    if (source.supportsDirectStream == true || source.directStreamUrl != null) return PlayMethod.directStream;
     return PlayMethod.directPlay;
   }
 }
