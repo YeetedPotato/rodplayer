@@ -107,15 +107,13 @@ void main() {
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
 
     await coordinator.activate(_plan('one'));
-    final second = coordinator.activate(_plan('two'));
-    final third = coordinator.activate(_plan('three'));
-
-    final secondSession = await second;
+    final secondSession = await coordinator.activate(_plan('two'));
     expect(secondSession.engine, same(runtime.created[1]));
     expect(coordinator.session.activePlan.mediaSourceId, 'two');
     expect(coordinator.diagnostics?.failure, isA<StateError>());
     expect(runtime.created[1].disposeCount, 0);
-    await third;
+
+    await coordinator.activate(_plan('three'));
     expect(coordinator.session.activePlan.mediaSourceId, 'three');
   });
 

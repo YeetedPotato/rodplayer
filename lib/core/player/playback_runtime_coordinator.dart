@@ -105,7 +105,11 @@ class PlaybackRuntimeCoordinator {
     try {
       session.activatePlan(plan);
     } on Object catch (error) {
-      await next.dispose();
+      try {
+        await next.dispose();
+      } on Object {
+        // Best-effort cleanup; the activation failure remains authoritative.
+      }
       request.completeError(error);
       return;
     }
