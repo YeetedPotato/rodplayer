@@ -25,22 +25,22 @@ class PlayerRoute extends StatefulWidget {
 }
 
 class _PlayerRouteState extends State<PlayerRoute> {
-  late final AppleNativePlaybackRuntime _appleNativeRuntime = AppleNativePlaybackRuntime();
-  late final PlaybackRuntimeRegistry _runtimeRegistry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime(), _appleNativeRuntime]);
   late final Future<_PreparedPlayback> _prepared = _prepare();
   PlaybackRuntimeCoordinator? _coordinator;
 
   Future<_PreparedPlayback> _prepare() async {
+    final appleNativeRuntime = await AppleNativePlaybackRuntime.create();
+    final runtimeRegistry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime(), appleNativeRuntime]);
     final plan = await PlaybackNegotiator(
       client: widget.client,
       environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
         identity: widget.client.identity,
-        playbackBackendRegistry: PlaybackBackendRegistry(appleNativeAvailable: _appleNativeRuntime.isAvailable),
+        playbackBackendRegistry: PlaybackBackendRegistry(appleNativeAvailable: appleNativeRuntime.isAvailable),
       ),
-      runtimeRegistry: _runtimeRegistry,
+      runtimeRegistry: runtimeRegistry,
     ).negotiate(itemId: widget.itemId);
     final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
-    final coordinator = PlaybackRuntimeCoordinator(registry: _runtimeRegistry, session: logicalSession);
+    final coordinator = PlaybackRuntimeCoordinator(registry: runtimeRegistry, session: logicalSession);
     _coordinator = coordinator;
     final runtimeSession = await coordinator.activate(plan);
     return _PreparedPlayback(plan: plan, session: logicalSession, runtimeSession: runtimeSession);

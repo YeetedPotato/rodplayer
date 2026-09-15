@@ -69,7 +69,7 @@ class PlaybackBackendRegistry {
     containers: <String>['mp4', 'mov', 'm4v', 'm3u8'],
     videoCodecs: <String>['h264', 'hevc'],
     audioCodecs: <String>['aac', 'ac3', 'eac3', 'mp3'],
-    subtitleCodecs: <String>['srt', 'webvtt'],
+    subtitleCodecs: <String>[],
     hardwareDecode: CapabilitySupport.unknown,
     softwareDecode: CapabilitySupport.unknown,
     passthrough: CapabilitySupport.unknown,
@@ -89,10 +89,7 @@ class PlaybackBackendRegistry {
       AudioCodecCapabilityRule(codec: 'eac3'),
       AudioCodecCapabilityRule(codec: 'mp3'),
     ],
-    subtitleRules: <SubtitleCapabilityRule>[
-      SubtitleCapabilityRule(codec: 'srt', deliveryMethod: 'External'),
-      SubtitleCapabilityRule(codec: 'webvtt', deliveryMethod: 'External'),
-    ],
+    subtitleRules: <SubtitleCapabilityRule>[],
     transcodingRules: <TranscodingCapabilityRule>[
       TranscodingCapabilityRule(type: 'Video', container: 'm3u8', videoCodec: 'h264', audioCodec: 'aac,ac3,eac3', protocol: 'hls', context: 'Streaming'),
       TranscodingCapabilityRule(type: 'Audio', container: 'mp3', audioCodec: 'mp3', protocol: 'http', context: 'Streaming'),

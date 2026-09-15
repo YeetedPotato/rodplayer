@@ -16,6 +16,7 @@ import VideoToolbox
     FlutterMethodChannel(name: "rodplayer/playback_capabilities", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler { call, result in
         switch call.method {
+        case "ping": result(true)
         case "probeCompute": result(self.probeCompute())
         case "probeDisplay": result(self.probeDisplay())
         case "probeAudio": result(self.probeAudio())
@@ -101,6 +102,8 @@ private final class ApplePlaybackManager: NSObject, FlutterStreamHandler {
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "ping":
+      result(true)
     case "create":
       guard let args = call.arguments as? [String: Any], let text = args["url"] as? String, let url = URL(string: text) else {
         result(FlutterError(code: "bad_url", message: "Missing playback URL", details: nil))

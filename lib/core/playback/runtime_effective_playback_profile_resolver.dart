@@ -1,4 +1,21 @@
 import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/playback_backend_registry.dart';
+
+class CompositeEffectivePlaybackProfileResolver implements EffectivePlaybackProfileResolver {
+  const CompositeEffectivePlaybackProfileResolver({
+    this.legacyResolver = const LegacyConservativePlaybackProfileResolver(),
+    this.runtimeResolver = const RuntimeEffectivePlaybackProfileResolver(),
+  });
+
+  final EffectivePlaybackProfileResolver legacyResolver;
+  final EffectivePlaybackProfileResolver runtimeResolver;
+
+  @override
+  EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend) {
+    if (backend.id == PlaybackBackendIds.appleNative) return runtimeResolver.resolve(environment, backend);
+    return legacyResolver.resolve(environment, backend);
+  }
+}
 
 class RuntimeCapabilityIntersection {
   const RuntimeCapabilityIntersection._();
@@ -34,7 +51,7 @@ class RuntimeEffectivePlaybackProfileResolver implements EffectivePlaybackProfil
       capabilities: backend.capabilities,
       deviceProfile: EffectiveDeviceProfile(
         maxStreamingBitrate: environment.network.maxStreamingBitrate,
-        directPlayRules: const <DirectPlayCapabilityRule>[],
+        directPlayRules: _directPlayRules(environment, backend.capabilities),
         transcodingRules: backend.capabilities.transcodingRules,
         videoCodecRules: videoRules,
         audioCodecRules: audioRules,
@@ -42,6 +59,28 @@ class RuntimeEffectivePlaybackProfileResolver implements EffectivePlaybackProfil
       ),
     );
   }
+
+  List<DirectPlayCapabilityRule> _directPlayRules(PlaybackEnvironment environment, PlaybackBackendCapabilities backend) {
+    final rules = <DirectPlayCapabilityRule>[];
+    for (final rule in backend.directPlayRules) {
+      final videoCodecs = _supportedCodecs(rule.videoCodecs, (codec) => _videoCodecSupport(environment, backend, codec));
+      final audioCodecs = _supportedCodecs(rule.audioCodecs, (codec) => _audioCodecSupport(environment, backend, codec));
+      if (rule.videoCodecs.isNotEmpty && videoCodecs.isEmpty) continue;
+      if (rule.audioCodecs.isNotEmpty && audioCodecs.isEmpty) continue;
+      rules.add(DirectPlayCapabilityRule(
+        containers: rule.containers,
+        type: rule.type,
+        videoCodecs: videoCodecs,
+        audioCodecs: audioCodecs,
+      ));
+    }
+    return rules;
+  }
+
+  List<String> _supportedCodecs(List<String> codecs, CapabilitySupport Function(String codec) supportFor) => <String>[
+        for (final codec in codecs)
+          if (supportFor(codec) == CapabilitySupport.supported) codec,
+      ];
 
   CapabilitySupport hdrOutputSupport(PlaybackEnvironment environment, CapabilitySupport backendPreservesHdr) => RuntimeCapabilityIntersection.combine(<CapabilitySupport>[
         backendPreservesHdr,

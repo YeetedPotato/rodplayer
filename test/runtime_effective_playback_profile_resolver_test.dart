@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/runtime_effective_playback_profile_resolver.dart';
 
@@ -88,6 +89,79 @@ void main() {
 
     expect(profile.deviceProfile.directPlayRules, isNotEmpty);
     expect(profile.deviceProfile.videoCodecRules, isNotEmpty);
+  });
+
+  test('composite resolver keeps media kit legacy and apple runtime-derived', () {
+    const mediaKit = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.mediaKit,
+      displayName: 'Default playback engine',
+      availability: BackendAvailability.available,
+      priority: 0,
+      capabilities: ConservativePlaybackEnvironmentProvider.mediaKitCapabilities,
+    );
+    const apple = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.appleNative,
+      displayName: 'Apple native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.appleNativeCapabilities,
+    );
+    const resolver = CompositeEffectivePlaybackProfileResolver();
+    final environment = _environment(
+      compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
+      audio: const AudioCapabilities(engine: PlaybackEngineAudioCapabilities(decodeCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.supported})),
+      backend: apple,
+    );
+
+    expect(resolver.resolve(_environment(backend: mediaKit), mediaKit).deviceProfile.directPlayRules.any((rule) => rule.containers.contains('mkv')), isTrue);
+    expect(resolver.resolve(environment, apple).deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
+  });
+
+  test('runtime resolver filters direct play rules by supported video and audio codecs', () {
+    const backend = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.appleNative,
+      displayName: 'Apple native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.appleNativeCapabilities,
+    );
+    final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
+      _environment(
+        compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[
+          VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported),
+          VideoCodecComputeCapability(codec: 'hevc', support: CapabilitySupport.unknown),
+        ]),
+        audio: const AudioCapabilities(engine: PlaybackEngineAudioCapabilities(decodeCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.supported})),
+        backend: backend,
+      ),
+      backend,
+    );
+
+    final rule = profile.deviceProfile.directPlayRules.singleWhere((rule) => rule.containers.contains('mp4'));
+    expect(rule.videoCodecs, <String>['h264']);
+    expect(rule.audioCodecs, <String>['aac']);
+    expect(profile.deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
+    expect(profile.deviceProfile.subtitleRules, isEmpty);
+  });
+
+  test('unknown runtime audio capability drops apple direct play rule', () {
+    const backend = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.appleNative,
+      displayName: 'Apple native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.appleNativeCapabilities,
+    );
+    final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
+      _environment(
+        compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
+        backend: backend,
+      ),
+      backend,
+    );
+
+    expect(profile.deviceProfile.directPlayRules, isEmpty);
+    expect(profile.deviceProfile.audioCodecRules, isEmpty);
   });
 }
 

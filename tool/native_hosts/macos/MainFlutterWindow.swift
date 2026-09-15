@@ -18,6 +18,7 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
     FlutterMethodChannel(name: "rodplayer/playback_capabilities", binaryMessenger: messenger)
       .setMethodCallHandler { call, result in
         switch call.method {
+        case "ping": result(true)
         case "probeCompute": result(self.probeCompute())
         case "probeDisplay": result(self.probeDisplay())
         case "probeAudio": result(self.probeAudio())
@@ -127,6 +128,8 @@ private final class ApplePlaybackManager: NSObject, FlutterStreamHandler {
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "ping":
+      result(true)
     case "create":
       guard let args = call.arguments as? [String: Any], let text = args["url"] as? String, let url = URL(string: text) else {
         result(FlutterError(code: "bad_url", message: "Missing playback URL", details: nil))
@@ -259,7 +262,7 @@ private final class ApplePlaybackSession {
   }
 }
 
-private final class ApplePlaybackPlatformView: NSView, FlutterPlatformView {
+private final class ApplePlaybackPlatformView: NSView {
   private let playerLayer = AVPlayerLayer()
 
   init(frame: CGRect, handle: String?, manager: ApplePlaybackManager) {
@@ -272,7 +275,6 @@ private final class ApplePlaybackPlatformView: NSView, FlutterPlatformView {
 
   required init?(coder: NSCoder) { nil }
 
-  func view() -> NSView { self }
 }
 
 private final class ApplePlaybackViewFactory: NSObject, FlutterPlatformViewFactory {

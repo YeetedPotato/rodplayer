@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/runtime_effective_playback_profile_resolver.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/platform/playback/native/native_playback_capability_bridge.dart';
 import 'package:rodplayer/platform/playback/native/native_playback_capability_probes.dart';
@@ -71,6 +72,7 @@ RuntimePlaybackEnvironmentProvider createDefaultRuntimePlaybackEnvironmentProvid
       ]),
       audioProbe: NativeAudioCapabilityProbe(bridge: bridge),
       backendProbe: RegistryPlaybackBackendProbe(platformFamily: platformFamilyForCurrentTarget(), registry: playbackBackendRegistry),
+      profileResolver: const CompositeEffectivePlaybackProfileResolver(),
       networkContext: networkContext,
       onDiagnostic: onDiagnostic,
     );

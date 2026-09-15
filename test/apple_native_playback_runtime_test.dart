@@ -13,11 +13,21 @@ import 'package:rodplayer/platform/playback/apple_native_playback_runtime.dart';
 
 void main() {
   test('apple native runtime registers only when host is executable', () {
-    final available = AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: true));
-    final unavailable = AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: false));
+    final available = AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: true), confirmedHostAvailable: true);
+    final unavailable = AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: false), confirmedHostAvailable: false);
 
     expect(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[available]).canExecute('apple_native'), isTrue);
     expect(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[unavailable]).canExecute('apple_native'), isFalse);
+  });
+
+  test('host handshake controls runtime availability', () async {
+    final missing = await AppleNativePlaybackRuntime.create(bridge: _FakeAppleBridge(available: true, handshake: false));
+    final present = await AppleNativePlaybackRuntime.create(bridge: _FakeAppleBridge(available: false, handshake: true));
+    final nonApple = AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: true), confirmedHostAvailable: false);
+
+    expect(missing.isAvailable, isFalse);
+    expect(present.isAvailable, isTrue);
+    expect(nonApple.isAvailable, isFalse);
   });
 
   test('apple backend availability remains truthful', () {
@@ -120,7 +130,10 @@ void main() {
   });
 
   test('media kit remains usable when Apple native is unavailable', () {
-    final registry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime(), AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: false))]);
+    final registry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[
+      MediaKitPlaybackRuntime(),
+      AppleNativePlaybackRuntime(bridge: _FakeAppleBridge(available: false), confirmedHostAvailable: false),
+    ]);
 
     expect(registry.canExecute('apple_native'), isFalse);
     expect(registry.canExecute('media_kit'), isTrue);
@@ -164,9 +177,10 @@ int _compareForTest(PlaybackBackendCandidate a, PlaybackBackendCandidate b) {
 }
 
 class _FakeAppleBridge implements AppleNativePlaybackBridge {
-  _FakeAppleBridge({required this.available});
+  _FakeAppleBridge({required this.available, bool? handshake}) : handshake = handshake ?? available;
 
   final bool available;
+  final bool handshake;
   final createdUris = <Uri>[];
   final commands = <String>[];
   final _events = StreamController<AppleNativePlaybackEvent>.broadcast();
@@ -174,6 +188,9 @@ class _FakeAppleBridge implements AppleNativePlaybackBridge {
 
   @override
   bool get isHostAvailable => available;
+
+  @override
+  Future<bool> confirmHostAvailable() async => handshake;
 
   @override
   Future<String> create(Uri uri) async {

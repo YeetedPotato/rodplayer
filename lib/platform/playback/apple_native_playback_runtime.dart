@@ -11,6 +11,7 @@ import 'package:rodplayer/core/player/playback_video_surface.dart';
 
 abstract interface class AppleNativePlaybackBridge {
   bool get isHostAvailable;
+  Future<bool> confirmHostAvailable();
   Future<String> create(Uri uri);
   Future<void> play(String handle);
   Future<void> pause(String handle);
@@ -76,7 +77,21 @@ class MethodChannelAppleNativePlaybackBridge implements AppleNativePlaybackBridg
   final EventChannel _eventChannel;
 
   @override
-  bool get isHostAvailable => !kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS);
+  bool get isHostAvailable => false;
+
+  bool get _isApplePlatform => !kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS);
+
+  @override
+  Future<bool> confirmHostAvailable() async {
+    if (!_isApplePlatform) return false;
+    try {
+      return await _channel.invokeMethod<bool>('ping') == true;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
 
   @override
   Future<String> create(Uri uri) async {
@@ -261,15 +276,28 @@ class AppleNativePlaybackVideoSurface implements PlaybackVideoSurface {
 }
 
 class AppleNativePlaybackRuntime implements PlaybackBackendRuntime {
-  AppleNativePlaybackRuntime({AppleNativePlaybackBridge bridge = const MethodChannelAppleNativePlaybackBridge()}) : bridge = bridge;
+  AppleNativePlaybackRuntime({
+    AppleNativePlaybackBridge bridge = const MethodChannelAppleNativePlaybackBridge(),
+    bool? confirmedHostAvailable,
+  })  : bridge = bridge,
+        _confirmedHostAvailable = confirmedHostAvailable;
+
+  static Future<AppleNativePlaybackRuntime> create({
+    AppleNativePlaybackBridge bridge = const MethodChannelAppleNativePlaybackBridge(),
+  }) async =>
+      AppleNativePlaybackRuntime(
+        bridge: bridge,
+        confirmedHostAvailable: await bridge.confirmHostAvailable(),
+      );
 
   final AppleNativePlaybackBridge bridge;
+  final bool? _confirmedHostAvailable;
 
   @override
   String get backendId => PlaybackBackendIds.appleNative;
 
   @override
-  bool get isAvailable => bridge.isHostAvailable;
+  bool get isAvailable => _confirmedHostAvailable ?? bridge.isHostAvailable;
 
   @override
   Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
