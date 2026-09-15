@@ -12,7 +12,7 @@ class CompositeEffectivePlaybackProfileResolver implements EffectivePlaybackProf
 
   @override
   EffectivePlaybackProfile resolve(PlaybackEnvironment environment, PlaybackBackendDescriptor backend) {
-    if (backend.id == PlaybackBackendIds.appleNative) return runtimeResolver.resolve(environment, backend);
+    if (backend.id == PlaybackBackendIds.appleNative || backend.id == PlaybackBackendIds.androidNative) return runtimeResolver.resolve(environment, backend);
     return legacyResolver.resolve(environment, backend);
   }
 }

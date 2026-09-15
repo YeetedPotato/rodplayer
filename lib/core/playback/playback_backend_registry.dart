@@ -16,10 +16,12 @@ class PlaybackBackendRegistry {
   const PlaybackBackendRegistry({
     this.mediaKitCapabilities = ConservativePlaybackEnvironmentProvider.mediaKitCapabilities,
     this.appleNativeAvailable = false,
+    this.androidNativeAvailable = false,
   });
 
   final PlaybackBackendCapabilities mediaKitCapabilities;
   final bool appleNativeAvailable;
+  final bool androidNativeAvailable;
 
   List<PlaybackBackendDescriptor> backendsFor(PlatformFamily platformFamily) {
     final descriptors = <PlaybackBackendDescriptor>[
@@ -31,7 +33,7 @@ class PlaybackBackendRegistry {
         capabilities: mediaKitCapabilities,
       ),
       ...switch (platformFamily) {
-        PlatformFamily.android => _androidBackends(),
+        PlatformFamily.android => _androidBackends(androidNativeAvailable: androidNativeAvailable),
         PlatformFamily.ios => _appleBackends(appleNativeAvailable: appleNativeAvailable),
         PlatformFamily.macos => _appleBackends(appleNativeAvailable: appleNativeAvailable),
         PlatformFamily.windows => _windowsBackends(),
@@ -96,15 +98,15 @@ class PlaybackBackendRegistry {
     ],
   );
 
-  static List<PlaybackBackendDescriptor> _androidBackends() => const <PlaybackBackendDescriptor>[
+  static List<PlaybackBackendDescriptor> _androidBackends({required bool androidNativeAvailable}) => <PlaybackBackendDescriptor>[
         PlaybackBackendDescriptor(
           id: PlaybackBackendIds.androidNative,
           displayName: 'Android native playback',
-          availability: BackendAvailability.unavailable,
+          availability: androidNativeAvailable ? BackendAvailability.available : BackendAvailability.unavailable,
           priority: 10,
-          capabilities: PlaybackBackendCapabilities(id: PlaybackBackendIds.androidNative, name: 'Android native playback'),
+          capabilities: androidNativeCapabilities,
         ),
-        PlaybackBackendDescriptor(
+        const PlaybackBackendDescriptor(
           id: PlaybackBackendIds.androidCompatibility,
           displayName: 'Android compatibility playback',
           availability: BackendAvailability.unavailable,
@@ -112,6 +114,45 @@ class PlaybackBackendRegistry {
           capabilities: PlaybackBackendCapabilities(id: PlaybackBackendIds.androidCompatibility, name: 'Android compatibility playback'),
         ),
       ];
+
+  static const PlaybackBackendCapabilities androidNativeCapabilities = PlaybackBackendCapabilities(
+    id: PlaybackBackendIds.androidNative,
+    name: 'Android native playback',
+    containers: <String>['mp4', 'm4v', 'webm', 'm3u8'],
+    videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1'],
+    audioCodecs: <String>['aac', 'ac3', 'eac3', 'opus', 'vorbis', 'flac', 'mp3'],
+    subtitleCodecs: <String>[],
+    hardwareDecode: CapabilitySupport.unknown,
+    softwareDecode: CapabilitySupport.unknown,
+    passthrough: CapabilitySupport.unknown,
+    localSubtitleRendering: CapabilitySupport.unknown,
+    hdrOutputPreservation: CapabilitySupport.unknown,
+    directPlayRules: <DirectPlayCapabilityRule>[
+      DirectPlayCapabilityRule(containers: <String>['mp4', 'm4v'], type: 'Video', videoCodecs: <String>['h264', 'hevc'], audioCodecs: <String>['aac', 'ac3', 'eac3', 'mp3']),
+      DirectPlayCapabilityRule(containers: <String>['webm'], type: 'Video', videoCodecs: <String>['vp9', 'av1'], audioCodecs: <String>['opus', 'vorbis']),
+      DirectPlayCapabilityRule(containers: <String>['m3u8'], type: 'Video', videoCodecs: <String>['h264', 'hevc'], audioCodecs: <String>['aac', 'ac3', 'eac3']),
+    ],
+    videoCodecRules: <VideoCodecCapabilityRule>[
+      VideoCodecCapabilityRule(codec: 'h264'),
+      VideoCodecCapabilityRule(codec: 'hevc'),
+      VideoCodecCapabilityRule(codec: 'vp9'),
+      VideoCodecCapabilityRule(codec: 'av1'),
+    ],
+    audioCodecRules: <AudioCodecCapabilityRule>[
+      AudioCodecCapabilityRule(codec: 'aac'),
+      AudioCodecCapabilityRule(codec: 'ac3'),
+      AudioCodecCapabilityRule(codec: 'eac3'),
+      AudioCodecCapabilityRule(codec: 'opus'),
+      AudioCodecCapabilityRule(codec: 'vorbis'),
+      AudioCodecCapabilityRule(codec: 'flac'),
+      AudioCodecCapabilityRule(codec: 'mp3'),
+    ],
+    subtitleRules: <SubtitleCapabilityRule>[],
+    transcodingRules: <TranscodingCapabilityRule>[
+      TranscodingCapabilityRule(type: 'Video', container: 'm3u8', videoCodec: 'h264', audioCodec: 'aac,ac3,eac3', protocol: 'hls', context: 'Streaming'),
+      TranscodingCapabilityRule(type: 'Audio', container: 'mp3', audioCodec: 'mp3', protocol: 'http', context: 'Streaming'),
+    ],
+  );
 
   static List<PlaybackBackendDescriptor> _windowsBackends() => const <PlaybackBackendDescriptor>[
         PlaybackBackendDescriptor(

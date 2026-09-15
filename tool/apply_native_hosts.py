@@ -25,9 +25,31 @@ def patch_windows_cmake() -> None:
         path.write_text(text)
 
 
+def patch_android_gradle() -> None:
+    groovy = ROOT / "android" / "app" / "build.gradle"
+    kotlin = ROOT / "android" / "app" / "build.gradle.kts"
+    dependencies = [
+        'implementation "androidx.media3:media3-exoplayer:1.4.1"',
+        'implementation "androidx.media3:media3-ui:1.4.1"',
+    ]
+    if groovy.exists():
+        text = groovy.read_text()
+        if "androidx.media3:media3-exoplayer" in text:
+            return
+        block = "\ndependencies {\n" + "\n".join(f"    {line}" for line in dependencies) + "\n}\n"
+        groovy.write_text(text + block)
+    elif kotlin.exists():
+        text = kotlin.read_text()
+        if "androidx.media3:media3-exoplayer" in text:
+            return
+        block = '\ndependencies {\n    implementation("androidx.media3:media3-exoplayer:1.4.1")\n    implementation("androidx.media3:media3-ui:1.4.1")\n}\n'
+        kotlin.write_text(text + block)
+
+
 def main(platform: str) -> None:
     if platform == "android":
         copy("android/MainActivity.kt", "android/app/src/main/kotlin/com/example/rodplayer/MainActivity.kt")
+        patch_android_gradle()
     elif platform == "ios":
         copy("ios/AppDelegate.swift", "ios/Runner/AppDelegate.swift")
     elif platform == "macos":

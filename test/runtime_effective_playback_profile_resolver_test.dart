@@ -106,6 +106,13 @@ void main() {
       priority: 10,
       capabilities: PlaybackBackendRegistry.appleNativeCapabilities,
     );
+    const android = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidNative,
+      displayName: 'Android native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.androidNativeCapabilities,
+    );
     const resolver = CompositeEffectivePlaybackProfileResolver();
     final environment = _environment(
       compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
@@ -115,6 +122,7 @@ void main() {
 
     expect(resolver.resolve(_environment(backend: mediaKit), mediaKit).deviceProfile.directPlayRules.any((rule) => rule.containers.contains('mkv')), isTrue);
     expect(resolver.resolve(environment, apple).deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
+    expect(resolver.resolve(environment.copyWith(backends: <PlaybackBackendDescriptor>[android]), android).deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
   });
 
   test('runtime resolver uses production native PCM output for decoded audio support', () {
@@ -192,6 +200,55 @@ void main() {
     );
 
     expect(support, CapabilitySupport.unknown);
+  });
+
+  test('android supported codec and PCM are retained while unknown codec is removed', () {
+    const backend = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidNative,
+      displayName: 'Android native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.androidNativeCapabilities,
+    );
+    final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
+      _environment(
+        compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[
+          VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported),
+          VideoCodecComputeCapability(codec: 'hevc', support: CapabilitySupport.unknown),
+        ]),
+        audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported)),
+        backend: backend,
+      ),
+      backend,
+    );
+    final rule = profile.deviceProfile.directPlayRules.singleWhere((rule) => rule.containers.contains('mp4'));
+
+    expect(rule.videoCodecs, <String>['h264']);
+    expect(rule.audioCodecs, contains('aac'));
+    expect(profile.deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
+    expect(profile.deviceProfile.audioCodecRules.map((rule) => rule.codec), contains('aac'));
+    expect(profile.deviceProfile.subtitleRules, isEmpty);
+  });
+
+  test('android unsupported PCM removes decoded audio advertisement', () {
+    const backend = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidNative,
+      displayName: 'Android native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.androidNativeCapabilities,
+    );
+    final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
+      _environment(
+        compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
+        audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.unsupported)),
+        backend: backend,
+      ),
+      backend,
+    );
+
+    expect(profile.deviceProfile.directPlayRules, isEmpty);
+    expect(profile.deviceProfile.audioCodecRules, isEmpty);
   });
 }
 

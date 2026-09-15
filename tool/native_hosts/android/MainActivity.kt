@@ -8,23 +8,44 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
+import android.view.View
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+import java.util.UUID
 
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "rodplayer/playback_capabilities"
     private val eventChannelName = "rodplayer/playback_capability_events"
+    private val playbackMethodChannelName = "rodplayer/android_playback"
+    private val playbackEventChannelName = "rodplayer/android_playback_events"
+    private val playbackViewType = "rodplayer/android_playback_view"
     private var eventSink: EventChannel.EventSink? = null
     private var displayListener: DisplayManager.DisplayListener? = null
     private var audioCallback: AudioDeviceCallback? = null
+    private lateinit var playbackManager: AndroidPlaybackManager
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        playbackManager = AndroidPlaybackManager(this)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -48,11 +69,19 @@ class MainActivity : FlutterActivity() {
                 eventSink = null
             }
         })
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, playbackMethodChannelName).setMethodCallHandler(playbackManager::handle)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, playbackEventChannelName).setStreamHandler(playbackManager)
+        flutterEngine.platformViewsController.registry.registerViewFactory(playbackViewType, AndroidPlaybackViewFactory(playbackManager))
     }
 
     override fun onResume() {
         super.onResume()
         eventSink?.success("resume")
+    }
+
+    override fun onDestroy() {
+        if (::playbackManager.isInitialized) playbackManager.disposeAll()
+        super.onDestroy()
     }
 
     private fun probeCompute(): Map<String, Any?> {
@@ -169,5 +198,190 @@ class MainActivity : FlutterActivity() {
         "video/av01" -> "av1"
         "video/mpeg2" -> "mpeg2"
         else -> null
+    }
+}
+
+private class AndroidPlaybackManager(private val context: Context) : EventChannel.StreamHandler {
+    private val sessions = mutableMapOf<String, AndroidPlaybackSession>()
+    private var eventSink: EventChannel.EventSink? = null
+
+    fun handle(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "ping" -> result.success(true)
+            "create" -> {
+                val url = call.argument<String>("url")
+                if (url.isNullOrBlank()) {
+                    result.error("bad_url", "Missing playback URL", null)
+                    return
+                }
+                val handle = UUID.randomUUID().toString()
+                sessions[handle] = AndroidPlaybackSession(context, handle, Uri.parse(url)) { eventSink?.success(it) }
+                result.success(handle)
+            }
+            "play" -> command(call, result) { it.play() }
+            "pause" -> command(call, result) { it.pause() }
+            "seek" -> command(call, result) { it.seek(call.argument<Number>("positionMillis")?.toLong() ?: 0L) }
+            "stop" -> command(call, result) { it.stop() }
+            "volume" -> command(call, result) { it.setVolume((call.argument<Number>("volume")?.toFloat() ?: 100f) / 100f) }
+            "mute" -> command(call, result) { it.setMuted(call.argument<Boolean>("muted") ?: false) }
+            "dispose" -> {
+                val handle = call.argument<String>("handle")
+                if (handle == null) {
+                    result.error("bad_handle", "Missing player handle", null)
+                    return
+                }
+                sessions.remove(handle)?.dispose()
+                result.success(null)
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    fun player(handle: String?): ExoPlayer? = handle?.let { sessions[it]?.player }
+
+    fun disposeAll() {
+        val handles = sessions.keys.toList()
+        for (handle in handles) {
+            sessions.remove(handle)?.dispose()
+        }
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        eventSink = events
+    }
+
+    override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+
+    private fun command(call: MethodCall, result: MethodChannel.Result, action: (AndroidPlaybackSession) -> Unit) {
+        val handle = call.argument<String>("handle")
+        val session = handle?.let { sessions[it] }
+        if (session == null) {
+            result.error("bad_handle", "Unknown player handle", null)
+            return
+        }
+        action(session)
+        result.success(null)
+    }
+}
+
+private class AndroidPlaybackSession(
+    context: Context,
+    private val handle: String,
+    uri: Uri,
+    private val emit: (Map<String, Any?>) -> Unit,
+) : Player.Listener {
+    val player: ExoPlayer = ExoPlayer.Builder(context).build()
+    private val handler = Handler(Looper.getMainLooper())
+    private var disposed = false
+    private val positionTick = object : Runnable {
+        override fun run() {
+            sendState()
+            if (!disposed) handler.postDelayed(this, 1000)
+        }
+    }
+
+    init {
+        player.addListener(this)
+        player.setMediaItem(MediaItem.fromUri(uri))
+        player.prepare()
+        player.playWhenReady = true
+        handler.post(positionTick)
+        sendState()
+    }
+
+    fun play() {
+        player.play()
+        sendState()
+    }
+
+    fun pause() {
+        player.pause()
+        sendState()
+    }
+
+    fun seek(positionMillis: Long) {
+        player.seekTo(positionMillis.coerceAtLeast(0))
+        sendState()
+    }
+
+    fun stop() {
+        player.pause()
+        player.seekTo(0)
+        sendState()
+    }
+
+    fun setVolume(value: Float) {
+        player.volume = value.coerceIn(0f, 1f)
+        sendState()
+    }
+
+    fun setMuted(value: Boolean) {
+        player.volume = if (value) 0f else player.volume.coerceAtLeast(1f)
+        sendState(muted = value)
+    }
+
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        sendState()
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        sendState(ended = playbackState == Player.STATE_ENDED)
+    }
+
+    override fun onPlayerError(error: PlaybackException) {
+        sendState(error = "${error.errorCodeName}: ${error.message ?: "Playback failed"}")
+    }
+
+    private fun sendState(error: String? = null, ended: Boolean = false, muted: Boolean = player.volume == 0f) {
+        if (disposed) return
+        val duration = if (player.duration == C.TIME_UNSET) 0L else player.duration.coerceAtLeast(0)
+        emit(mapOf(
+            "handle" to handle,
+            "playing" to player.isPlaying,
+            "buffering" to (player.playbackState == Player.STATE_BUFFERING),
+            "positionMillis" to player.currentPosition.coerceAtLeast(0),
+            "durationMillis" to duration,
+            "volume" to (player.volume * 100.0),
+            "muted" to muted,
+            "error" to error,
+            "ended" to ended,
+        ))
+    }
+
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        handler.removeCallbacks(positionTick)
+        player.removeListener(this)
+        player.release()
+    }
+}
+
+private class AndroidPlaybackPlatformView(
+    context: Context,
+    handle: String?,
+    manager: AndroidPlaybackManager,
+) : PlatformView {
+    private val view = PlayerView(context)
+
+    init {
+        view.useController = false
+        view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        view.player = manager.player(handle)
+    }
+
+    override fun getView(): View = view
+
+    override fun dispose() {
+        view.player = null
+    }
+}
+
+private class AndroidPlaybackViewFactory(private val manager: AndroidPlaybackManager) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        val handle = (args as? Map<*, *>)?.get("handle") as? String
+        return AndroidPlaybackPlatformView(context, handle, manager)
     }
 }

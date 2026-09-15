@@ -141,6 +141,13 @@ void main() {
       expect(android.first.availability, BackendAvailability.available);
     });
 
+    test('android native availability is explicit', () {
+      final android = const PlaybackBackendRegistry(androidNativeAvailable: true).backendsFor(PlatformFamily.android);
+
+      expect(android.singleWhere((backend) => backend.id == PlaybackBackendIds.androidNative).availability, BackendAvailability.available);
+      expect(android.singleWhere((backend) => backend.id == PlaybackBackendIds.androidCompatibility).availability, BackendAvailability.unavailable);
+    });
+
     test('future backends are not falsely marked available', () {
       final apple = const PlaybackBackendRegistry().backendsFor(PlatformFamily.ios);
 

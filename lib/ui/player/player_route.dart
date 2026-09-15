@@ -3,13 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
-import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
-import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
-import 'package:rodplayer/platform/playback/apple_native_playback_runtime.dart';
+import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/platform/playback/runtime_playback_probes.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
 import 'package:uuid/uuid.dart';
@@ -29,18 +26,17 @@ class _PlayerRouteState extends State<PlayerRoute> {
   PlaybackRuntimeCoordinator? _coordinator;
 
   Future<_PreparedPlayback> _prepare() async {
-    final appleNativeRuntime = await AppleNativePlaybackRuntime.create();
-    final runtimeRegistry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime(), appleNativeRuntime]);
+    final runtimes = await createPlatformPlaybackRuntimes();
     final plan = await PlaybackNegotiator(
       client: widget.client,
       environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
         identity: widget.client.identity,
-        playbackBackendRegistry: PlaybackBackendRegistry(appleNativeAvailable: appleNativeRuntime.isAvailable),
+        playbackBackendRegistry: runtimes.backendRegistry,
       ),
-      runtimeRegistry: runtimeRegistry,
+      runtimeRegistry: runtimes.registry,
     ).negotiate(itemId: widget.itemId);
     final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
-    final coordinator = PlaybackRuntimeCoordinator(registry: runtimeRegistry, session: logicalSession);
+    final coordinator = PlaybackRuntimeCoordinator(registry: runtimes.registry, session: logicalSession);
     _coordinator = coordinator;
     final runtimeSession = await coordinator.activate(plan);
     return _PreparedPlayback(plan: plan, session: logicalSession, runtimeSession: runtimeSession);
