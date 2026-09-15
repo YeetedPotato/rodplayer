@@ -274,10 +274,9 @@ class AndroidNativePlaybackVideoSurface implements PlaybackVideoSurface {
 
 class AndroidNativePlaybackRuntime implements PlaybackBackendRuntime {
   AndroidNativePlaybackRuntime({
-    AndroidNativePlaybackBridge bridge = const MethodChannelAndroidNativePlaybackBridge(),
+    this.bridge = const MethodChannelAndroidNativePlaybackBridge(),
     bool? confirmedHostAvailable,
-  })  : bridge = bridge,
-        _confirmedHostAvailable = confirmedHostAvailable;
+  }) : _confirmedHostAvailable = confirmedHostAvailable;
 
   static Future<AndroidNativePlaybackRuntime> create({
     AndroidNativePlaybackBridge bridge = const MethodChannelAndroidNativePlaybackBridge(),

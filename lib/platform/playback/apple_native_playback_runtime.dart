@@ -277,10 +277,9 @@ class AppleNativePlaybackVideoSurface implements PlaybackVideoSurface {
 
 class AppleNativePlaybackRuntime implements PlaybackBackendRuntime {
   AppleNativePlaybackRuntime({
-    AppleNativePlaybackBridge bridge = const MethodChannelAppleNativePlaybackBridge(),
+    this.bridge = const MethodChannelAppleNativePlaybackBridge(),
     bool? confirmedHostAvailable,
-  })  : bridge = bridge,
-        _confirmedHostAvailable = confirmedHostAvailable;
+  }) : _confirmedHostAvailable = confirmedHostAvailable;
 
   static Future<AppleNativePlaybackRuntime> create({
     AppleNativePlaybackBridge bridge = const MethodChannelAppleNativePlaybackBridge(),

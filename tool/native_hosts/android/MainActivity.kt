@@ -275,6 +275,8 @@ private class AndroidPlaybackSession(
     val player: ExoPlayer = ExoPlayer.Builder(context).build()
     private val handler = Handler(Looper.getMainLooper())
     private var disposed = false
+    private var muted = false
+    private var desiredVolume = 1f
     private val positionTick = object : Runnable {
         override fun run() {
             sendState()
@@ -313,13 +315,19 @@ private class AndroidPlaybackSession(
     }
 
     fun setVolume(value: Float) {
-        player.volume = value.coerceIn(0f, 1f)
+        desiredVolume = value.coerceIn(0f, 1f)
+        if (!muted) player.volume = desiredVolume
         sendState()
     }
 
     fun setMuted(value: Boolean) {
-        player.volume = if (value) 0f else player.volume.coerceAtLeast(1f)
-        sendState(muted = value)
+        if (muted == value) {
+            sendState()
+            return
+        }
+        muted = value
+        player.volume = if (muted) 0f else desiredVolume
+        sendState()
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -334,7 +342,7 @@ private class AndroidPlaybackSession(
         sendState(error = "${error.errorCodeName}: ${error.message ?: "Playback failed"}")
     }
 
-    private fun sendState(error: String? = null, ended: Boolean = false, muted: Boolean = player.volume == 0f) {
+    private fun sendState(error: String? = null, ended: Boolean = false) {
         if (disposed) return
         val duration = if (player.duration == C.TIME_UNSET) 0L else player.duration.coerceAtLeast(0)
         emit(mapOf(
@@ -343,7 +351,7 @@ private class AndroidPlaybackSession(
             "buffering" to (player.playbackState == Player.STATE_BUFFERING),
             "positionMillis" to player.currentPosition.coerceAtLeast(0),
             "durationMillis" to duration,
-            "volume" to (player.volume * 100.0),
+            "volume" to (desiredVolume * 100.0),
             "muted" to muted,
             "error" to error,
             "ended" to ended,

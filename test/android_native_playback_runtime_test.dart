@@ -147,6 +147,11 @@ void main() {
     expect(source, contains('rodplayer/android_playback_events'));
     expect(source, contains('rodplayer/android_playback_view'));
     expect(source, contains('"ping" -> result.success(true)'));
+    expect(source, contains('private var muted = false'));
+    expect(source, contains('private var desiredVolume = 1f'));
+    expect(source, contains('if (!muted) player.volume = desiredVolume'));
+    expect(source, contains('player.volume = if (muted) 0f else desiredVolume'));
+    expect(source, isNot(contains('coerceAtLeast(1f)')));
     expect(source, contains('player.release()'));
     expect(patcher, contains('androidx.media3:media3-exoplayer'));
     expect(patcher, contains('androidx.media3:media3-ui'));
