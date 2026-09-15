@@ -110,7 +110,11 @@ void main() {
     final second = coordinator.activate(_plan('two'));
     final third = coordinator.activate(_plan('three'));
 
-    await expectLater(second, throwsA(isA<StateError>()));
+    final secondSession = await second;
+    expect(secondSession.engine, same(runtime.created[1]));
+    expect(coordinator.session.activePlan.mediaSourceId, 'two');
+    expect(coordinator.diagnostics?.failure, isA<StateError>());
+    expect(runtime.created[1].disposeCount, 0);
     await third;
     expect(coordinator.session.activePlan.mediaSourceId, 'three');
   });

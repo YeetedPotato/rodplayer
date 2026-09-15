@@ -103,8 +103,24 @@ class PlaybackRuntimeCoordinator {
     }
     final previous = _active;
     try {
-      _active = next;
       session.activatePlan(plan);
+    } on Object catch (error) {
+      await next.dispose();
+      request.completeError(error);
+      return;
+    }
+    _active = next;
+    diagnostics = PlaybackRuntimeDiagnostics(
+      selectedBackendId: plan.engineId,
+      runtimeId: next.runtimeId,
+      mediaSourceId: plan.mediaSourceId,
+      logicalSessionId: session.id,
+      generation: generation,
+      playSessionId: plan.playSessionId,
+    );
+    try {
+      if (previous != null) await previous.dispose();
+    } on Object catch (error) {
       diagnostics = PlaybackRuntimeDiagnostics(
         selectedBackendId: plan.engineId,
         runtimeId: next.runtimeId,
@@ -112,12 +128,10 @@ class PlaybackRuntimeCoordinator {
         logicalSessionId: session.id,
         generation: generation,
         playSessionId: plan.playSessionId,
+        failure: error,
       );
-      if (previous != null) await previous.dispose();
-      request.complete(next);
-    } on Object catch (error) {
-      request.completeError(error);
     }
+    request.complete(next);
   }
 
   Future<void> dispose() async {
