@@ -102,6 +102,19 @@ void main() {
     expect(runtime.opened.map((plan) => plan.mediaSourceId), <String>['one']);
   });
 
+  test('cleanup failure does not wedge queued activation drain', () async {
+    final runtime = _ThrowingFirstDisposeRuntime('media_kit');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+
+    await coordinator.activate(_plan('one'));
+    final second = coordinator.activate(_plan('two'));
+    final third = coordinator.activate(_plan('three'));
+
+    await expectLater(second, throwsA(isA<StateError>()));
+    await third;
+    expect(coordinator.session.activePlan.mediaSourceId, 'three');
+  });
+
   test('runtime is disposed exactly once on replacement and coordinator dispose', () async {
     final runtime = _FakeRuntime('media_kit');
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
@@ -202,6 +215,19 @@ class _ControlledRuntime extends _FakeRuntime {
   void completeNext() => _pending.removeAt(0).complete();
 }
 
+class _ThrowingFirstDisposeRuntime extends _FakeRuntime {
+  _ThrowingFirstDisposeRuntime(super.backendId);
+
+  @override
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
+    opened.add(plan);
+    final engine = created.isEmpty ? _ThrowingDisposeEngine(id: backendId) : _CountingEngine(id: backendId);
+    created.add(engine);
+    await engine.load(plan);
+    return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine);
+  }
+}
+
 class _CountingEngine extends TestPlaybackEngine {
   _CountingEngine({required super.id});
 
@@ -211,6 +237,16 @@ class _CountingEngine extends TestPlaybackEngine {
   Future<void> dispose() async {
     disposeCount += 1;
     await super.dispose();
+  }
+}
+
+class _ThrowingDisposeEngine extends _CountingEngine {
+  _ThrowingDisposeEngine({required super.id});
+
+  @override
+  Future<void> dispose() async {
+    await super.dispose();
+    throw StateError('dispose failed');
   }
 }
 

@@ -46,7 +46,7 @@ class PlaybackRuntimeCoordinator {
     final request = _ActivationRequest(plan: plan, generation: ++_generation);
     _queue.add(request);
     _startNext();
-    return request.completer.future;
+    return request.future;
   }
 
   void _startNext() {
@@ -61,16 +61,23 @@ class PlaybackRuntimeCoordinator {
   }
 
   Future<void> _runActivation(_ActivationRequest request) async {
+    try {
+      await _runActivationBody(request);
+    } finally {
+      _opening = false;
+      _startNext();
+    }
+  }
+
+  Future<void> _runActivationBody(_ActivationRequest request) async {
     final plan = request.plan;
     final generation = request.generation;
     final runtime = registry.resolve(plan.engineId);
     if (runtime == null) {
       request.completeError(PlaybackRuntimeUnavailableException(plan.engineId));
-      _opening = false;
-      _startNext();
       return;
     }
-    PlaybackRuntimeSession next;
+    final PlaybackRuntimeSession next;
     try {
       next = await runtime.open(plan);
     } on Object catch (error) {
@@ -84,32 +91,33 @@ class PlaybackRuntimeCoordinator {
         failure: error,
       );
       request.completeError(PlaybackActivationException(plan.engineId, error));
-      _opening = false;
-      _startNext();
       return;
     }
     if (_disposed || generation != _generation) {
-      await next.dispose();
-      request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
-      _opening = false;
-      _startNext();
+      try {
+        await next.dispose();
+      } finally {
+        request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
+      }
       return;
     }
     final previous = _active;
-    _active = next;
-    session.activatePlan(plan);
-    diagnostics = PlaybackRuntimeDiagnostics(
-      selectedBackendId: plan.engineId,
-      runtimeId: next.runtimeId,
-      mediaSourceId: plan.mediaSourceId,
-      logicalSessionId: session.id,
-      generation: generation,
-      playSessionId: plan.playSessionId,
-    );
-    if (previous != null) await previous.dispose();
-    request.complete(next);
-    _opening = false;
-    _startNext();
+    try {
+      _active = next;
+      session.activatePlan(plan);
+      diagnostics = PlaybackRuntimeDiagnostics(
+        selectedBackendId: plan.engineId,
+        runtimeId: next.runtimeId,
+        mediaSourceId: plan.mediaSourceId,
+        logicalSessionId: session.id,
+        generation: generation,
+        playSessionId: plan.playSessionId,
+      );
+      if (previous != null) await previous.dispose();
+      request.complete(next);
+    } on Object catch (error) {
+      request.completeError(error);
+    }
   }
 
   Future<void> dispose() async {
@@ -132,11 +140,16 @@ class PlaybackRuntimeCoordinator {
 }
 
 class _ActivationRequest {
-  _ActivationRequest({required this.plan, required this.generation});
+  _ActivationRequest({required this.plan, required this.generation}) {
+    _observed = completer.future..ignore();
+  }
 
   final PlaybackPlan plan;
   final int generation;
   final completer = Completer<PlaybackRuntimeSession>();
+  late final Future<PlaybackRuntimeSession> _observed;
+
+  Future<PlaybackRuntimeSession> get future => _observed;
 
   void complete(PlaybackRuntimeSession session) {
     if (!completer.isCompleted) completer.complete(session);
