@@ -147,8 +147,8 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
         slivers: [
           SliverToBoxAdapter(child: _LibraryHeader(kind: widget.kind, total: _totalRecordCount, sort: _sort, filter: _filter, onSort: _setSort, onFilter: _setFilter, onRefresh: _reload)),
           if (_loadingInitial) const SliverFillRemaining(hasScrollBody: false, child: Center(child: CircularProgressIndicator()))
-          else if (_initialError != null) SliverFillRemaining(hasScrollBody: false, child: _LibraryMessage(icon: Icons.cloud_off_outlined, title: '${_title} unavailable', action: TextButton(onPressed: _reload, child: const Text('Retry'))))
-          else if (_items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _LibraryMessage(icon: Icons.movie_filter_outlined, title: _filter == JellyfinLibraryFilter.all ? 'No ${_emptyName} found' : 'No ${_filter.label.toLowerCase()} ${_emptyName}'))
+          else if (_initialError != null) SliverFillRemaining(hasScrollBody: false, child: _LibraryMessage(icon: Icons.cloud_off_outlined, title: '$_title unavailable', action: TextButton(onPressed: _reload, child: const Text('Retry'))))
+          else if (_items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _LibraryMessage(icon: Icons.movie_filter_outlined, title: _filter == JellyfinLibraryFilter.all ? 'No $_emptyName found' : 'No ${_filter.label.toLowerCase()} $_emptyName'))
           else ...[
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -214,21 +214,26 @@ class _LibraryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = kind == JellyfinLibraryKind.movies ? 'Movies' : 'TV Shows';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
-      child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 10, children: [
-        ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 180),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: Theme.of(context).textTheme.headlineSmall),
-            if (total != null) Text('$total titles', style: Theme.of(context).textTheme.bodySmall),
-          ]),
-        ),
-        _Menu<JellyfinLibrarySort>(label: 'Sort', value: sort, values: JellyfinLibrarySort.values, titleOf: (value) => value.label, onChanged: onSort),
-        _Menu<JellyfinLibraryFilter>(label: 'Filter', value: filter, values: JellyfinLibraryFilter.values, titleOf: (value) => value.label, onChanged: onFilter),
-        IconButton(tooltip: 'Refresh', onPressed: onRefresh, icon: const Icon(Icons.refresh)),
-      ]),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final compact = constraints.maxWidth < 560;
+      final availableWidth = compact ? (constraints.maxWidth - 48).clamp(0, double.infinity).toDouble() : constraints.maxWidth;
+      final controlWidth = compact ? availableWidth : 210.0;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+        child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 10, children: [
+          SizedBox(
+            width: compact ? availableWidth : 180,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.headlineSmall),
+              if (total != null) Text('$total titles', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+            ]),
+          ),
+          SizedBox(width: controlWidth, child: _Menu<JellyfinLibrarySort>(label: 'Sort', value: sort, values: JellyfinLibrarySort.values, titleOf: (value) => value.label, onChanged: onSort)),
+          SizedBox(width: controlWidth, child: _Menu<JellyfinLibraryFilter>(label: 'Filter', value: filter, values: JellyfinLibraryFilter.values, titleOf: (value) => value.label, onChanged: onFilter)),
+          IconButton(tooltip: 'Refresh', onPressed: onRefresh, icon: const Icon(Icons.refresh)),
+        ]),
+      );
+    });
   }
 }
 
@@ -243,9 +248,11 @@ class _Menu<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DropdownButton<T>(
         value: value,
+        isExpanded: true,
         underline: const SizedBox.shrink(),
-        hint: Text(label),
-        items: values.map((item) => DropdownMenuItem<T>(value: item, child: Text('$label: ${titleOf(item)}', overflow: TextOverflow.ellipsis))).toList(),
+        hint: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        selectedItemBuilder: (context) => values.map((item) => Align(alignment: Alignment.centerLeft, child: Text('$label: ${titleOf(item)}', maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
+        items: values.map((item) => DropdownMenuItem<T>(value: item, child: Text('$label: ${titleOf(item)}', maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
         onChanged: (value) {
           if (value != null) onChanged(value);
         },

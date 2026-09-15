@@ -57,6 +57,14 @@ void main() {
     setSurface(tester, const Size(390, 760));
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'A Long Movie Title That Should Not Overflow')]), kind: JellyfinLibraryKind.movies), size: const Size(390, 760), textScale: 1.25));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort: Title'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort: Community Rating').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter: All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter: Favorites').last);
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 
@@ -87,7 +95,12 @@ void main() {
 
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -3000));
     await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextButton, 'Retry loading more'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Movie 0'), -900, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.text('Movie 0'), findsWidgets);
+    await tester.scrollUntilVisible(find.widgetWithText(TextButton, 'Retry loading more'), 900, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.widgetWithText(TextButton, 'Retry loading more'), findsOneWidget);
 
     client.failStarts.clear();
