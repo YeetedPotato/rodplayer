@@ -8,8 +8,8 @@ import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
-import 'package:rodplayer/ui/screens/browse_screen.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
+import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
@@ -96,7 +96,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     if (_client == null) return LoginScreen(identity: _identity!, onAuthenticated: _authenticated);
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.maybePop(context)},
-      child: BrowseScreen(client: _client!, onLogout: _logout),
+      child: RodPlayerAppShell(client: _client!, onLogout: _logout),
     );
   }
 }

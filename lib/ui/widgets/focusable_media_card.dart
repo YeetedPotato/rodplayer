@@ -5,9 +5,10 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/media_badge_overlay.dart';
 
 class FocusableMediaCard extends StatefulWidget {
-  const FocusableMediaCard({required this.title, this.subtitle, this.imageUrl, this.aspectRatio = 2 / 3, this.badge, this.mediaInfo, this.onTap, this.autofocus = false, this.focusNode, super.key});
+  const FocusableMediaCard({required this.title, this.subtitle, this.imageUrl, this.progress, this.aspectRatio = 2 / 3, this.badge, this.mediaInfo, this.onTap, this.autofocus = false, this.focusNode, super.key});
   final String title;
   final String? subtitle, imageUrl;
+  final double? progress;
   final double aspectRatio;
   final Widget? badge;
   final MediaIntelligence? mediaInfo;
@@ -58,6 +59,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
               final poster = _Poster(
                 aspectRatio: widget.aspectRatio,
                 imageUrl: widget.imageUrl,
+                progress: widget.progress,
                 mediaInfo: widget.mediaInfo,
                 badge: widget.badge,
                 theme: theme,
@@ -79,9 +81,10 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
 }
 
 class _Poster extends StatelessWidget {
-  const _Poster({required this.aspectRatio, required this.imageUrl, required this.mediaInfo, required this.badge, required this.theme});
+  const _Poster({required this.aspectRatio, required this.imageUrl, required this.progress, required this.mediaInfo, required this.badge, required this.theme});
   final double aspectRatio;
   final String? imageUrl;
+  final double? progress;
   final MediaIntelligence? mediaInfo;
   final Widget? badge;
   final RodPlayerTheme theme;
@@ -93,6 +96,7 @@ class _Poster extends StatelessWidget {
           _MediaImage(imageUrl: imageUrl, theme: theme),
           if (mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
           if (badge != null) Positioned(top: 10, right: 10, child: badge!),
+          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: Colors.black54, color: theme.goldBright)),
         ]),
       );
 }

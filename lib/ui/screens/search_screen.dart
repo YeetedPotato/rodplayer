@@ -8,8 +8,9 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({required this.client, super.key});
+  const SearchScreen({required this.client, this.embedded = false, super.key});
   final JellyfinApiClient client;
+  final bool embedded;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -76,10 +77,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final width = MediaQuery.sizeOf(context).width;
     final columns = width >= 1200 ? 6 : width >= 850 ? 4 : width >= 560 ? 3 : 2;
-    return Scaffold(
-      backgroundColor: theme.obsidian,
-      appBar: AppBar(title: const Text('Search'), centerTitle: false),
-      body: CustomScrollView(slivers: [
+    final content = CustomScrollView(key: const PageStorageKey<String>('search-scroll'), slivers: [
         SliverPadding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 12), sliver: SliverToBoxAdapter(child: TextField(
           controller: _controller, focusNode: _focusNode, autofocus: true, textInputAction: TextInputAction.search,
           onChanged: _onChanged, onSubmitted: (value) { _debounce?.cancel(); if (value.trim().isNotEmpty) _search(value.trim()); },
@@ -90,8 +88,9 @@ class _SearchScreenState extends State<SearchScreen> {
         else if (_query.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _RecentSearches(items: _recent, onSelect: (value) { _controller.text = value; _search(value); }))
         else if (_results.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.search_off, title: 'No results', detail: 'Try a different title, artist, or keyword.'))
         else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), onTap: () => _showDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),
-      ]),
-    );
+      ]);
+    if (widget.embedded) return ColoredBox(color: theme.obsidian, child: content);
+    return Scaffold(backgroundColor: theme.obsidian, appBar: AppBar(title: const Text('Search'), centerTitle: false), body: content);
   }
 
   void _showDetails(JellyfinSearchHint item) { final id = item.id.isEmpty ? null : item.id; showModalBottomSheet<void>(context: context, builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(item.subtitle()), const SizedBox(height: 20), FilledButton.icon(onPressed: id == null ? null : () => Navigator.pop(context), icon: const Icon(Icons.play_arrow), label: const Text('Play'))])))); }
