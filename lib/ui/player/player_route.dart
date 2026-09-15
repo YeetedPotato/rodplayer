@@ -28,19 +28,20 @@ class _PlayerRouteState extends State<PlayerRoute> {
 
   Future<_PreparedPlayback> _prepare() async {
     final runtimes = await createPlatformPlaybackRuntimes();
-    final plan = await PlaybackNegotiator(
+    final decision = await PlaybackNegotiator(
       client: widget.client,
       environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
         identity: widget.client.identity,
         playbackBackendRegistry: runtimes.backendRegistry,
       ),
       runtimeRegistry: runtimes.registry,
-    ).negotiate(itemId: widget.itemId);
+    ).negotiateDecision(itemId: widget.itemId);
+    final plan = decision.plan;
     final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
     final coordinator = PlaybackRuntimeCoordinator(registry: runtimes.registry, session: logicalSession);
     _coordinator = coordinator;
-    final runtimeSession = await coordinator.activate(plan);
-    return _PreparedPlayback(plan: plan, session: logicalSession, runtimeSession: runtimeSession);
+    final runtimeSession = await coordinator.activateCandidates(decision.orderedUsableCandidates);
+    return _PreparedPlayback(plan: runtimeSession.plan, session: logicalSession, runtimeSession: runtimeSession);
   }
 
   @override

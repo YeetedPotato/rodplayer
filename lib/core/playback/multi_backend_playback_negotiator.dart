@@ -85,6 +85,11 @@ class PlaybackPlanDecision {
   String get selectedBackendId => selected.backend.id;
   PlaybackPlanScore get score => selected.score!;
   List<PlaybackBackendCandidate> get rejectedCandidates => candidates.where((candidate) => !candidate.isUsable).toList(growable: false);
+  List<PlaybackBackendCandidate> get orderedUsableCandidates {
+    final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
+      ..sort(_compareCandidates);
+    return usable;
+  }
 }
 
 class PlaybackPlanScorer {
@@ -165,17 +170,27 @@ class MultiBackendPlaybackNegotiator {
         candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'No playback runtime registered'));
         continue;
       }
-      candidates.addAll(await _candidatesForBackend(
-        environment: environment,
-        backend: backend,
-        itemId: itemId,
-        audioStreamIndex: audioStreamIndex,
-        subtitleStreamIndex: subtitleStreamIndex,
-      ));
+      try {
+        candidates.addAll(await _candidatesForBackend(
+          environment: environment,
+          backend: backend,
+          itemId: itemId,
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+        ));
+      } on Object catch (error) {
+        candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'PlaybackInfo request failed: $error'));
+      }
     }
     final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
       ..sort(_compareCandidates);
-    if (usable.isEmpty) throw ServerConnectionException('Server returned no playable media source');
+    if (usable.isEmpty) {
+      final failures = candidates.where((candidate) => candidate.rejectionReason?.startsWith('PlaybackInfo request failed:') == true).toList(growable: false);
+      if (failures.isNotEmpty && failures.length == candidates.length) {
+        throw ServerConnectionException('PlaybackInfo failed for all executable backends: ${failures.map((c) => '${c.backend.id}: ${c.rejectionReason}').join('; ')}');
+      }
+      throw ServerConnectionException('Server returned no playable media source: ${candidates.map((c) => '${c.backend.id}: ${c.rejectionReason ?? 'no usable candidate'}').join('; ')}');
+    }
     return PlaybackPlanDecision(selected: usable.first, candidates: candidates);
   }
 
@@ -299,13 +314,21 @@ PlaybackDeliveryMode _deliveryMode(PlayMethod method) => switch (method) {
 
 VideoOperation _videoOperation(PlayMethod method, MediaSourceInfo source) {
   if (source.videoStreams.isEmpty) return VideoOperation.none;
-  if (method == PlayMethod.transcode && source.videoCopied != true) return VideoOperation.transcode;
+  if (method == PlayMethod.transcode) {
+    if (source.videoCopied == true) return VideoOperation.copy;
+    if (source.videoCopied == false) return VideoOperation.transcode;
+    return VideoOperation.unknown;
+  }
   return VideoOperation.copy;
 }
 
 AudioOperation _audioOperation(PlayMethod method, MediaSourceInfo source) {
   if (source.audioStreams.isEmpty) return AudioOperation.none;
-  if (method == PlayMethod.transcode && source.audioCopied != true) return AudioOperation.transcode;
+  if (method == PlayMethod.transcode) {
+    if (source.audioCopied == true) return AudioOperation.copy;
+    if (source.audioCopied == false) return AudioOperation.transcode;
+    return AudioOperation.unknown;
+  }
   return AudioOperation.copy;
 }
 
@@ -326,8 +349,10 @@ HdrHandling _hdrHandling(MediaSourceInfo source) {
   });
   if (!hasHdr) return HdrHandling.none;
   final reasons = source.transcodingReasons.join(' ').toLowerCase();
-  if (reasons.contains('tonemap') || reasons.contains('tone map') || reasons.contains('hdr')) return HdrHandling.toneMapToSdr;
-  return HdrHandling.preserve;
+  final raw = source.raw.entries.map((entry) => '${entry.key} ${entry.value}').join(' ').toLowerCase();
+  if (reasons.contains('tonemap') || reasons.contains('tone map') || raw.contains('tonemap') || raw.contains('tone map')) return HdrHandling.toneMapToSdr;
+  if (raw.contains('hdrpreserved') || raw.contains('hdr preserved') || raw.contains('preservehdr') || raw.contains('preserve hdr')) return HdrHandling.preserve;
+  return HdrHandling.unknown;
 }
 
 extension _FirstOrNull<T> on Iterable<T> {

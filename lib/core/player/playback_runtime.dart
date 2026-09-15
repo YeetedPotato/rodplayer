@@ -22,6 +22,15 @@ class PlaybackActivationException implements Exception {
   String toString() => 'PlaybackActivationException: failed to activate "$backendId": $error';
 }
 
+class PlaybackActivationAggregateException implements Exception {
+  const PlaybackActivationAggregateException(this.failures);
+
+  final Map<String, Object> failures;
+
+  @override
+  String toString() => 'PlaybackActivationAggregateException: ${failures.entries.map((entry) => '${entry.key}: ${entry.value}').join('; ')}';
+}
+
 abstract interface class PlaybackBackendRuntime {
   String get backendId;
   bool get isAvailable;

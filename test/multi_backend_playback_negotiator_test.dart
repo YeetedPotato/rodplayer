@@ -217,6 +217,125 @@ void main() {
     expect(decision.plan.playMethod, PlayMethod.directStream);
     expect(decision.plan.playbackUri.path, '/Videos/flags/stream.mkv');
   });
+
+  test('backend PlaybackInfo failure is isolated while another backend wins', () async {
+    final requester = _Requester(<String, PlaybackInfoResponse>{'b': _response('b', PlayMethod.directPlay)}, failuresByBackendId: <String, Object>{'a': StateError('offline')});
+    final decision = await _negotiate(requester, backends: <PlaybackBackendDescriptor>[_backend('a'), _backend('b')], runtimes: const <PlaybackBackendRuntime>[_Runtime('a'), _Runtime('b')]);
+
+    expect(decision.selectedBackendId, 'b');
+    expect(decision.rejectedCandidates.single.rejectionReason, contains('a'));
+  });
+
+  test('request failure, no candidates, then success remains successful', () async {
+    final requester = _Requester(<String, PlaybackInfoResponse>{
+      'b': const PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[], raw: <String, dynamic>{}),
+      'c': _response('c', PlayMethod.directPlay),
+    }, failuresByBackendId: <String, Object>{'a': StateError('offline')});
+    final decision = await _negotiate(requester, backends: <PlaybackBackendDescriptor>[_backend('a'), _backend('b'), _backend('c')], runtimes: const <PlaybackBackendRuntime>[_Runtime('a'), _Runtime('b'), _Runtime('c')]);
+
+    expect(decision.selectedBackendId, 'c');
+    expect(decision.rejectedCandidates.map((candidate) => candidate.backend.id), containsAll(<String>['a', 'b']));
+  });
+
+  test('all backend PlaybackInfo failures aggregate backend context', () async {
+    final requester = _Requester(const <String, PlaybackInfoResponse>{}, failuresByBackendId: <String, Object>{'a': StateError('a down'), 'b': StateError('b down')});
+
+    await expectLater(
+      _negotiate(requester, backends: <PlaybackBackendDescriptor>[_backend('a'), _backend('b')], runtimes: const <PlaybackBackendRuntime>[_Runtime('a'), _Runtime('b')]),
+      throwsA(predicate<Object>((error) => error.toString().contains('a') && error.toString().contains('b'))),
+    );
+  });
+
+  test('one backend no candidates differs from request exception', () async {
+    final requester = _Requester(<String, PlaybackInfoResponse>{
+      'a': const PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[], raw: <String, dynamic>{}),
+      'b': _response('b', PlayMethod.directPlay),
+    });
+    final decision = await _negotiate(requester, backends: <PlaybackBackendDescriptor>[_backend('a'), _backend('b')], runtimes: const <PlaybackBackendRuntime>[_Runtime('a'), _Runtime('b')]);
+
+    expect(decision.selectedBackendId, 'b');
+    expect(decision.rejectedCandidates.single.rejectionReason, 'Server returned no media sources');
+  });
+
+  test('PlaybackInfo request bodies remain per-backend profiles', () async {
+    final appleNative = _backend('apple_native', priority: 10, capabilities: const PlaybackBackendCapabilities(id: 'apple_native', name: 'Apple', containers: <String>['mp4'], videoCodecs: <String>['h264'], audioCodecs: <String>['aac']));
+    final appleCompatibility = _backend('apple_compatibility', priority: 20, capabilities: const PlaybackBackendCapabilities(id: 'apple_compatibility', name: 'VLC', containers: <String>['mkv'], videoCodecs: <String>['vp9'], audioCodecs: <String>['opus']));
+    final requester = _Requester(<String, PlaybackInfoResponse>{
+      'apple_native': _response('n', PlayMethod.directPlay),
+      'apple_compatibility': _response('c', PlayMethod.directPlay),
+    });
+
+    await _negotiate(requester, backends: <PlaybackBackendDescriptor>[appleNative, appleCompatibility], runtimes: const <PlaybackBackendRuntime>[_Runtime('apple_native'), _Runtime('apple_compatibility')]);
+
+    expect('${requester.requestsByBackendId['apple_native']!.deviceProfile}', contains('mp4'));
+    expect('${requester.requestsByBackendId['apple_native']!.deviceProfile}', isNot(contains('mkv')));
+    expect('${requester.requestsByBackendId['apple_compatibility']!.deviceProfile}', contains('mkv'));
+    expect('${requester.requestsByBackendId['apple_compatibility']!.deviceProfile}', isNot(contains('mp4')));
+  });
+
+  test('transcode copied true false and null infer operations independently', () async {
+    final sources = <MediaSourceInfo>[
+      _source('copy-copy', PlayMethod.transcode, videoCopied: true, audioCopied: true),
+      _source('trans-trans', PlayMethod.transcode, videoCopied: false, audioCopied: false),
+      _source('unknown-unknown', PlayMethod.transcode),
+      _source('copy-unknown', PlayMethod.transcode, videoCopied: true),
+      _source('unknown-copy', PlayMethod.transcode, audioCopied: true),
+    ];
+    final decision = await _negotiate(_Requester(<String, PlaybackInfoResponse>{'media_kit': PlaybackInfoResponse(mediaSources: sources, raw: const <String, dynamic>{})}));
+    final plans = decision.orderedUsableCandidates.map((candidate) => candidate.plan!).toList(growable: false);
+
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'copy-copy').videoOperation, VideoOperation.copy);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'copy-copy').audioOperation, AudioOperation.copy);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'trans-trans').videoOperation, VideoOperation.transcode);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'trans-trans').audioOperation, AudioOperation.transcode);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'unknown-unknown').videoOperation, VideoOperation.unknown);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'unknown-unknown').audioOperation, AudioOperation.unknown);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'copy-unknown').audioOperation, AudioOperation.unknown);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'unknown-copy').videoOperation, VideoOperation.unknown);
+  });
+
+  test('HDR inference requires explicit evidence', () async {
+    final sources = <MediaSourceInfo>[
+      _source('tone', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'TranscodingReasons': <String>['VideoLevelNotSupported', 'ToneMap']}, hdr: true),
+      _source('preserve', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'HdrPreserved': true}, hdr: true),
+      _source('unknown-hdr', PlayMethod.transcode, videoCopied: false, hdr: true),
+      _source('sdr', PlayMethod.transcode, videoCopied: false),
+    ];
+    final decision = await _negotiate(_Requester(<String, PlaybackInfoResponse>{'media_kit': PlaybackInfoResponse(mediaSources: sources, raw: const <String, dynamic>{})}));
+    final plans = decision.orderedUsableCandidates.map((candidate) => candidate.plan!).toList(growable: false);
+
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'tone').hdrHandling, HdrHandling.toneMapToSdr);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'preserve').hdrHandling, HdrHandling.preserve);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'unknown-hdr').hdrHandling, HdrHandling.unknown);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'sdr').hdrHandling, HdrHandling.none);
+  });
+
+  test('backend priority cannot overturn preservation tier', () {
+    final scorer = const PlaybackPlanScorer();
+    final compatibility = PlaybackBackendCandidate(backend: _backend('compat', priority: 20), effectiveProfile: _profile(_backend('compat', priority: 20)), plan: _plan('compat', PlayMethod.directPlay), score: scorer.score(_plan('compat', PlayMethod.directPlay), _profile(_backend('compat', priority: 20))));
+    final native = PlaybackBackendCandidate(backend: _backend('native', priority: 10), effectiveProfile: _profile(_backend('native', priority: 10)), plan: _plan('native', PlayMethod.transcode, videoCopied: false, audioCopied: false), score: scorer.score(_plan('native', PlayMethod.transcode, videoCopied: false, audioCopied: false), _profile(_backend('native', priority: 10))));
+    final candidates = <PlaybackBackendCandidate>[native, compatibility]..sort(_compareForTest);
+
+    expect(candidates.first.backend.id, 'compat');
+  });
+
+  test('native direct play beats compatibility transcode and equal quality uses priority', () {
+    final scorer = const PlaybackPlanScorer();
+    final native = PlaybackBackendCandidate(backend: _backend('native', priority: 10), effectiveProfile: _profile(_backend('native', priority: 10)), plan: _plan('native', PlayMethod.directPlay), score: scorer.score(_plan('native', PlayMethod.directPlay), _profile(_backend('native', priority: 10))));
+    final compatibilityTranscode = PlaybackBackendCandidate(backend: _backend('compat', priority: 20), effectiveProfile: _profile(_backend('compat', priority: 20)), plan: _plan('compat', PlayMethod.transcode, videoCopied: false, audioCopied: false), score: scorer.score(_plan('compat', PlayMethod.transcode, videoCopied: false, audioCopied: false), _profile(_backend('compat', priority: 20))));
+    final compatibilityDirect = PlaybackBackendCandidate(backend: _backend('compat', priority: 20), effectiveProfile: _profile(_backend('compat', priority: 20)), plan: _plan('compat', PlayMethod.directPlay), score: scorer.score(_plan('compat', PlayMethod.directPlay), _profile(_backend('compat', priority: 20))));
+
+    expect((<PlaybackBackendCandidate>[compatibilityTranscode, native]..sort(_compareForTest)).first.backend.id, 'native');
+    expect((<PlaybackBackendCandidate>[compatibilityDirect, native]..sort(_compareForTest)).first.backend.id, 'native');
+  });
+
+  test('media kit can win when it uniquely has a better plan', () {
+    final scorer = const PlaybackPlanScorer();
+    final mediaKit = PlaybackBackendCandidate(backend: _backend('media_kit', priority: 30), effectiveProfile: _profile(_backend('media_kit', priority: 30)), plan: _plan('mk', PlayMethod.directPlay), score: scorer.score(_plan('mk', PlayMethod.directPlay), _profile(_backend('media_kit', priority: 30))));
+    final native = PlaybackBackendCandidate(backend: _backend('native', priority: 10), effectiveProfile: _profile(_backend('native', priority: 10)), plan: _plan('native', PlayMethod.transcode, videoCopied: false, audioCopied: false), score: scorer.score(_plan('native', PlayMethod.transcode, videoCopied: false, audioCopied: false), _profile(_backend('native', priority: 10))));
+
+    expect((<PlaybackBackendCandidate>[native, mediaKit]..sort(_compareForTest)).first.backend.id, 'media_kit');
+  });
 }
 
 Future<PlaybackPlanDecision> _negotiate(
@@ -249,12 +368,12 @@ PlaybackEnvironment _environment(List<PlaybackBackendDescriptor> backends) {
   );
 }
 
-PlaybackBackendDescriptor _backend(String id, {BackendAvailability availability = BackendAvailability.available, int priority = 0, CapabilitySupport hardwareDecode = CapabilitySupport.unknown, CapabilitySupport passthrough = CapabilitySupport.unknown}) => PlaybackBackendDescriptor(
+PlaybackBackendDescriptor _backend(String id, {BackendAvailability availability = BackendAvailability.available, int priority = 0, CapabilitySupport hardwareDecode = CapabilitySupport.unknown, CapabilitySupport passthrough = CapabilitySupport.unknown, PlaybackBackendCapabilities? capabilities}) => PlaybackBackendDescriptor(
       id: id,
       displayName: id,
       availability: availability,
       priority: priority,
-      capabilities: PlaybackBackendCapabilities(id: id, name: id, hardwareDecode: hardwareDecode, passthrough: passthrough),
+      capabilities: capabilities ?? PlaybackBackendCapabilities(id: id, name: id, hardwareDecode: hardwareDecode, passthrough: passthrough),
     );
 
 EffectivePlaybackProfile _profile(PlaybackBackendDescriptor backend) => EffectivePlaybackProfile(backendId: backend.id, capabilities: backend.capabilities, deviceProfile: _deviceProfile());
@@ -270,15 +389,16 @@ EffectiveDeviceProfile _deviceProfile() => const EffectiveDeviceProfile(
 
 PlaybackInfoResponse _response(String sourceId, PlayMethod method) => PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[_source(sourceId, method)], playSessionId: 'play-$sourceId', raw: const <String, dynamic>{});
 
-MediaSourceInfo _source(String id, PlayMethod method) => MediaSourceInfo.fromJson(<String, dynamic>{
+MediaSourceInfo _source(String id, PlayMethod method, {bool? videoCopied, bool? audioCopied, bool hdr = false, Map<String, dynamic> rawExtras = const <String, dynamic>{}}) => MediaSourceInfo.fromJson(<String, dynamic>{
       'Id': id,
       'PlayMethod': method.name,
       if (method == PlayMethod.directStream) 'DirectStreamUrl': '/Videos/$id/stream.mkv',
       if (method == PlayMethod.transcode) 'TranscodingUrl': '/server-built/$id.m3u8',
-      if (method == PlayMethod.transcode) 'VideoStreamCopy': id.contains('copy'),
-      if (method == PlayMethod.transcode) 'AudioStreamCopy': id.contains('audio-copy'),
+      if (videoCopied != null) 'VideoStreamCopy': videoCopied,
+      if (audioCopied != null) 'AudioStreamCopy': audioCopied,
+      ...rawExtras,
       'MediaStreams': <Map<String, dynamic>>[
-        <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': 'h264'},
+        <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': 'h264', if (hdr) 'VideoRange': 'HDR10'},
         <String, dynamic>{'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},
       ],
     });
@@ -335,10 +455,12 @@ PlaybackPlan _plan(
     );
 
 class _Requester implements PlaybackInfoRequester {
-  _Requester(this.responsesByBackendId);
+  _Requester(this.responsesByBackendId, {this.failuresByBackendId = const <String, Object>{}});
 
   final Map<String, PlaybackInfoResponse> responsesByBackendId;
+  final Map<String, Object> failuresByBackendId;
   final requestedBackendIds = <String>[];
+  final requestsByBackendId = <String, PlaybackInfoRequest>{};
 
   @override
   String? get userId => 'user';
@@ -352,6 +474,9 @@ class _Requester implements PlaybackInfoRequester {
   Future<PlaybackInfoResponse> getPlaybackInfoForBackend(PlaybackBackendDescriptor backend, PlaybackInfoRequest request) async {
     final backendId = backend.id;
     requestedBackendIds.add(backendId);
+    requestsByBackendId[backendId] = request;
+    final failure = failuresByBackendId[backendId];
+    if (failure != null) throw failure;
     return responsesByBackendId[backendId] ?? _response(backendId, PlayMethod.directPlay);
   }
 
@@ -377,6 +502,16 @@ class _Runtime implements PlaybackBackendRuntime {
     await engine.load(plan);
     return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine);
   }
+}
+
+int _compareForTest(PlaybackBackendCandidate a, PlaybackBackendCandidate b) {
+  final score = b.score!.total.compareTo(a.score!.total);
+  if (score != 0) return score;
+  final priority = a.backend.priority.compareTo(b.backend.priority);
+  if (priority != 0) return priority;
+  final backend = a.backend.id.compareTo(b.backend.id);
+  if (backend != 0) return backend;
+  return (a.plan?.mediaSourceId ?? '').compareTo(b.plan?.mediaSourceId ?? '');
 }
 
 class _FakeTrackSelectionController implements TrackSelectionController {

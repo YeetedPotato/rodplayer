@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:rodplayer/core/playback/multi_backend_playback_negotiator.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
@@ -13,6 +14,8 @@ class PlaybackRuntimeDiagnostics {
     required this.generation,
     this.playSessionId,
     this.failure,
+    this.attemptedRuntimeIds = const <String>[],
+    this.cleanupFailure,
   });
 
   final String selectedBackendId;
@@ -22,6 +25,8 @@ class PlaybackRuntimeDiagnostics {
   final int generation;
   final String? playSessionId;
   final Object? failure;
+  final List<String> attemptedRuntimeIds;
+  final Object? cleanupFailure;
 }
 
 class PlaybackRuntimeCoordinator {
@@ -42,8 +47,20 @@ class PlaybackRuntimeCoordinator {
   PlaybackRuntimeSession? get active => _active;
 
   Future<PlaybackRuntimeSession> activate(PlaybackPlan plan) {
+    return activateFirst(<PlaybackPlan>[plan]);
+  }
+
+  Future<PlaybackRuntimeSession> activateCandidates(List<PlaybackBackendCandidate> candidates) {
+    return activateFirst(<PlaybackPlan>[
+      for (final candidate in candidates)
+        if (candidate.isUsable) candidate.plan!,
+    ]);
+  }
+
+  Future<PlaybackRuntimeSession> activateFirst(List<PlaybackPlan> plans) {
     if (_disposed) return Future<PlaybackRuntimeSession>.error(StateError('Playback runtime coordinator is disposed'));
-    final request = _ActivationRequest(plan: plan, generation: ++_generation);
+    if (plans.isEmpty) return Future<PlaybackRuntimeSession>.error(StateError('No playback runtime candidates to activate'));
+    final request = _ActivationRequest(plans: List<PlaybackPlan>.unmodifiable(plans), generation: ++_generation);
     _queue.add(request);
     _startNext();
     return request.future;
@@ -70,12 +87,28 @@ class PlaybackRuntimeCoordinator {
   }
 
   Future<void> _runActivationBody(_ActivationRequest request) async {
-    final plan = request.plan;
     final generation = request.generation;
+    final failures = <String, Object>{};
+    final attemptedRuntimeIds = <String>[];
+    for (final plan in request.plans) {
+      attemptedRuntimeIds.add(plan.engineId);
+      final activated = await _tryActivatePlan(request, plan, generation, failures, attemptedRuntimeIds);
+      if (activated) return;
+      if (_disposed || generation != _generation) return;
+    }
+    if (failures.length == 1) {
+      final failure = failures.values.single;
+      request.completeError(failure is PlaybackRuntimeUnavailableException ? failure : PlaybackActivationException(failures.keys.single, failure));
+      return;
+    }
+    request.completeError(PlaybackActivationAggregateException(Map<String, Object>.unmodifiable(failures)));
+  }
+
+  Future<bool> _tryActivatePlan(_ActivationRequest request, PlaybackPlan plan, int generation, Map<String, Object> failures, List<String> attemptedRuntimeIds) async {
     final runtime = registry.resolve(plan.engineId);
     if (runtime == null) {
-      request.completeError(PlaybackRuntimeUnavailableException(plan.engineId));
-      return;
+      failures[plan.engineId] = PlaybackRuntimeUnavailableException(plan.engineId);
+      return false;
     }
     final PlaybackRuntimeSession next;
     try {
@@ -89,9 +122,10 @@ class PlaybackRuntimeCoordinator {
         generation: generation,
         playSessionId: plan.playSessionId,
         failure: error,
+        attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
       );
-      request.completeError(PlaybackActivationException(plan.engineId, error));
-      return;
+      failures[plan.engineId] = error;
+      return false;
     }
     if (_disposed || generation != _generation) {
       try {
@@ -99,7 +133,7 @@ class PlaybackRuntimeCoordinator {
       } finally {
         request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
       }
-      return;
+      return true;
     }
     final previous = _active;
     try {
@@ -111,7 +145,7 @@ class PlaybackRuntimeCoordinator {
         // Best-effort cleanup; the activation failure remains authoritative.
       }
       request.completeError(error);
-      return;
+      return true;
     }
     _active = next;
     diagnostics = PlaybackRuntimeDiagnostics(
@@ -121,6 +155,7 @@ class PlaybackRuntimeCoordinator {
       logicalSessionId: session.id,
       generation: generation,
       playSessionId: plan.playSessionId,
+      attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
     );
     try {
       if (previous != null) await previous.dispose();
@@ -132,10 +167,12 @@ class PlaybackRuntimeCoordinator {
         logicalSessionId: session.id,
         generation: generation,
         playSessionId: plan.playSessionId,
-        failure: error,
+        cleanupFailure: error,
+        attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
       );
     }
     request.complete(next);
+    return true;
   }
 
   Future<void> dispose() async {
@@ -158,11 +195,11 @@ class PlaybackRuntimeCoordinator {
 }
 
 class _ActivationRequest {
-  _ActivationRequest({required this.plan, required this.generation}) {
+  _ActivationRequest({required this.plans, required this.generation}) {
     _observed = completer.future..ignore();
   }
 
-  final PlaybackPlan plan;
+  final List<PlaybackPlan> plans;
   final int generation;
   final completer = Completer<PlaybackRuntimeSession>();
   late final Future<PlaybackRuntimeSession> _observed;

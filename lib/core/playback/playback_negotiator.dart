@@ -27,9 +27,15 @@ class PlaybackNegotiator {
     required String itemId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
+  }) async => (await negotiateDecision(itemId: itemId, audioStreamIndex: audioStreamIndex, subtitleStreamIndex: subtitleStreamIndex)).plan;
+
+  Future<PlaybackPlanDecision> negotiateDecision({
+    required String itemId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
   }) async {
     final environment = await environmentProvider.load();
-    final decision = await MultiBackendPlaybackNegotiator(
+    return MultiBackendPlaybackNegotiator(
       requester: JellyfinPlaybackInfoRequester(client),
       profileMapper: profileMapper,
       runtimeRegistry: runtimeRegistry,
@@ -39,6 +45,5 @@ class PlaybackNegotiator {
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
     );
-    return decision.plan;
   }
 }

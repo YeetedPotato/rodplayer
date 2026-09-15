@@ -154,6 +154,72 @@ void main() {
     expect(state.toJson(), containsPair('PlaySessionId', 'play-two'));
     expect(state.toJson(), containsPair('MediaSourceId', 'two'));
   });
+
+  test('activation failover tries second candidate after first open fails', () async {
+    final first = _FailingRuntime('apple_native');
+    final second = _FakeRuntime('apple_compatibility');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+
+    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('one', engineId: 'apple_native'), _plan('two', engineId: 'apple_compatibility')]);
+
+    expect(session.runtimeId, 'apple_compatibility');
+    expect(coordinator.session.activePlan.engineId, 'apple_compatibility');
+    expect(coordinator.diagnostics?.attemptedRuntimeIds, <String>['apple_native', 'apple_compatibility']);
+  });
+
+  test('activation failover can skip two failed candidates', () async {
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('a'), _FailingRuntime('b'), _FakeRuntime('c')]));
+
+    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('a', engineId: 'a'), _plan('b', engineId: 'b'), _plan('c', engineId: 'c')]);
+
+    expect(session.runtimeId, 'c');
+    expect(coordinator.session.activePlan.engineId, 'c');
+  });
+
+  test('all activation failover attempts fail with aggregate error', () async {
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('a'), _FailingRuntime('b')]));
+
+    await expectLater(coordinator.activateFirst(<PlaybackPlan>[_plan('a', engineId: 'a'), _plan('b', engineId: 'b')]), throwsA(isA<PlaybackActivationAggregateException>()));
+  });
+
+  test('superseded failover cannot commit', () async {
+    final slow = _ControlledRuntime('fallback');
+    final replacement = _FakeRuntime('replacement');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow, replacement]));
+
+    final first = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    final second = coordinator.activate(_plan('replacement', engineId: 'replacement'));
+    slow.completeNext();
+
+    await expectLater(first, throwsA(isA<StateError>()));
+    await second;
+    expect(coordinator.session.activePlan.engineId, 'replacement');
+    expect(slow.created.single.disposeCount, 1);
+  });
+
+  test('dispose during failover prevents later commit', () async {
+    final slow = _ControlledRuntime('fallback');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow]));
+
+    final activation = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    await coordinator.dispose();
+    slow.completeNext();
+
+    await expectLater(activation, throwsA(isA<StateError>()));
+    expect(coordinator.active, isNull);
+  });
+
+  test('cleanup failure after successful failover is diagnostic only', () async {
+    final runtime = _ThrowingFirstDisposeRuntime('media_kit');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime, _FailingRuntime('failed')]));
+
+    await coordinator.activate(_plan('one'));
+    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('two')]);
+
+    expect(session.plan.mediaSourceId, 'two');
+    expect(coordinator.diagnostics?.cleanupFailure, isA<StateError>());
+    expect(coordinator.session.activePlan.mediaSourceId, 'two');
+  });
 }
 
 PlaybackRuntimeCoordinator _coordinator(PlaybackRuntimeRegistry registry) => PlaybackRuntimeCoordinator(
@@ -228,6 +294,19 @@ class _ThrowingFirstDisposeRuntime extends _FakeRuntime {
     await engine.load(plan);
     return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine);
   }
+}
+
+class _FailingRuntime implements PlaybackBackendRuntime {
+  const _FailingRuntime(this.backendId);
+
+  @override
+  final String backendId;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async => throw StateError('open failed $backendId');
 }
 
 class _CountingEngine extends TestPlaybackEngine {

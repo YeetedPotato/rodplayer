@@ -33,7 +33,7 @@ class PlaybackBackendRegistry {
         id: PlaybackBackendIds.mediaKit,
         displayName: 'Default playback engine',
         availability: BackendAvailability.available,
-        priority: 0,
+        priority: 30,
         capabilities: mediaKitCapabilities,
       ),
       ...switch (platformFamily) {
