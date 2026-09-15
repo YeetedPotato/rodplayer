@@ -16,12 +16,16 @@ class PlaybackBackendRegistry {
   const PlaybackBackendRegistry({
     this.mediaKitCapabilities = ConservativePlaybackEnvironmentProvider.mediaKitCapabilities,
     this.appleNativeAvailable = false,
+    this.appleCompatibilityAvailable = false,
     this.androidNativeAvailable = false,
+    this.androidCompatibilityAvailable = false,
   });
 
   final PlaybackBackendCapabilities mediaKitCapabilities;
   final bool appleNativeAvailable;
+  final bool appleCompatibilityAvailable;
   final bool androidNativeAvailable;
+  final bool androidCompatibilityAvailable;
 
   List<PlaybackBackendDescriptor> backendsFor(PlatformFamily platformFamily) {
     final descriptors = <PlaybackBackendDescriptor>[
@@ -33,9 +37,9 @@ class PlaybackBackendRegistry {
         capabilities: mediaKitCapabilities,
       ),
       ...switch (platformFamily) {
-        PlatformFamily.android => _androidBackends(androidNativeAvailable: androidNativeAvailable),
-        PlatformFamily.ios => _appleBackends(appleNativeAvailable: appleNativeAvailable),
-        PlatformFamily.macos => _appleBackends(appleNativeAvailable: appleNativeAvailable),
+        PlatformFamily.android => _androidBackends(androidNativeAvailable: androidNativeAvailable, androidCompatibilityAvailable: androidCompatibilityAvailable),
+        PlatformFamily.ios => _appleBackends(appleNativeAvailable: appleNativeAvailable, appleCompatibilityAvailable: appleCompatibilityAvailable),
+        PlatformFamily.macos => _appleBackends(appleNativeAvailable: appleNativeAvailable, appleCompatibilityAvailable: appleCompatibilityAvailable),
         PlatformFamily.windows => _windowsBackends(),
         _ => const <PlaybackBackendDescriptor>[],
       },
@@ -48,7 +52,7 @@ class PlaybackBackendRegistry {
     return descriptors;
   }
 
-  static List<PlaybackBackendDescriptor> _appleBackends({required bool appleNativeAvailable}) => <PlaybackBackendDescriptor>[
+  static List<PlaybackBackendDescriptor> _appleBackends({required bool appleNativeAvailable, required bool appleCompatibilityAvailable}) => <PlaybackBackendDescriptor>[
         PlaybackBackendDescriptor(
           id: PlaybackBackendIds.appleNative,
           displayName: 'Apple native playback',
@@ -56,12 +60,12 @@ class PlaybackBackendRegistry {
           priority: 10,
           capabilities: appleNativeCapabilities,
         ),
-        const PlaybackBackendDescriptor(
+        PlaybackBackendDescriptor(
           id: PlaybackBackendIds.appleCompatibility,
           displayName: 'Apple compatibility playback',
-          availability: BackendAvailability.unavailable,
+          availability: appleCompatibilityAvailable ? BackendAvailability.available : BackendAvailability.unavailable,
           priority: 20,
-          capabilities: PlaybackBackendCapabilities(id: PlaybackBackendIds.appleCompatibility, name: 'Apple compatibility playback'),
+          capabilities: appleCompatibilityCapabilities,
         ),
       ];
 
@@ -98,7 +102,53 @@ class PlaybackBackendRegistry {
     ],
   );
 
-  static List<PlaybackBackendDescriptor> _androidBackends({required bool androidNativeAvailable}) => <PlaybackBackendDescriptor>[
+  static const PlaybackBackendCapabilities appleCompatibilityCapabilities = PlaybackBackendCapabilities(
+    id: PlaybackBackendIds.appleCompatibility,
+    name: 'Apple compatibility playback',
+    containers: <String>['mkv', 'mp4', 'mov', 'mpegts', 'avi', 'webm', 'm3u8'],
+    videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1', 'mpeg2', 'mpeg4'],
+    audioCodecs: <String>['aac', 'ac3', 'eac3', 'flac', 'mp3', 'opus', 'vorbis', 'alac', 'pcm'],
+    subtitleCodecs: <String>['srt', 'ass', 'ssa', 'webvtt'],
+    softwareDecode: CapabilitySupport.supported,
+    hardwareDecode: CapabilitySupport.unknown,
+    passthrough: CapabilitySupport.unknown,
+    localSubtitleRendering: CapabilitySupport.supported,
+    hdrOutputPreservation: CapabilitySupport.unknown,
+    directPlayRules: <DirectPlayCapabilityRule>[
+      DirectPlayCapabilityRule(containers: <String>['mkv', 'mp4', 'mov', 'mpegts', 'avi', 'webm', 'm3u8'], type: 'Video', videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1', 'mpeg2', 'mpeg4'], audioCodecs: <String>['aac', 'ac3', 'eac3', 'flac', 'mp3', 'opus', 'vorbis', 'alac', 'pcm']),
+    ],
+    videoCodecRules: <VideoCodecCapabilityRule>[
+      VideoCodecCapabilityRule(codec: 'h264'),
+      VideoCodecCapabilityRule(codec: 'hevc'),
+      VideoCodecCapabilityRule(codec: 'vp9'),
+      VideoCodecCapabilityRule(codec: 'av1'),
+      VideoCodecCapabilityRule(codec: 'mpeg2'),
+      VideoCodecCapabilityRule(codec: 'mpeg4'),
+    ],
+    audioCodecRules: <AudioCodecCapabilityRule>[
+      AudioCodecCapabilityRule(codec: 'aac'),
+      AudioCodecCapabilityRule(codec: 'ac3'),
+      AudioCodecCapabilityRule(codec: 'eac3'),
+      AudioCodecCapabilityRule(codec: 'flac'),
+      AudioCodecCapabilityRule(codec: 'mp3'),
+      AudioCodecCapabilityRule(codec: 'opus'),
+      AudioCodecCapabilityRule(codec: 'vorbis'),
+      AudioCodecCapabilityRule(codec: 'alac'),
+      AudioCodecCapabilityRule(codec: 'pcm'),
+    ],
+    subtitleRules: <SubtitleCapabilityRule>[
+      SubtitleCapabilityRule(codec: 'srt', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'ass', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'ssa', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'webvtt', deliveryMethod: 'Embed'),
+    ],
+    transcodingRules: <TranscodingCapabilityRule>[
+      TranscodingCapabilityRule(type: 'Video', container: 'm3u8', videoCodec: 'h264', audioCodec: 'aac,ac3,eac3', protocol: 'hls', context: 'Streaming'),
+      TranscodingCapabilityRule(type: 'Audio', container: 'mp3', audioCodec: 'mp3', protocol: 'http', context: 'Streaming'),
+    ],
+  );
+
+  static List<PlaybackBackendDescriptor> _androidBackends({required bool androidNativeAvailable, required bool androidCompatibilityAvailable}) => <PlaybackBackendDescriptor>[
         PlaybackBackendDescriptor(
           id: PlaybackBackendIds.androidNative,
           displayName: 'Android native playback',
@@ -106,12 +156,12 @@ class PlaybackBackendRegistry {
           priority: 10,
           capabilities: androidNativeCapabilities,
         ),
-        const PlaybackBackendDescriptor(
+        PlaybackBackendDescriptor(
           id: PlaybackBackendIds.androidCompatibility,
           displayName: 'Android compatibility playback',
-          availability: BackendAvailability.unavailable,
+          availability: androidCompatibilityAvailable ? BackendAvailability.available : BackendAvailability.unavailable,
           priority: 20,
-          capabilities: PlaybackBackendCapabilities(id: PlaybackBackendIds.androidCompatibility, name: 'Android compatibility playback'),
+          capabilities: androidCompatibilityCapabilities,
         ),
       ];
 
@@ -148,6 +198,52 @@ class PlaybackBackendRegistry {
       AudioCodecCapabilityRule(codec: 'mp3'),
     ],
     subtitleRules: <SubtitleCapabilityRule>[],
+    transcodingRules: <TranscodingCapabilityRule>[
+      TranscodingCapabilityRule(type: 'Video', container: 'm3u8', videoCodec: 'h264', audioCodec: 'aac,ac3,eac3', protocol: 'hls', context: 'Streaming'),
+      TranscodingCapabilityRule(type: 'Audio', container: 'mp3', audioCodec: 'mp3', protocol: 'http', context: 'Streaming'),
+    ],
+  );
+
+  static const PlaybackBackendCapabilities androidCompatibilityCapabilities = PlaybackBackendCapabilities(
+    id: PlaybackBackendIds.androidCompatibility,
+    name: 'Android compatibility playback',
+    containers: <String>['mkv', 'mp4', 'm4v', 'mov', 'mpegts', 'avi', 'webm', 'm3u8'],
+    videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1', 'mpeg2', 'mpeg4'],
+    audioCodecs: <String>['aac', 'ac3', 'eac3', 'flac', 'mp3', 'opus', 'vorbis', 'alac', 'pcm'],
+    subtitleCodecs: <String>['srt', 'ass', 'ssa', 'webvtt'],
+    softwareDecode: CapabilitySupport.supported,
+    hardwareDecode: CapabilitySupport.unknown,
+    passthrough: CapabilitySupport.unknown,
+    localSubtitleRendering: CapabilitySupport.supported,
+    hdrOutputPreservation: CapabilitySupport.unknown,
+    directPlayRules: <DirectPlayCapabilityRule>[
+      DirectPlayCapabilityRule(containers: <String>['mkv', 'mp4', 'm4v', 'mov', 'mpegts', 'avi', 'webm', 'm3u8'], type: 'Video', videoCodecs: <String>['h264', 'hevc', 'vp9', 'av1', 'mpeg2', 'mpeg4'], audioCodecs: <String>['aac', 'ac3', 'eac3', 'flac', 'mp3', 'opus', 'vorbis', 'alac', 'pcm']),
+    ],
+    videoCodecRules: <VideoCodecCapabilityRule>[
+      VideoCodecCapabilityRule(codec: 'h264'),
+      VideoCodecCapabilityRule(codec: 'hevc'),
+      VideoCodecCapabilityRule(codec: 'vp9'),
+      VideoCodecCapabilityRule(codec: 'av1'),
+      VideoCodecCapabilityRule(codec: 'mpeg2'),
+      VideoCodecCapabilityRule(codec: 'mpeg4'),
+    ],
+    audioCodecRules: <AudioCodecCapabilityRule>[
+      AudioCodecCapabilityRule(codec: 'aac'),
+      AudioCodecCapabilityRule(codec: 'ac3'),
+      AudioCodecCapabilityRule(codec: 'eac3'),
+      AudioCodecCapabilityRule(codec: 'flac'),
+      AudioCodecCapabilityRule(codec: 'mp3'),
+      AudioCodecCapabilityRule(codec: 'opus'),
+      AudioCodecCapabilityRule(codec: 'vorbis'),
+      AudioCodecCapabilityRule(codec: 'alac'),
+      AudioCodecCapabilityRule(codec: 'pcm'),
+    ],
+    subtitleRules: <SubtitleCapabilityRule>[
+      SubtitleCapabilityRule(codec: 'srt', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'ass', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'ssa', deliveryMethod: 'Embed'),
+      SubtitleCapabilityRule(codec: 'webvtt', deliveryMethod: 'Embed'),
+    ],
     transcodingRules: <TranscodingCapabilityRule>[
       TranscodingCapabilityRule(type: 'Video', container: 'm3u8', videoCodec: 'h264', audioCodec: 'aac,ac3,eac3', protocol: 'hls', context: 'Streaming'),
       TranscodingCapabilityRule(type: 'Audio', container: 'mp3', audioCodec: 'mp3', protocol: 'http', context: 'Streaming'),

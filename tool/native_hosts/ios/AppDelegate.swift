@@ -1,5 +1,6 @@
 import AVFoundation
 import Flutter
+import MobileVLCKit
 import UIKit
 import VideoToolbox
 
@@ -7,6 +8,7 @@ import VideoToolbox
 @objc class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private var events: FlutterEventSink?
   private let applePlayback = ApplePlaybackManager()
+  private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
 
   override func application(
     _ application: UIApplication,
@@ -31,6 +33,12 @@ import VideoToolbox
       .setStreamHandler(applePlayback)
     registrar(forPlugin: "RodPlayerApplePlayback")
       .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
+    FlutterMethodChannel(name: "rodplayer/apple_compatibility_playback", binaryMessenger: controller.binaryMessenger)
+      .setMethodCallHandler(compatibilityPlayback.handle)
+    FlutterEventChannel(name: "rodplayer/apple_compatibility_playback_events", binaryMessenger: controller.binaryMessenger)
+      .setStreamHandler(compatibilityPlayback)
+    registrar(forPlugin: "RodPlayerAppleCompatibilityPlayback")
+      .register(AppleCompatibilityPlaybackViewFactory(manager: compatibilityPlayback), withId: "rodplayer/apple_compatibility_playback_view")
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -93,6 +101,154 @@ import VideoToolbox
       "maxChannels": route?.channels?.count as Any,
       "sampleRates": [Int(session.sampleRate)].filter { $0 > 0 },
     ]
+  }
+}
+
+private final class AppleCompatibilityPlaybackManager: NSObject, FlutterStreamHandler {
+  private var players: [String: AppleCompatibilityPlaybackSession] = [:]
+  private var eventSink: FlutterEventSink?
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "ping":
+      result(true)
+    case "create":
+      guard let args = call.arguments as? [String: Any], let text = args["url"] as? String, let url = URL(string: text) else {
+        result(FlutterError(code: "bad_url", message: "Missing playback URL", details: nil))
+        return
+      }
+      let handle = UUID().uuidString
+      players[handle] = AppleCompatibilityPlaybackSession(handle: handle, url: url) { [weak self] payload in self?.eventSink?(payload) }
+      result(handle)
+    case "play": command(call, result) { $0.play() }
+    case "pause": command(call, result) { $0.pause() }
+    case "seek": command(call, result) { session in
+      let millis = ((call.arguments as? [String: Any])?["positionMillis"] as? NSNumber)?.int32Value ?? 0
+      session.seek(milliseconds: millis)
+    }
+    case "stop": command(call, result) { $0.stop() }
+    case "volume": command(call, result) { session in
+      let volume = ((call.arguments as? [String: Any])?["volume"] as? NSNumber)?.floatValue ?? 100
+      session.setVolume(volume / 100)
+    }
+    case "mute": command(call, result) { session in
+      let muted = ((call.arguments as? [String: Any])?["muted"] as? Bool) ?? false
+      session.setMuted(muted)
+    }
+    case "dispose":
+      guard let handle = (call.arguments as? [String: Any])?["handle"] as? String else {
+        result(FlutterError(code: "bad_handle", message: "Missing player handle", details: nil))
+        return
+      }
+      players.removeValue(forKey: handle)?.dispose()
+      result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func attach(handle: String?, view: UIView?) {
+    guard let handle = handle else { return }
+    players[handle]?.player.drawable = view
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func command(_ call: FlutterMethodCall, _ result: @escaping FlutterResult, _ action: (AppleCompatibilityPlaybackSession) -> Void) {
+    guard let handle = (call.arguments as? [String: Any])?["handle"] as? String, let session = players[handle] else {
+      result(FlutterError(code: "bad_handle", message: "Unknown player handle", details: nil))
+      return
+    }
+    action(session)
+    result(nil)
+  }
+}
+
+private final class AppleCompatibilityPlaybackSession: NSObject, VLCMediaPlayerDelegate {
+  let handle: String
+  let player = VLCMediaPlayer()
+  private let emit: ([String: Any]) -> Void
+  private var disposed = false
+  private var muted = false
+  private var desiredVolume: Float = 1
+
+  init(handle: String, url: URL, emit: @escaping ([String: Any]) -> Void) {
+    self.handle = handle
+    self.emit = emit
+    super.init()
+    player.delegate = self
+    player.media = VLCMedia(url: url)
+    player.play()
+    sendState()
+  }
+
+  func play() { player.play(); sendState() }
+  func pause() { player.pause(); sendState() }
+  func stop() { player.stop(); sendState() }
+  func seek(milliseconds: Int32) { player.time = VLCTime(int: milliseconds); sendState() }
+  func setVolume(_ value: Float) { desiredVolume = min(max(value, 0), 1); if !muted { player.audio?.volume = Int32(desiredVolume * 100) }; sendState() }
+  func setMuted(_ value: Bool) { muted = value; player.audio?.isMuted = muted; if !muted { player.audio?.volume = Int32(desiredVolume * 100) }; sendState() }
+
+  func mediaPlayerStateChanged(_ aNotification: Notification!) { sendState(error: player.state == .error ? "VLCKit playback failed" : nil, ended: player.state == .ended) }
+  func mediaPlayerTimeChanged(_ aNotification: Notification!) { sendState() }
+
+  private func sendState(error: String? = nil, ended: Bool = false) {
+    guard !disposed else { return }
+    emit([
+      "handle": handle,
+      "playing": player.isPlaying,
+      "buffering": player.state == .buffering,
+      "positionMillis": player.time.intValue,
+      "durationMillis": player.media?.length.intValue ?? 0,
+      "volume": Double(desiredVolume * 100),
+      "muted": muted,
+      "error": error as Any,
+      "ended": ended,
+    ])
+  }
+
+  func dispose() {
+    guard !disposed else { return }
+    disposed = true
+    player.stop()
+    player.delegate = nil
+    player.drawable = nil
+  }
+}
+
+private final class AppleCompatibilityPlaybackPlatformView: NSObject, FlutterPlatformView {
+  private let playerView = UIView()
+
+  init(frame: CGRect, handle: String?, manager: AppleCompatibilityPlaybackManager) {
+    super.init()
+    playerView.backgroundColor = .black
+    manager.attach(handle: handle, view: playerView)
+  }
+
+  func view() -> UIView { playerView }
+}
+
+private final class AppleCompatibilityPlaybackViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let manager: AppleCompatibilityPlaybackManager
+
+  init(manager: AppleCompatibilityPlaybackManager) {
+    self.manager = manager
+    super.init()
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol { FlutterStandardMessageCodec.sharedInstance() }
+
+  func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+    let handle = (args as? [String: Any])?["handle"] as? String
+    return AppleCompatibilityPlaybackPlatformView(frame: frame, handle: handle, manager: manager)
   }
 }
 
