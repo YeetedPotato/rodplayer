@@ -99,12 +99,18 @@ void main() {
     await tester.scrollUntilVisible(find.text('Movie 0'), -900, scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     expect(find.text('Movie 0'), findsWidgets);
-    for (var i = 0; i < 3 && find.widgetWithText(TextButton, 'Retry loading more').evaluate().isEmpty; i++) {
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -3000));
-      await tester.pumpAndSettle();
-    }
-    expect(find.widgetWithText(TextButton, 'Retry loading more'), findsOneWidget);
+    final scrollableState =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
 
+    scrollableState.position.jumpTo(
+      scrollableState.position.maxScrollExtent,
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.widgetWithText(TextButton, 'Retry loading more'),
+      findsOneWidget,
+    );
     client.failStarts.clear();
     client.pages[48] = JellyfinItemsPage<JellyfinLibraryItem>(items: [_movie('m48', 'Movie 48')], totalRecordCount: 49, startIndex: 48);
     await tester.tap(find.widgetWithText(TextButton, 'Retry loading more'));
