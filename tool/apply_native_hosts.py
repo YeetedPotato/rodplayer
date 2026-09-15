@@ -19,7 +19,7 @@ def patch_windows_cmake() -> None:
     if not path.exists():
         return
     text = path.read_text()
-    line = "target_link_libraries(${BINARY_NAME} PRIVATE d3d11 mmdevapi ole32)\n"
+    line = "target_link_libraries(${BINARY_NAME} PRIVATE d3d11 dxguid mmdevapi ole32)\n"
     if line not in text:
         text += "\n" + line
         path.write_text(text)
