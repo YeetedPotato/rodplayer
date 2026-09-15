@@ -22,11 +22,21 @@ class _HomeScreenState extends State<HomeScreen> {
   _Load<NextUpItem> _nextUp = const _Load.loading();
   _Load<JellyfinLibraryItem> _movies = const _Load.loading();
   _Load<JellyfinLibraryItem> _shows = const _Load.loading();
+  int _clientRevision = 0;
 
   @override
   void initState() {
     super.initState();
     _reloadAll();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.client != widget.client) {
+      _clientRevision++;
+      _reloadAll();
+    }
   }
 
   void _reloadAll() {
@@ -42,12 +52,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void _reloadShows() => _load((items) => _shows = items, () => widget.client.getLatestTvShows(limit: 12));
 
   Future<void> _load<T extends JellyfinLibraryItem>(void Function(_Load<T>) assign, Future<List<T>> Function() request) async {
+    final revision = _clientRevision;
     setState(() => assign(const _Load.loading()));
     try {
       final items = await request();
-      if (mounted) setState(() => assign(_Load.data(items)));
+      if (mounted && revision == _clientRevision) setState(() => assign(_Load.data(items)));
     } catch (error) {
-      if (mounted) setState(() => assign(_Load.error(error)));
+      if (mounted && revision == _clientRevision) setState(() => assign(_Load.error(error)));
     }
   }
 
@@ -140,7 +151,8 @@ class _HomeHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final size = MediaQuery.sizeOf(context);
-    final height = size.width < 650 ? 290.0 : 380.0;
+    final compact = size.width < 650;
+    final height = compact ? 290.0 : 380.0;
     final imageUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 85) ?? item.imageUrl(client.baseUrl, quality: 85);
     return SizedBox(
       height: height,
@@ -149,17 +161,17 @@ class _HomeHero extends StatelessWidget {
           Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
         DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.obsidian, theme.obsidian.withValues(alpha: .72), theme.obsidian], begin: Alignment.bottomCenter, end: Alignment.topCenter))),
         Padding(
-          padding: EdgeInsets.fromLTRB(size.width < 650 ? 20 : 40, 36, size.width < 650 ? 20 : 48, 28),
+          padding: EdgeInsets.fromLTRB(compact ? 20 : 40, compact ? 28 : 36, compact ? 20 : 48, compact ? 22 : 28),
           child: Align(
             alignment: Alignment.bottomLeft,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_title(item), maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: size.width < 650 ? 30 : 42)),
-                      const SizedBox(height: 8),
+                      Text(_title(item), maxLines: compact ? 1 : 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: compact ? 28 : 42)),
+                      SizedBox(height: compact ? 6 : 8),
                       Text(_heroSubtitle(item), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary)),
-                      if (item.overview != null) ...[const SizedBox(height: 12), Text(item.overview!, maxLines: size.width < 650 ? 2 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))],
-                      const SizedBox(height: 18),
+                      if (item.overview != null) ...[SizedBox(height: compact ? 8 : 12), Text(item.overview!, maxLines: compact ? 1 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))],
+                      SizedBox(height: compact ? 12 : 18),
                       FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
                     ]),
             ),
@@ -174,7 +186,7 @@ class _ShelfLoading extends StatelessWidget {
   const _ShelfLoading({required this.title});
   final String title;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(24, 18, 24, 24), child: Row(children: [Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), const Spacer(), const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))]));
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(24, 18, 24, 24), child: Row(children: [Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700))), const SizedBox(width: 12), const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))]));
 }
 
 class _ShelfError extends StatelessWidget {

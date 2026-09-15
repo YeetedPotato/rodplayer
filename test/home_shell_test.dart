@@ -104,9 +104,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Resume Movie'), findsWidgets);
-    expect(find.text('Latest Movie'), findsOneWidget);
-    expect(find.text('Latest Series'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Next Up unavailable'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.text('Next Up unavailable'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Latest Movie'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Latest Series'), findsOneWidget);
   });
 
   testWidgets('failed shelf retry reloads only that section', (tester) async {
@@ -115,11 +121,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect((client.resumeCalls, client.nextUpCalls, client.movieCalls, client.showCalls), (1, 1, 1, 1));
+    await tester.scrollUntilVisible(find.widgetWithText(TextButton, 'Retry'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(TextButton, 'Retry').first);
     await tester.pumpAndSettle();
 
     expect((client.resumeCalls, client.nextUpCalls, client.movieCalls, client.showCalls), (1, 2, 1, 1));
     expect(find.text('Resume Movie'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.text('Latest Movie'), findsOneWidget);
   });
 
