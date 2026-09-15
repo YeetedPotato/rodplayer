@@ -3,7 +3,21 @@ import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
+import 'package:rodplayer/ui/screens/media_library_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
+
+enum RodPlayerDestination {
+  home('Home', 'Home', Icons.home_outlined, Icons.home),
+  movies('Movies', 'Movies', Icons.movie_outlined, Icons.movie),
+  tvShows('TV Shows', 'TV', Icons.tv_outlined, Icons.tv),
+  search('Search', 'Search', Icons.search, Icons.search);
+
+  const RodPlayerDestination(this.title, this.compactLabel, this.icon, this.selectedIcon);
+  final String title;
+  final String compactLabel;
+  final IconData icon;
+  final IconData selectedIcon;
+}
 
 class RodPlayerAppShell extends StatefulWidget {
   const RodPlayerAppShell({required this.client, required this.onLogout, super.key});
@@ -15,7 +29,7 @@ class RodPlayerAppShell extends StatefulWidget {
 }
 
 class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
-  int _index = 0;
+  RodPlayerDestination _destination = RodPlayerDestination.home;
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'RodPlayer search');
 
   @override
@@ -24,8 +38,8 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     super.dispose();
   }
 
-  void _select(int index, {bool focusSearch = false}) {
-    setState(() => _index = index);
+  void _select(RodPlayerDestination destination, {bool focusSearch = false}) {
+    setState(() => _destination = destination);
     if (focusSearch) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _searchFocusNode.requestFocus();
@@ -40,28 +54,29 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     final directional = media.navigationMode == NavigationMode.directional;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => _select(1, focusSearch: true),
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => _select(1, focusSearch: true),
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => _select(RodPlayerDestination.search, focusSearch: true),
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => _select(RodPlayerDestination.search, focusSearch: true),
       },
       child: Focus(
         autofocus: true,
         child: LayoutBuilder(builder: (context, constraints) {
           final compact = constraints.maxWidth < 720 && !directional;
-          final body = IndexedStack(index: _index, children: [
+          final body = IndexedStack(index: RodPlayerDestination.values.indexOf(_destination), children: [
             HomeScreen(client: widget.client),
+            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies),
+            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.tvShows),
             SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false),
           ]);
           if (compact) {
             return Scaffold(
               backgroundColor: theme.obsidian,
-              appBar: AppBar(title: Text(_title), actions: [_LogoutButton(onLogout: widget.onLogout)]),
+              appBar: AppBar(title: Text(_destination.title), actions: [_LogoutButton(onLogout: widget.onLogout)]),
               body: SafeArea(bottom: false, child: body),
               bottomNavigationBar: NavigationBar(
-                selectedIndex: _index,
-                onDestinationSelected: (index) => _select(index),
-                destinations: const [
-                  NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-                  NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
+                selectedIndex: RodPlayerDestination.values.indexOf(_destination),
+                onDestinationSelected: (index) => _select(RodPlayerDestination.values[index]),
+                destinations: [
+                  for (final destination in RodPlayerDestination.values) NavigationDestination(icon: Icon(destination.icon), selectedIcon: Icon(destination.selectedIcon), label: destination.compactLabel),
                 ],
               ),
             );
@@ -70,7 +85,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
             backgroundColor: theme.obsidian,
             body: SafeArea(
               child: Row(children: [
-                _SideNav(selectedIndex: _index, directional: directional, onSelect: (index) => _select(index), onLogout: widget.onLogout),
+                _SideNav(destination: _destination, directional: directional, onSelect: _select, onLogout: widget.onLogout),
                 Expanded(child: body),
               ]),
             ),
@@ -80,14 +95,13 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     );
   }
 
-  String get _title => _index == 0 ? 'Home' : 'Search';
 }
 
 class _SideNav extends StatelessWidget {
-  const _SideNav({required this.selectedIndex, required this.directional, required this.onSelect, required this.onLogout});
-  final int selectedIndex;
+  const _SideNav({required this.destination, required this.directional, required this.onSelect, required this.onLogout});
+  final RodPlayerDestination destination;
   final bool directional;
-  final ValueChanged<int> onSelect;
+  final ValueChanged<RodPlayerDestination> onSelect;
   final Future<void> Function() onLogout;
 
   @override
@@ -102,13 +116,12 @@ class _SideNav extends StatelessWidget {
           Expanded(
             child: NavigationRail(
               backgroundColor: Colors.transparent,
-              selectedIndex: selectedIndex,
-              onDestinationSelected: onSelect,
+              selectedIndex: RodPlayerDestination.values.indexOf(destination),
+              onDestinationSelected: (index) => onSelect(RodPlayerDestination.values[index]),
               extended: directional,
               labelType: directional ? null : NavigationRailLabelType.all,
-              destinations: const [
-                NavigationRailDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: Text('Home')),
-                NavigationRailDestination(icon: Icon(Icons.search), label: Text('Search')),
+              destinations: [
+                for (final destination in RodPlayerDestination.values) NavigationRailDestination(icon: Icon(destination.icon), selectedIcon: Icon(destination.selectedIcon), label: Text(destination.title)),
               ],
             ),
           ),

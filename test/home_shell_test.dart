@@ -48,6 +48,10 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
+    expect(find.text('Home'), findsWidgets);
+    expect(find.text('Movies'), findsWidgets);
+    expect(find.text('TV'), findsWidgets);
+    expect(find.text('Search'), findsWidgets);
     await tester.tap(find.byIcon(Icons.search).last);
     await tester.pumpAndSettle();
     expect(find.byType(SearchScreen), findsOneWidget);
@@ -64,6 +68,14 @@ void main() {
 
     expect(find.byType(NavigationRail), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
+    expect(find.text('Movies'), findsWidgets);
+    expect(find.text('TV Shows'), findsWidgets);
+    await tester.tap(find.text('Movies').first);
+    await tester.pumpAndSettle();
+    expect(find.text('No movies found'), findsOneWidget);
+    await tester.tap(find.text('TV Shows').first);
+    await tester.pumpAndSettle();
+    expect(find.text('No shows found'), findsOneWidget);
     await tester.tap(find.byTooltip('Log out'));
     expect(loggedOut, isTrue);
   });
@@ -267,4 +279,15 @@ class _FakeHomeClient extends JellyfinApiClient {
     showCalls++;
     return _maybePending(shows);
   }
+
+  @override
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
+    required JellyfinLibraryKind kind,
+    JellyfinLibrarySort sort = JellyfinLibrarySort.title,
+    JellyfinLibraryFilter filter = JellyfinLibraryFilter.all,
+    int startIndex = 0,
+    int limit = 48,
+    String? parentId,
+  }) async =>
+      JellyfinItemsPage<JellyfinLibraryItem>(items: const <JellyfinLibraryItem>[], totalRecordCount: 0, startIndex: startIndex);
 }

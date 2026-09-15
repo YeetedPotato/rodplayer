@@ -114,6 +114,58 @@ void main() {
     expect(mock.requests[1].url.queryParameters, containsPair('IncludeItemTypes', 'Series'));
   });
 
+  test('library page query maps kind sort filter paging and base path', () async {
+    final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
+          'Items': <Map<String, dynamic>>[
+            <String, dynamic>{'Id': 'movie', 'Name': 'Film', 'Type': 'Movie'}
+          ],
+          'TotalRecordCount': 10,
+          'StartIndex': 5,
+        }), 200));
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+
+    final page = await client.getLibraryItemsPage(
+      kind: JellyfinLibraryKind.movies,
+      sort: JellyfinLibrarySort.title,
+      filter: JellyfinLibraryFilter.unplayed,
+      startIndex: 5,
+      limit: 7,
+      parentId: 'parent id',
+    );
+
+    final uri = mock.requests.single.url;
+    expect(uri.path, '/jellyfin/Items');
+    expect(uri.queryParameters, containsPair('UserId', 'user'));
+    expect(uri.queryParameters, containsPair('IncludeItemTypes', 'Movie'));
+    expect(uri.queryParameters, containsPair('Recursive', 'true'));
+    expect(uri.queryParameters, containsPair('StartIndex', '5'));
+    expect(uri.queryParameters, containsPair('Limit', '7'));
+    expect(uri.queryParameters, containsPair('EnableTotalRecordCount', 'true'));
+    expect(uri.queryParameters, containsPair('SortBy', 'SortName'));
+    expect(uri.queryParameters, containsPair('SortOrder', 'Ascending'));
+    expect(uri.queryParameters, containsPair('Filters', 'IsUnplayed'));
+    expect(uri.queryParameters, containsPair('ParentId', 'parent id'));
+    expect(page.totalRecordCount, 10);
+    expect(page.startIndex, 5);
+    expect(page.items.single.title, 'Film');
+  });
+
+  test('library sorts and filters map to Jellyfin query values', () async {
+    final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+
+    await client.getLibraryItemsPage(kind: JellyfinLibraryKind.tvShows, sort: JellyfinLibrarySort.recentlyAdded);
+    await client.getLibraryItemsPage(kind: JellyfinLibraryKind.movies, sort: JellyfinLibrarySort.releaseDate);
+    await client.getLibraryItemsPage(kind: JellyfinLibraryKind.movies, sort: JellyfinLibrarySort.communityRating, filter: JellyfinLibraryFilter.favorites);
+
+    expect(mock.requests[0].url.queryParameters, containsPair('IncludeItemTypes', 'Series'));
+    expect(mock.requests[0].url.queryParameters, containsPair('SortBy', 'DateCreated'));
+    expect(mock.requests[0].url.queryParameters, containsPair('SortOrder', 'Descending'));
+    expect(mock.requests[1].url.queryParameters, containsPair('SortBy', 'PremiereDate'));
+    expect(mock.requests[2].url.queryParameters, containsPair('SortBy', 'CommunityRating'));
+    expect(mock.requests[2].url.queryParameters, containsPair('Filters', 'IsFavorite'));
+  });
+
   test('user views and getItem use user-aware endpoints', () async {
     final mock = MockClient((request) async {
       if (request.url.path.endsWith('/Views')) return http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200);

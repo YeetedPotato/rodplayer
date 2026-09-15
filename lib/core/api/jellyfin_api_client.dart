@@ -21,6 +21,36 @@ class ServerConnectionException implements Exception {
   String toString() => 'ServerConnectionException: $message';
 }
 
+enum JellyfinLibraryKind {
+  movies('Movie'),
+  tvShows('Series');
+
+  const JellyfinLibraryKind(this.includeItemType);
+  final String includeItemType;
+}
+
+enum JellyfinLibrarySort {
+  title('Title', 'SortName', 'Ascending'),
+  recentlyAdded('Recently Added', 'DateCreated', 'Descending'),
+  releaseDate('Release Date', 'PremiereDate', 'Descending'),
+  communityRating('Community Rating', 'CommunityRating', 'Descending');
+
+  const JellyfinLibrarySort(this.label, this.sortBy, this.sortOrder);
+  final String label;
+  final String sortBy;
+  final String sortOrder;
+}
+
+enum JellyfinLibraryFilter {
+  all('All', null),
+  unplayed('Unplayed', 'IsUnplayed'),
+  favorites('Favorites', 'IsFavorite');
+
+  const JellyfinLibraryFilter(this.label, this.filter);
+  final String label;
+  final String? filter;
+}
+
 class JellyfinApiClient {
   JellyfinApiClient({
     required String baseUrl,
@@ -108,8 +138,8 @@ class JellyfinApiClient {
         JellyfinLibraryItem.fromJson,
       );
   Future<List<JellyfinLibraryItem>> getItems() async => (await getItemsPage()).items;
-  Future<List<JellyfinLibraryItem>> getLatestMovies({int limit = 20}) async => (await _typedItems(includeItemTypes: 'Movie', limit: limit)).items;
-  Future<List<JellyfinLibraryItem>> getLatestTvShows({int limit = 20}) async => (await _typedItems(includeItemTypes: 'Series', limit: limit)).items;
+  Future<List<JellyfinLibraryItem>> getLatestMovies({int limit = 20}) async => (await getLibraryItemsPage(kind: JellyfinLibraryKind.movies, sort: JellyfinLibrarySort.recentlyAdded, limit: limit)).items;
+  Future<List<JellyfinLibraryItem>> getLatestTvShows({int limit = 20}) async => (await getLibraryItemsPage(kind: JellyfinLibraryKind.tvShows, sort: JellyfinLibrarySort.recentlyAdded, limit: limit)).items;
   Future<List<NextUpItem>> getNextUp({int limit = 12}) async => _page(
         _jsonObject(await _client.get(_uri(<String>['Shows', 'NextUp'], <String, Object?>{'UserId': _requireUserId(), 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines'}), headers: headers)),
         NextUpItem.fromJson,
@@ -127,8 +157,28 @@ class JellyfinApiClient {
 
   Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Items', itemId], const <String, Object?>{}), headers: headers)));
 
-  Future<JellyfinItemsPage<JellyfinLibraryItem>> _typedItems({required String includeItemTypes, required int limit}) async => _page(
-        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{'UserId': _requireUserId(), 'IncludeItemTypes': includeItemTypes, 'Recursive': true, 'SortBy': 'DateCreated', 'SortOrder': 'Descending', 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines'}), headers: headers)),
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
+    required JellyfinLibraryKind kind,
+    JellyfinLibrarySort sort = JellyfinLibrarySort.title,
+    JellyfinLibraryFilter filter = JellyfinLibraryFilter.all,
+    int startIndex = 0,
+    int limit = 48,
+    String? parentId,
+  }) async =>
+      _page(
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'IncludeItemTypes': kind.includeItemType,
+          'Recursive': true,
+          'StartIndex': startIndex,
+          'Limit': limit,
+          'SortBy': sort.sortBy,
+          'SortOrder': sort.sortOrder,
+          'EnableTotalRecordCount': true,
+          if (filter.filter != null) 'Filters': filter.filter,
+          if (parentId != null && parentId.isNotEmpty) 'ParentId': parentId,
+          'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines',
+        }), headers: headers)),
         JellyfinLibraryItem.fromJson,
       );
 
