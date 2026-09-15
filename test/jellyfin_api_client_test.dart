@@ -70,6 +70,25 @@ void main() {
     expect(page.items.single.title, 'Film');
   });
 
+  test('content endpoints preserve configured base path', () async {
+    final mock = MockClient((request) async {
+      if (request.url.path.endsWith('/Items/item')) return http.Response(jsonEncode(<String, dynamic>{'Id': 'item', 'Name': 'Film'}), 200);
+      if (request.url.path.endsWith('/Search/Hints')) return http.Response(jsonEncode(<String, dynamic>{'SearchHints': <Map<String, dynamic>>[]}), 200);
+      return http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200);
+    });
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+
+    await client.getItemsPage();
+    await client.getNextUp();
+    await client.getItem('item');
+    await client.search(query: 'star wars');
+
+    expect(mock.requests[0].url.path, '/jellyfin/Items');
+    expect(mock.requests[1].url.path, '/jellyfin/Shows/NextUp');
+    expect(mock.requests[2].url.path, '/jellyfin/Users/user/Items/item');
+    expect(mock.requests[3].url.path, '/jellyfin/Search/Hints');
+  });
+
   test('resume and next up endpoints use authenticated user', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
     final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';

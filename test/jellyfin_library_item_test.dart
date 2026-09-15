@@ -13,7 +13,7 @@ void main() {
       'Overview': 'Story',
       'OfficialRating': 'PG-13',
       'CommunityRating': 7.5,
-      'Tagline': 'Tag',
+      'Taglines': <String>['Tag', 'Second'],
       'RunTimeTicks': 1200000000,
       'PrimaryImageAspectRatio': 0.7,
       'ImageTags': <String, dynamic>{'Primary': 'p', 'Thumb': 't'},
@@ -41,7 +41,14 @@ void main() {
     expect(item.playbackPositionTicks, 1000);
     expect(item.playedPercentage, 50.5);
     expect(item.imageUrl('https://server'), 'https://server/Items/movie%201/Images/Primary?tag=p&quality=90');
+    expect(item.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.raw['Name'], 'Film');
+  });
+
+  test('parses taglines conservatively', () {
+    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Taglines': <String>['First', 'Second']}).tagline, 'First');
+    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Taglines': <String>['', '  ']}).tagline, isNull);
+    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Tagline': 'Legacy'}).tagline, 'Legacy');
   });
 
   test('parses series and episode hierarchy', () {
@@ -92,8 +99,9 @@ void main() {
     expect(item.imageUrl('https://server'), isNull);
   });
 
-  test('search hint parses ItemId without pretending full item metadata exists', () {
+  test('search hint prefers Id and supports legacy ItemId', () {
     final hint = JellyfinSearchHint.fromJson(<String, dynamic>{
+      'Id': 'current',
       'ItemId': 'item',
       'Name': 'Result',
       'Type': 'Series',
@@ -101,20 +109,39 @@ void main() {
       'ImageTags': <String, dynamic>{'Primary': 'p'},
     });
 
-    expect(hint.id, 'item');
+    expect(hint.id, 'current');
     expect(hint.title, 'Result');
     expect(hint.kind, JellyfinItemKind.series);
     expect(hint.productionYear, 2020);
     expect(hint.primaryImageTag, 'p');
     expect(hint.raw.containsKey('Overview'), isFalse);
+    expect(JellyfinSearchHint.fromJson(<String, dynamic>{'ItemId': 'legacy'}).id, 'legacy');
   });
 
-  test('search hint tolerates missing optional fields', () {
+  test('search hint image ownership uses image item ids', () {
+    final hint = JellyfinSearchHint.fromJson(<String, dynamic>{
+      'Id': 'item',
+      'Name': 'Result',
+      'PrimaryImageTag': 'primary',
+      'ThumbImageItemId': 'thumb-owner',
+      'ThumbImageTag': 'thumb',
+      'BackdropImageItemId': 'backdrop-owner',
+      'BackdropImageTag': 'backdrop',
+    });
+
+    expect(hint.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/item/Images/Primary?tag=primary&quality=90');
+    expect(hint.imageUrl('https://server/jellyfin', type: JellyfinImageType.thumb), 'https://server/jellyfin/Items/thumb-owner/Images/Thumb?tag=thumb&quality=90');
+    expect(hint.imageUrl('https://server/jellyfin', type: JellyfinImageType.backdrop), 'https://server/jellyfin/Items/backdrop-owner/Images/Backdrop?tag=backdrop&quality=90');
+  });
+
+  test('search hint tolerates missing optional fields and image data', () {
     final hint = JellyfinSearchHint.fromJson(<String, dynamic>{'Id': 'fallback', 'Name': 'Sparse'});
 
     expect(hint.id, 'fallback');
     expect(hint.primaryImageTag, isNull);
     expect(hint.productionYear, isNull);
     expect(hint.imageUrl('https://server'), isNull);
+    expect(hint.imageUrl('https://server', type: JellyfinImageType.thumb), isNull);
+    expect(hint.imageUrl('https://server', type: JellyfinImageType.backdrop), isNull);
   });
 }

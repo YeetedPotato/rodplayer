@@ -51,11 +51,11 @@ class JellyfinUserData {
 }
 
 class JellyfinItemsPage<T> {
-  const JellyfinItemsPage({
-    required this.items,
+  JellyfinItemsPage({
+    required List<T> items,
     this.totalRecordCount,
     this.startIndex,
-  });
+  }) : items = List<T>.unmodifiable(items);
 
   final List<T> items;
   final int? totalRecordCount;
@@ -120,7 +120,6 @@ class JellyfinLibraryItem {
   JellyfinItemKind get kind => JellyfinItemKind.fromServer(rawType);
   bool get isFavorite => userData.isFavorite;
   bool get played => userData.played;
-  int? get posterImageTagHash => primaryImageTag == null ? null : primaryImageTag.hashCode;
   String? get posterImageTag => primaryImageTag;
   String? get backdropImageTag => backdropImageTags.isEmpty ? null : backdropImageTags.first;
   Duration? get playbackPosition => playbackPositionTicks == null ? null : Duration(microseconds: playbackPositionTicks! ~/ 10);
@@ -145,7 +144,7 @@ class JellyfinLibraryItem {
       overview: _string(json['Overview']),
       officialRating: _string(json['OfficialRating']),
       communityRating: _double(json['CommunityRating']),
-      tagline: _string(json['Tagline']),
+      tagline: _tagline(json),
       playbackPositionTicks: userData.playbackPositionTicks ?? _integer(json['PlaybackPositionTicks']),
       playedPercentage: userData.playedPercentage ?? _double(json['PlayedPercentage']),
       runTimeTicks: _integer(json['RunTimeTicks']),
@@ -305,6 +304,9 @@ class JellyfinSearchHint {
     this.mediaType,
     this.productionYear,
     this.primaryImageTag,
+    this.backdropImageItemId,
+    this.backdropImageTag,
+    this.thumbImageItemId,
     this.thumbImageTag,
     this.primaryImageAspectRatio,
     this.raw = const <String, dynamic>{},
@@ -316,6 +318,9 @@ class JellyfinSearchHint {
   final String? mediaType;
   final int? productionYear;
   final String? primaryImageTag;
+  final String? backdropImageItemId;
+  final String? backdropImageTag;
+  final String? thumbImageItemId;
   final String? thumbImageTag;
   final double? primaryImageAspectRatio;
   final Map<String, dynamic> raw;
@@ -325,12 +330,15 @@ class JellyfinSearchHint {
   factory JellyfinSearchHint.fromJson(Map<String, dynamic> json) {
     final imageTags = json['ImageTags'] is Map ? Map<String, dynamic>.from(json['ImageTags'] as Map) : const <String, dynamic>{};
     return JellyfinSearchHint(
-      id: _string(json['ItemId'] ?? json['Id']) ?? '',
+      id: _string(json['Id'] ?? json['ItemId']) ?? '',
       title: _string(json['Name']) ?? '',
       rawType: _string(json['Type']),
       mediaType: _string(json['MediaType']),
       productionYear: _integer(json['ProductionYear']),
       primaryImageTag: _string(imageTags['Primary'] ?? json['PrimaryImageTag']),
+      backdropImageItemId: _string(json['BackdropImageItemId']),
+      backdropImageTag: _string(imageTags['Backdrop'] ?? json['BackdropImageTag']),
+      thumbImageItemId: _string(json['ThumbImageItemId']),
       thumbImageTag: _string(imageTags['Thumb'] ?? json['ThumbImageTag']),
       primaryImageAspectRatio: _double(json['PrimaryImageAspectRatio']),
       raw: Map<String, dynamic>.unmodifiable(json),
@@ -342,17 +350,19 @@ class JellyfinSearchHint {
     return productionYear == null ? type : '$productionYear · $type';
   }
 
-  String? imageUrl(String baseUrl, {JellyfinImageType type = JellyfinImageType.primary, int? quality = 90}) => jellyfinImageUrl(
-        baseUrl: baseUrl,
-        itemId: id,
-        tag: switch (type) {
-          JellyfinImageType.primary => primaryImageTag,
-          JellyfinImageType.backdrop => null,
-          JellyfinImageType.thumb => thumbImageTag,
-        },
-        type: type,
-        quality: quality,
-      );
+  String? imageUrl(String baseUrl, {JellyfinImageType type = JellyfinImageType.primary, int? quality = 90}) {
+    final ownerId = switch (type) {
+      JellyfinImageType.primary => id,
+      JellyfinImageType.backdrop => backdropImageItemId ?? id,
+      JellyfinImageType.thumb => thumbImageItemId ?? id,
+    };
+    final tag = switch (type) {
+      JellyfinImageType.primary => primaryImageTag,
+      JellyfinImageType.backdrop => backdropImageTag,
+      JellyfinImageType.thumb => thumbImageTag,
+    };
+    return jellyfinImageUrl(baseUrl: baseUrl, itemId: ownerId, tag: tag, type: type, quality: quality);
+  }
 }
 
 enum JellyfinImageType {
@@ -374,16 +384,34 @@ String? jellyfinImageUrl({
   final cleanId = itemId.trim();
   final cleanTag = tag?.trim();
   if (cleanId.isEmpty || cleanTag == null || cleanTag.isEmpty) return null;
-  final uri = Uri.parse(baseUrl).resolve('/Items/${Uri.encodeComponent(cleanId)}/Images/${type.pathName}');
+  final uri = jellyfinUri(baseUrl, <String>['Items', cleanId, 'Images', type.pathName]);
   return uri.replace(queryParameters: <String, String>{
     'tag': cleanTag,
     if (quality != null) 'quality': '$quality',
   }).toString();
 }
 
+Uri jellyfinUri(String baseUrl, Iterable<String> pathSegments, {Map<String, String>? queryParameters}) {
+  final base = Uri.parse(baseUrl);
+  final baseSegments = base.pathSegments.where((segment) => segment.isNotEmpty);
+  return base.replace(pathSegments: <String>[...baseSegments, ...pathSegments], queryParameters: queryParameters);
+}
+
 int? _integer(Object? value) => value is num ? value.toInt() : int.tryParse('$value');
 double? _double(Object? value) => value is num ? value.toDouble() : double.tryParse('$value');
 String? _string(Object? value) => value == null ? null : '$value';
+String? _tagline(Map<String, dynamic> json) {
+  final taglines = json['Taglines'];
+  if (taglines is List) {
+    for (final tagline in taglines) {
+      final value = _string(tagline)?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
+  }
+  final legacy = _string(json['Tagline'])?.trim();
+  return legacy == null || legacy.isEmpty ? null : legacy;
+}
 bool? _bool(Object? value) {
   if (value is bool) return value;
   if (value is! String) return null;

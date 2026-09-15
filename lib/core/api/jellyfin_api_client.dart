@@ -95,37 +95,40 @@ class JellyfinApiClient {
     return JellyfinItemsPage<T>(items: values, totalRecordCount: _int(json['TotalRecordCount']), startIndex: _int(json['StartIndex']));
   }
 
-  Uri _uri(String path, Map<String, Object?> query) => Uri.parse(baseUrl).replace(path: path, queryParameters: <String, String>{
-        for (final entry in query.entries)
-          if (entry.value != null) entry.key: '${entry.value}',
-      });
+  Uri _uri(Iterable<String> pathSegments, Map<String, Object?> query) {
+    final queryParameters = <String, String>{
+      for (final entry in query.entries)
+        if (entry.value != null) entry.key: '${entry.value}',
+    };
+    return jellyfinUri(baseUrl, pathSegments, queryParameters: queryParameters.isEmpty ? null : queryParameters);
+  }
 
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getItemsPage({int? startIndex, int? limit}) async => _page(
-        _jsonObject(await _client.get(_uri('/Items', <String, Object?>{'UserId': _requireUserId(), if (startIndex != null) 'StartIndex': startIndex, if (limit != null) 'Limit': limit}), headers: headers)),
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{'UserId': _requireUserId(), if (startIndex != null) 'StartIndex': startIndex, if (limit != null) 'Limit': limit}), headers: headers)),
         JellyfinLibraryItem.fromJson,
       );
   Future<List<JellyfinLibraryItem>> getItems() async => (await getItemsPage()).items;
   Future<List<JellyfinLibraryItem>> getLatestMovies({int limit = 20}) async => (await _typedItems(includeItemTypes: 'Movie', limit: limit)).items;
   Future<List<JellyfinLibraryItem>> getLatestTvShows({int limit = 20}) async => (await _typedItems(includeItemTypes: 'Series', limit: limit)).items;
   Future<List<NextUpItem>> getNextUp({int limit = 12}) async => _page(
-        _jsonObject(await _client.get(_uri('/Shows/NextUp', <String, Object?>{'UserId': _requireUserId(), 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,UserData,SeriesName,SeriesId,SeasonId,ParentId,SeasonNumber,IndexNumber,RunTimeTicks,Overview,OfficialRating,CommunityRating,ProductionYear'}), headers: headers)),
+        _jsonObject(await _client.get(_uri(<String>['Shows', 'NextUp'], <String, Object?>{'UserId': _requireUserId(), 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines'}), headers: headers)),
         NextUpItem.fromJson,
       ).items;
   Future<List<ResumableItem>> getResumeItems({int limit = 12}) async => _page(
-        _jsonObject(await _client.get(_uri('/Items', <String, Object?>{'UserId': _requireUserId(), 'Filters': 'IsResumable', 'Recursive': true, 'SortBy': 'DatePlayed', 'SortOrder': 'Descending', 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,BackdropImageTags,UserData,SeriesName,SeriesId,SeasonId,ParentId,SeasonNumber,IndexNumber,RunTimeTicks,Overview,OfficialRating,CommunityRating,ProductionYear'}), headers: headers)),
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{'UserId': _requireUserId(), 'Filters': 'IsResumable', 'Recursive': true, 'SortBy': 'DatePlayed', 'SortOrder': 'Descending', 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines'}), headers: headers)),
         ResumableItem.fromJson,
       ).items;
-  Future<List<JellyfinLibraryItem>> getUserViews() async => _page(_jsonObject(await _client.get(_uri('/Users/${Uri.encodeComponent(_requireUserId())}/Views', const <String, Object?>{}), headers: headers)), JellyfinLibraryItem.fromJson).items;
+  Future<List<JellyfinLibraryItem>> getUserViews() async => _page(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Views'], const <String, Object?>{}), headers: headers)), JellyfinLibraryItem.fromJson).items;
   Future<List<JellyfinSearchHint>> search({required String query, int limit = 20}) async => _page(
-        _jsonObject(await _client.get(_uri('/Search/Hints', <String, Object?>{'UserId': _requireUserId(), 'SearchTerm': query, 'Limit': limit, 'IncludeItemTypes': 'Movie,Series,Episode'}), headers: headers)),
+        _jsonObject(await _client.get(_uri(<String>['Search', 'Hints'], <String, Object?>{'UserId': _requireUserId(), 'SearchTerm': query, 'Limit': limit, 'IncludeItemTypes': 'Movie,Series,Episode'}), headers: headers)),
         JellyfinSearchHint.fromJson,
         key: 'SearchHints',
       ).items;
 
-  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri('/Users/${Uri.encodeComponent(_requireUserId())}/Items/${Uri.encodeComponent(itemId)}', const <String, Object?>{}), headers: headers)));
+  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Items', itemId], const <String, Object?>{}), headers: headers)));
 
   Future<JellyfinItemsPage<JellyfinLibraryItem>> _typedItems({required String includeItemTypes, required int limit}) async => _page(
-        _jsonObject(await _client.get(_uri('/Items', <String, Object?>{'UserId': _requireUserId(), 'IncludeItemTypes': includeItemTypes, 'Recursive': true, 'SortBy': 'DateCreated', 'SortOrder': 'Descending', 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,UserData,Overview,OfficialRating,CommunityRating,ProductionYear,PremiereDate,Taglines,Tagline'}), headers: headers)),
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{'UserId': _requireUserId(), 'IncludeItemTypes': includeItemTypes, 'Recursive': true, 'SortBy': 'DateCreated', 'SortOrder': 'Descending', 'Limit': limit, 'Fields': 'PrimaryImageAspectRatio,Overview,ParentId,Taglines'}), headers: headers)),
         JellyfinLibraryItem.fromJson,
       );
 
