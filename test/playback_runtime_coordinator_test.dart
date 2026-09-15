@@ -66,12 +66,13 @@ void main() {
     final second = coordinator.activate(_plan('two'));
     expect(runtime.activeOpens, 1);
     runtime.completeNext();
-    await first;
+    await expectLater(first, throwsA(isA<StateError>()));
     expect(runtime.activeOpens, 1);
     runtime.completeNext();
     await second;
 
     expect(runtime.maxActiveOpens, 1);
+    expect(runtime.created.first.disposeCount, 1);
     expect(coordinator.session.activePlan.mediaSourceId, 'two');
   });
 
@@ -85,6 +86,20 @@ void main() {
 
     await expectLater(activation, throwsA(isA<StateError>()));
     expect(runtime.created.single.disposeCount, 1);
+  });
+
+  test('queued activation after dispose never opens', () async {
+    final runtime = _ControlledRuntime('media_kit');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+
+    final first = coordinator.activate(_plan('one'));
+    final second = coordinator.activate(_plan('two'));
+    await coordinator.dispose();
+    runtime.completeNext();
+
+    await expectLater(first, throwsA(isA<StateError>()));
+    await expectLater(second, throwsA(isA<StateError>()));
+    expect(runtime.opened.map((plan) => plan.mediaSourceId), <String>['one']);
   });
 
   test('runtime is disposed exactly once on replacement and coordinator dispose', () async {

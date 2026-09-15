@@ -27,36 +27,49 @@ class PlaybackRuntimeDiagnostics {
 class PlaybackRuntimeCoordinator {
   PlaybackRuntimeCoordinator({
     required this.registry,
-    required LogicalPlaybackSession session,
-  }) : session = session;
+    required this.session,
+  });
 
   final PlaybackRuntimeRegistry registry;
   final LogicalPlaybackSession session;
   PlaybackRuntimeSession? _active;
   PlaybackRuntimeDiagnostics? diagnostics;
-  Future<void> _tail = Future<void>.value();
+  final _queue = <_ActivationRequest>[];
   var _generation = 0;
+  var _opening = false;
   var _disposed = false;
 
   PlaybackRuntimeSession? get active => _active;
 
   Future<PlaybackRuntimeSession> activate(PlaybackPlan plan) {
-    final completer = Completer<PlaybackRuntimeSession>();
-    _tail = _tail.whenComplete(() async {
-      try {
-        completer.complete(await _activateNow(plan));
-      } on Object catch (error, stackTrace) {
-        completer.completeError(error, stackTrace);
-      }
-    });
-    return completer.future;
+    if (_disposed) return Future<PlaybackRuntimeSession>.error(StateError('Playback runtime coordinator is disposed'));
+    final request = _ActivationRequest(plan: plan, generation: ++_generation);
+    _queue.add(request);
+    _startNext();
+    return request.completer.future;
   }
 
-  Future<PlaybackRuntimeSession> _activateNow(PlaybackPlan plan) async {
-    if (_disposed) throw StateError('Playback runtime coordinator is disposed');
-    final generation = ++_generation;
+  void _startNext() {
+    if (_opening || _queue.isEmpty) return;
+    if (_disposed) {
+      _failQueued(StateError('Playback runtime coordinator is disposed'));
+      return;
+    }
+    final request = _queue.removeAt(0);
+    _opening = true;
+    unawaited(_runActivation(request));
+  }
+
+  Future<void> _runActivation(_ActivationRequest request) async {
+    final plan = request.plan;
+    final generation = request.generation;
     final runtime = registry.resolve(plan.engineId);
-    if (runtime == null) throw PlaybackRuntimeUnavailableException(plan.engineId);
+    if (runtime == null) {
+      request.completeError(PlaybackRuntimeUnavailableException(plan.engineId));
+      _opening = false;
+      _startNext();
+      return;
+    }
     PlaybackRuntimeSession next;
     try {
       next = await runtime.open(plan);
@@ -70,11 +83,17 @@ class PlaybackRuntimeCoordinator {
         playSessionId: plan.playSessionId,
         failure: error,
       );
-      throw PlaybackActivationException(plan.engineId, error);
+      request.completeError(PlaybackActivationException(plan.engineId, error));
+      _opening = false;
+      _startNext();
+      return;
     }
     if (_disposed || generation != _generation) {
       await next.dispose();
-      throw StateError('Playback activation was superseded');
+      request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
+      _opening = false;
+      _startNext();
+      return;
     }
     final previous = _active;
     _active = next;
@@ -88,15 +107,42 @@ class PlaybackRuntimeCoordinator {
       playSessionId: plan.playSessionId,
     );
     if (previous != null) await previous.dispose();
-    return next;
+    request.complete(next);
+    _opening = false;
+    _startNext();
   }
 
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
     _generation += 1;
+    _failQueued(StateError('Playback runtime coordinator is disposed'));
     final active = _active;
     _active = null;
     if (active != null) await active.dispose();
+  }
+
+  void _failQueued(Object error) {
+    final queued = List<_ActivationRequest>.of(_queue);
+    _queue.clear();
+    for (final request in queued) {
+      request.completeError(error);
+    }
+  }
+}
+
+class _ActivationRequest {
+  _ActivationRequest({required this.plan, required this.generation});
+
+  final PlaybackPlan plan;
+  final int generation;
+  final completer = Completer<PlaybackRuntimeSession>();
+
+  void complete(PlaybackRuntimeSession session) {
+    if (!completer.isCompleted) completer.complete(session);
+  }
+
+  void completeError(Object error) {
+    if (!completer.isCompleted) completer.completeError(error);
   }
 }
