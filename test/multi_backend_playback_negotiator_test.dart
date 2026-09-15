@@ -297,7 +297,10 @@ void main() {
   test('HDR inference requires explicit evidence', () async {
     final sources = <MediaSourceInfo>[
       _source('tone', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'TranscodingReasons': <String>['VideoLevelNotSupported', 'ToneMap']}, hdr: true),
+      _source('tone-raw', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'ToneMap': true}, hdr: true),
+      _source('tone-false', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'ToneMap': false}, hdr: true),
       _source('preserve', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'HdrPreserved': true}, hdr: true),
+      _source('preserve-false', PlayMethod.transcode, videoCopied: false, rawExtras: const <String, dynamic>{'HdrPreserved': false}, hdr: true),
       _source('unknown-hdr', PlayMethod.transcode, videoCopied: false, hdr: true),
       _source('sdr', PlayMethod.transcode, videoCopied: false),
     ];
@@ -305,7 +308,10 @@ void main() {
     final plans = decision.orderedUsableCandidates.map((candidate) => candidate.plan!).toList(growable: false);
 
     expect(plans.singleWhere((plan) => plan.mediaSourceId == 'tone').hdrHandling, HdrHandling.toneMapToSdr);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'tone-raw').hdrHandling, HdrHandling.toneMapToSdr);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'tone-false').hdrHandling, HdrHandling.unknown);
     expect(plans.singleWhere((plan) => plan.mediaSourceId == 'preserve').hdrHandling, HdrHandling.preserve);
+    expect(plans.singleWhere((plan) => plan.mediaSourceId == 'preserve-false').hdrHandling, HdrHandling.unknown);
     expect(plans.singleWhere((plan) => plan.mediaSourceId == 'unknown-hdr').hdrHandling, HdrHandling.unknown);
     expect(plans.singleWhere((plan) => plan.mediaSourceId == 'sdr').hdrHandling, HdrHandling.none);
   });

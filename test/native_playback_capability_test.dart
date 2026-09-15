@@ -136,9 +136,9 @@ void main() {
       final android = registry.backendsFor(PlatformFamily.android);
       final windows = registry.backendsFor(PlatformFamily.windows);
 
-      expect(android.map((backend) => backend.id), <String>['media_kit', 'android_native', 'android_compatibility']);
-      expect(windows.map((backend) => backend.id), <String>['media_kit', 'windows_mpv']);
-      expect(android.first.availability, BackendAvailability.available);
+      expect(android.map((backend) => backend.id), <String>['android_native', 'android_compatibility', 'media_kit']);
+      expect(windows.map((backend) => backend.id), <String>['windows_mpv', 'media_kit']);
+      expect(android.last.availability, BackendAvailability.available);
     });
 
     test('android native availability is explicit', () {

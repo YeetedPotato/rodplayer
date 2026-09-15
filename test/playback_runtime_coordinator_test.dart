@@ -110,7 +110,7 @@ void main() {
     final secondSession = await coordinator.activate(_plan('two'));
     expect(secondSession.engine, same(runtime.created[1]));
     expect(coordinator.session.activePlan.mediaSourceId, 'two');
-    expect(coordinator.diagnostics?.failure, isA<StateError>());
+    expect(coordinator.diagnostics?.cleanupFailure, isA<StateError>());
     expect(runtime.created[1].disposeCount, 0);
 
     await coordinator.activate(_plan('three'));
@@ -165,6 +165,7 @@ void main() {
     expect(session.runtimeId, 'apple_compatibility');
     expect(coordinator.session.activePlan.engineId, 'apple_compatibility');
     expect(coordinator.diagnostics?.attemptedRuntimeIds, <String>['apple_native', 'apple_compatibility']);
+    expect(coordinator.diagnostics?.activationFailures.keys, contains('apple_native'));
   });
 
   test('activation failover can skip two failed candidates', () async {
@@ -174,6 +175,7 @@ void main() {
 
     expect(session.runtimeId, 'c');
     expect(coordinator.session.activePlan.engineId, 'c');
+    expect(coordinator.diagnostics?.activationFailures.keys, containsAll(<String>['a', 'b']));
   });
 
   test('all activation failover attempts fail with aggregate error', () async {
@@ -188,6 +190,7 @@ void main() {
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow, replacement]));
 
     final first = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    await slow.waitUntilOpenStarted();
     final second = coordinator.activate(_plan('replacement', engineId: 'replacement'));
     slow.completeNext();
 
@@ -202,11 +205,29 @@ void main() {
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow]));
 
     final activation = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    await slow.waitUntilOpenStarted();
     await coordinator.dispose();
     slow.completeNext();
 
     await expectLater(activation, throwsA(isA<StateError>()));
     expect(coordinator.active, isNull);
+  });
+
+  test('superseded before fallback starts completes old request', () async {
+    final failed = _ControlledFailingRuntime('failed');
+    final fallback = _FakeRuntime('fallback');
+    final replacement = _FakeRuntime('replacement');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[failed, fallback, replacement]));
+
+    final first = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    await failed.waitUntilOpenStarted();
+    final second = coordinator.activate(_plan('replacement', engineId: 'replacement'));
+    failed.completeNext();
+
+    await expectLater(first, throwsA(isA<StateError>()));
+    await second;
+    expect(fallback.opened, isEmpty);
+    expect(coordinator.session.activePlan.engineId, 'replacement');
   });
 
   test('cleanup failure after successful failover is diagnostic only', () async {
@@ -218,6 +239,7 @@ void main() {
 
     expect(session.plan.mediaSourceId, 'two');
     expect(coordinator.diagnostics?.cleanupFailure, isA<StateError>());
+    expect(coordinator.diagnostics?.activationFailures.keys, contains('failed'));
     expect(coordinator.session.activePlan.mediaSourceId, 'two');
   });
 }
@@ -266,6 +288,7 @@ class _ControlledRuntime extends _FakeRuntime {
   _ControlledRuntime(super.backendId);
 
   final _pending = <Completer<void>>[];
+  final _openStarted = <Completer<void>>[];
   var activeOpens = 0;
   var maxActiveOpens = 0;
 
@@ -273,14 +296,23 @@ class _ControlledRuntime extends _FakeRuntime {
   Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
     final completer = Completer<void>();
     _pending.add(completer);
+    final started = Completer<void>();
+    _openStarted.add(started);
     activeOpens += 1;
     if (activeOpens > maxActiveOpens) maxActiveOpens = activeOpens;
+    started.complete();
     await completer.future;
     activeOpens -= 1;
     return super.open(plan);
   }
 
   void completeNext() => _pending.removeAt(0).complete();
+  Future<void> waitUntilOpenStarted() async {
+    while (_openStarted.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    await _openStarted.first.future;
+  }
 }
 
 class _ThrowingFirstDisposeRuntime extends _FakeRuntime {
@@ -307,6 +339,37 @@ class _FailingRuntime implements PlaybackBackendRuntime {
 
   @override
   Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async => throw StateError('open failed $backendId');
+}
+
+class _ControlledFailingRuntime implements PlaybackBackendRuntime {
+  _ControlledFailingRuntime(this.backendId);
+
+  @override
+  final String backendId;
+  final _pending = <Completer<void>>[];
+  final _openStarted = <Completer<void>>[];
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
+    final completer = Completer<void>();
+    _pending.add(completer);
+    final started = Completer<void>();
+    _openStarted.add(started);
+    started.complete();
+    await completer.future;
+    throw StateError('open failed $backendId');
+  }
+
+  void completeNext() => _pending.removeAt(0).complete();
+  Future<void> waitUntilOpenStarted() async {
+    while (_openStarted.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    await _openStarted.first.future;
+  }
 }
 
 class _CountingEngine extends TestPlaybackEngine {

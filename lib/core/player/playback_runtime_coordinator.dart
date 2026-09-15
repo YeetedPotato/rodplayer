@@ -15,6 +15,7 @@ class PlaybackRuntimeDiagnostics {
     this.playSessionId,
     this.failure,
     this.attemptedRuntimeIds = const <String>[],
+    this.activationFailures = const <String, Object>{},
     this.cleanupFailure,
   });
 
@@ -26,6 +27,7 @@ class PlaybackRuntimeDiagnostics {
   final String? playSessionId;
   final Object? failure;
   final List<String> attemptedRuntimeIds;
+  final Map<String, Object> activationFailures;
   final Object? cleanupFailure;
 }
 
@@ -94,7 +96,10 @@ class PlaybackRuntimeCoordinator {
       attemptedRuntimeIds.add(plan.engineId);
       final activated = await _tryActivatePlan(request, plan, generation, failures, attemptedRuntimeIds);
       if (activated) return;
-      if (_disposed || generation != _generation) return;
+      if (_disposed || generation != _generation) {
+        request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
+        return;
+      }
     }
     if (failures.length == 1) {
       final failure = failures.values.single;
@@ -107,13 +112,14 @@ class PlaybackRuntimeCoordinator {
   Future<bool> _tryActivatePlan(_ActivationRequest request, PlaybackPlan plan, int generation, Map<String, Object> failures, List<String> attemptedRuntimeIds) async {
     final runtime = registry.resolve(plan.engineId);
     if (runtime == null) {
-      failures[plan.engineId] = PlaybackRuntimeUnavailableException(plan.engineId);
+      _recordFailure(failures, plan.engineId, PlaybackRuntimeUnavailableException(plan.engineId));
       return false;
     }
     final PlaybackRuntimeSession next;
     try {
       next = await runtime.open(plan);
     } on Object catch (error) {
+      _recordFailure(failures, plan.engineId, error);
       diagnostics = PlaybackRuntimeDiagnostics(
         selectedBackendId: plan.engineId,
         runtimeId: plan.engineId,
@@ -123,8 +129,8 @@ class PlaybackRuntimeCoordinator {
         playSessionId: plan.playSessionId,
         failure: error,
         attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
+        activationFailures: Map<String, Object>.unmodifiable(failures),
       );
-      failures[plan.engineId] = error;
       return false;
     }
     if (_disposed || generation != _generation) {
@@ -156,6 +162,7 @@ class PlaybackRuntimeCoordinator {
       generation: generation,
       playSessionId: plan.playSessionId,
       attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
+      activationFailures: Map<String, Object>.unmodifiable(failures),
     );
     try {
       if (previous != null) await previous.dispose();
@@ -169,10 +176,23 @@ class PlaybackRuntimeCoordinator {
         playSessionId: plan.playSessionId,
         cleanupFailure: error,
         attemptedRuntimeIds: List<String>.unmodifiable(attemptedRuntimeIds),
+        activationFailures: Map<String, Object>.unmodifiable(failures),
       );
     }
     request.complete(next);
     return true;
+  }
+
+  void _recordFailure(Map<String, Object> failures, String runtimeId, Object error) {
+    if (!failures.containsKey(runtimeId)) {
+      failures[runtimeId] = error;
+      return;
+    }
+    var index = 2;
+    while (failures.containsKey('$runtimeId#$index')) {
+      index += 1;
+    }
+    failures['$runtimeId#$index'] = error;
   }
 
   Future<void> dispose() async {

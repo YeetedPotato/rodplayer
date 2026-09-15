@@ -349,10 +349,27 @@ HdrHandling _hdrHandling(MediaSourceInfo source) {
   });
   if (!hasHdr) return HdrHandling.none;
   final reasons = source.transcodingReasons.join(' ').toLowerCase();
-  final raw = source.raw.entries.map((entry) => '${entry.key} ${entry.value}').join(' ').toLowerCase();
-  if (reasons.contains('tonemap') || reasons.contains('tone map') || raw.contains('tonemap') || raw.contains('tone map')) return HdrHandling.toneMapToSdr;
-  if (raw.contains('hdrpreserved') || raw.contains('hdr preserved') || raw.contains('preservehdr') || raw.contains('preserve hdr')) return HdrHandling.preserve;
+  if (reasons.contains('tonemap') || reasons.contains('tone map')) return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(source.raw, const <String>{'tonemap', 'tone_map', 'toneMap'})) return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(source.raw, const <String>{'hdrpreserved', 'hdr_preserved', 'preservehdr', 'preserve_hdr'})) return HdrHandling.preserve;
   return HdrHandling.unknown;
+}
+
+bool _hasAffirmativeRawFlag(Map<String, dynamic> raw, Set<String> names) {
+  for (final entry in raw.entries) {
+    final normalized = entry.key.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+    if (names.map((name) => name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase()).contains(normalized) && _isAffirmative(entry.value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _isAffirmative(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value?.toString().trim().toLowerCase();
+  return text == 'true' || text == '1' || text == 'yes' || text == 'y' || text == 'preserve' || text == 'preserved' || text == 'tonemap' || text == 'tone map';
 }
 
 extension _FirstOrNull<T> on Iterable<T> {
