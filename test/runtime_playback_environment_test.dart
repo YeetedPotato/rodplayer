@@ -181,7 +181,35 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.resume);
-    await source.dispose();
+    controller.dispose();
+  });
+
+  test('attached event source is disposed with controller', () async {
+    final source = _TestEventSource();
+    final controller = await PlaybackEnvironmentController.create(
+      provider: RuntimePlaybackEnvironmentProvider(identityProbe: const _IdentityProbe('device-1')),
+    );
+    controller.attachEventSource(source);
+
+    controller.dispose();
+    await source.disposed;
+
+    expect(source.disposeCount, 1);
+  });
+
+  test('replacing event source disposes previous source', () async {
+    final first = _TestEventSource();
+    final second = _TestEventSource();
+    final controller = await PlaybackEnvironmentController.create(
+      provider: RuntimePlaybackEnvironmentProvider(identityProbe: const _IdentityProbe('device-1')),
+    );
+    controller.attachEventSource(first);
+
+    controller.attachEventSource(second);
+    await first.disposed;
+
+    expect(first.disposeCount, 1);
+    expect(second.disposeCount, 0);
     controller.dispose();
   });
 
@@ -201,7 +229,64 @@ void main() {
       PlaybackEnvironmentRefreshReason.displayChanged,
       PlaybackEnvironmentRefreshReason.audioRouteChanged,
     ]);
+    expect(provider.maxActiveRefreshes, 1);
     expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.audioRouteChanged);
+    controller.dispose();
+  });
+
+  test('waiting on overlapping refresh waits for pending refresh completion', () async {
+    final provider = _SlowRuntimeProvider();
+    final controller = await PlaybackEnvironmentController.create(provider: provider);
+
+    final first = controller.refresh(PlaybackEnvironmentRefreshReason.displayChanged);
+    var secondCompleted = false;
+    final second = controller.refresh(PlaybackEnvironmentRefreshReason.audioRouteChanged).then((_) {
+      secondCompleted = true;
+    });
+    provider.completeOne();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(secondCompleted, isFalse);
+    provider.completeOne();
+    await Future.wait(<Future<void>>[first, second]);
+
+    expect(secondCompleted, isTrue);
+    controller.dispose();
+  });
+
+  test('provider refresh failure does not wedge later refreshes', () async {
+    final provider = _FailingRuntimeProvider();
+    final controller = await PlaybackEnvironmentController.create(provider: provider);
+
+    await expectLater(controller.refresh(PlaybackEnvironmentRefreshReason.displayChanged), throwsStateError);
+    await controller.refresh(PlaybackEnvironmentRefreshReason.audioRouteChanged);
+
+    expect(provider.reasons, <PlaybackEnvironmentRefreshReason>[
+      PlaybackEnvironmentRefreshReason.initialLoad,
+      PlaybackEnvironmentRefreshReason.displayChanged,
+      PlaybackEnvironmentRefreshReason.audioRouteChanged,
+    ]);
+    expect(controller.lastRefreshReason, PlaybackEnvironmentRefreshReason.audioRouteChanged);
+    controller.dispose();
+  });
+
+  test('latest pending refresh reason is retained and coalesced', () async {
+    final provider = _SlowRuntimeProvider();
+    final controller = await PlaybackEnvironmentController.create(provider: provider);
+
+    final first = controller.refresh(PlaybackEnvironmentRefreshReason.displayChanged);
+    final second = controller.refresh(PlaybackEnvironmentRefreshReason.audioRouteChanged);
+    final third = controller.refresh(PlaybackEnvironmentRefreshReason.resume);
+    provider.completeOne();
+    await Future<void>.delayed(Duration.zero);
+    provider.completeOne();
+    await Future.wait(<Future<void>>[first, second, third]);
+
+    expect(provider.reasons, <PlaybackEnvironmentRefreshReason>[
+      PlaybackEnvironmentRefreshReason.initialLoad,
+      PlaybackEnvironmentRefreshReason.displayChanged,
+      PlaybackEnvironmentRefreshReason.resume,
+    ]);
     controller.dispose();
   });
 
@@ -438,14 +523,21 @@ class _RecordingResolver implements EffectivePlaybackProfileResolver {
 
 class _TestEventSource implements PlaybackEnvironmentEventSource {
   final _controller = StreamController<PlaybackEnvironmentRefreshReason>.broadcast();
+  final _disposed = Completer<void>();
+  var disposeCount = 0;
 
   void add(PlaybackEnvironmentRefreshReason reason) => _controller.add(reason);
+  Future<void> get disposed => _disposed.future;
 
   @override
   Stream<PlaybackEnvironmentRefreshReason> get refreshReasons => _controller.stream;
 
   @override
-  Future<void> dispose() => _controller.close();
+  Future<void> dispose() async {
+    disposeCount += 1;
+    if (!_disposed.isCompleted) _disposed.complete();
+    await _controller.close();
+  }
 }
 
 class _SlowRuntimeProvider extends RuntimePlaybackEnvironmentProvider {
@@ -453,6 +545,8 @@ class _SlowRuntimeProvider extends RuntimePlaybackEnvironmentProvider {
 
   final reasons = <PlaybackEnvironmentRefreshReason>[];
   final _completers = <Completer<void>>[];
+  var activeRefreshes = 0;
+  var maxActiveRefreshes = 0;
 
   @override
   Future<PlaybackEnvironment> refresh(PlaybackEnvironmentRefreshReason reason) async {
@@ -460,13 +554,34 @@ class _SlowRuntimeProvider extends RuntimePlaybackEnvironmentProvider {
     if (reason != PlaybackEnvironmentRefreshReason.initialLoad) {
       final completer = Completer<void>();
       _completers.add(completer);
-      await completer.future;
+      activeRefreshes += 1;
+      if (activeRefreshes > maxActiveRefreshes) maxActiveRefreshes = activeRefreshes;
+      try {
+        await completer.future;
+      } finally {
+        activeRefreshes -= 1;
+      }
     }
     return super.refresh(reason);
   }
 
   void completeOne() {
     _completers.removeAt(0).complete();
+  }
+}
+
+class _FailingRuntimeProvider extends RuntimePlaybackEnvironmentProvider {
+  _FailingRuntimeProvider() : super(identityProbe: const _IdentityProbe('device-1'));
+
+  final reasons = <PlaybackEnvironmentRefreshReason>[];
+
+  @override
+  Future<PlaybackEnvironment> refresh(PlaybackEnvironmentRefreshReason reason) async {
+    reasons.add(reason);
+    if (reason == PlaybackEnvironmentRefreshReason.displayChanged) {
+      throw StateError('refresh failed');
+    }
+    return super.refresh(reason);
   }
 }
 

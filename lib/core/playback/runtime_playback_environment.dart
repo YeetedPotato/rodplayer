@@ -357,8 +357,11 @@ class PlaybackEnvironmentController {
   final ValueNotifier<PlaybackEnvironment> environment;
   PlaybackEnvironmentRefreshReason lastRefreshReason;
   StreamSubscription<PlaybackEnvironmentRefreshReason>? _eventSubscription;
-  Future<void>? _refreshInFlight;
-  PlaybackEnvironmentRefreshReason? _pendingRefreshReason;
+  PlaybackEnvironmentEventSource? _eventSource;
+  Completer<void>? _refreshDrain;
+  PlaybackEnvironmentRefreshReason? _nextRefreshReason;
+  bool _isRefreshing = false;
+  bool _isDisposed = false;
 
   PlaybackEnvironment get current => environment.value;
 
@@ -370,32 +373,64 @@ class PlaybackEnvironmentController {
   }
 
   Future<void> refresh(PlaybackEnvironmentRefreshReason reason) async {
-    if (_refreshInFlight != null) {
-      _pendingRefreshReason = reason;
-      await _refreshInFlight;
-      return;
+    _nextRefreshReason = reason;
+    final drain = _refreshDrain ??= Completer<void>();
+    if (!_isRefreshing) {
+      unawaited(_drainRefreshes(drain));
     }
-    lastRefreshReason = reason;
-    _refreshInFlight = provider.refresh(reason).then((value) {
-      environment.value = value;
-    });
-    await _refreshInFlight;
-    _refreshInFlight = null;
-    final pending = _pendingRefreshReason;
-    _pendingRefreshReason = null;
-    if (pending != null) await refresh(pending);
+    await drain.future;
   }
 
   void attachEventSource(PlaybackEnvironmentEventSource source) {
-    _eventSubscription?.cancel();
+    final previous = _eventSource;
+    final subscription = _eventSubscription;
+    if (subscription != null) unawaited(subscription.cancel());
+    if (previous != null && !identical(previous, source)) {
+      unawaited(previous.dispose());
+    }
+    _eventSource = source;
     _eventSubscription = source.refreshReasons.listen((reason) {
-      unawaited(refresh(reason));
+      unawaited(refresh(reason).catchError((Object _) {}));
     });
   }
 
   void dispose() {
-    _eventSubscription?.cancel();
+    if (_isDisposed) return;
+    _isDisposed = true;
+    final subscription = _eventSubscription;
+    _eventSubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+    final source = _eventSource;
+    _eventSource = null;
+    if (source != null) unawaited(source.dispose());
     environment.dispose();
+  }
+
+  Future<void> _drainRefreshes(Completer<void> drain) async {
+    _isRefreshing = true;
+    Object? firstError;
+    StackTrace? firstStackTrace;
+    try {
+      while (_nextRefreshReason != null) {
+        final reason = _nextRefreshReason!;
+        _nextRefreshReason = null;
+        try {
+          lastRefreshReason = reason;
+          environment.value = await provider.refresh(reason);
+        } on Object catch (error, stackTrace) {
+          firstError ??= error;
+          firstStackTrace ??= stackTrace;
+        }
+      }
+    } finally {
+      _isRefreshing = false;
+      _refreshDrain = null;
+      if (firstError != null) {
+        drain.completeError(firstError, firstStackTrace);
+      } else {
+        drain.complete();
+      }
+    }
   }
 }
 
