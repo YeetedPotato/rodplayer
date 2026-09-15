@@ -92,11 +92,7 @@ class PlaybackPlanScorer {
 
   PlaybackPlanScore score(PlaybackPlan plan, EffectivePlaybackProfile effectiveProfile) {
     final c = <String, int>{};
-    c['delivery'] = switch (plan.deliveryMode ?? _deliveryMode(plan.playMethod)) {
-      PlaybackDeliveryMode.directPlay => 1000,
-      PlaybackDeliveryMode.directStream => 620,
-      PlaybackDeliveryMode.transcode => 500,
-    };
+    c['preservationTier'] = _preservationTier(plan) * 10000;
     c['video'] = switch (plan.videoOperation) {
       VideoOperation.copy => 300,
       VideoOperation.transcode => -220,
@@ -131,6 +127,17 @@ class PlaybackPlanScorer {
     c['audioPreservation'] = effectiveProfile.capabilities.passthrough == CapabilitySupport.supported ? 20 : 0;
     return PlaybackPlanScore(total: c.values.fold<int>(0, (sum, value) => sum + value), components: Map<String, int>.unmodifiable(c));
   }
+}
+
+int _preservationTier(PlaybackPlan plan) {
+  final deliveryMode = plan.deliveryMode ?? _deliveryMode(plan.playMethod);
+  if (deliveryMode == PlaybackDeliveryMode.directPlay) return 7;
+  if (plan.videoOperation == VideoOperation.copy && plan.audioOperation == AudioOperation.transcode) return 6;
+  if (deliveryMode == PlaybackDeliveryMode.directStream) return 5;
+  if (plan.videoOperation == VideoOperation.copy) return 4;
+  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.copy) return 3;
+  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.transcode) return 2;
+  return 1;
 }
 
 abstract interface class PlaybackBackendRuntime {

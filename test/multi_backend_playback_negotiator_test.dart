@@ -178,6 +178,22 @@ void main() {
     expect(scorer.score(_plan('video-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: true), profile).total, greaterThan(scorer.score(_plan('full-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: false), profile).total));
   });
 
+  test('preservation tier enforces locked destructive order', () {
+    final scorer = const PlaybackPlanScorer();
+    final profile = _profile(_backend('media_kit'));
+    final scores = <int>[
+      scorer.score(_plan('direct', PlayMethod.directPlay), profile).total,
+      scorer.score(_plan('copy-audio-transcode', PlayMethod.transcode, videoCopied: true, audioCopied: false), profile).total,
+      scorer.score(_plan('container-stream', PlayMethod.directStream), profile).total,
+      scorer.score(_plan('video-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: true), profile).total,
+      scorer.score(_plan('full-transcode', PlayMethod.transcode, videoCopied: false, audioCopied: false), profile).total,
+    ];
+
+    for (var i = 0; i < scores.length - 1; i += 1) {
+      expect(scores[i], greaterThan(scores[i + 1]));
+    }
+  });
+
   test('fallback prefers direct play support over transcode URL', () async {
     final decision = await _negotiate(_Requester(<String, PlaybackInfoResponse>{
       'media_kit': PlaybackInfoResponse(mediaSources: <MediaSourceInfo>[
