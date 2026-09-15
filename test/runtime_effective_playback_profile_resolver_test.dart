@@ -36,7 +36,7 @@ void main() {
         VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported),
         VideoCodecComputeCapability(codec: 'hevc', support: CapabilitySupport.unknown),
       ]),
-      audio: const AudioCapabilities(engine: PlaybackEngineAudioCapabilities(decodeCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.supported})),
+      audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported)),
       backend: backend,
     ), backend);
 
@@ -109,7 +109,7 @@ void main() {
     const resolver = CompositeEffectivePlaybackProfileResolver();
     final environment = _environment(
       compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
-      audio: const AudioCapabilities(engine: PlaybackEngineAudioCapabilities(decodeCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.supported})),
+      audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported)),
       backend: apple,
     );
 
@@ -117,7 +117,7 @@ void main() {
     expect(resolver.resolve(environment, apple).deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
   });
 
-  test('runtime resolver filters direct play rules by supported video and audio codecs', () {
+  test('runtime resolver uses production native PCM output for decoded audio support', () {
     const backend = PlaybackBackendDescriptor(
       id: PlaybackBackendIds.appleNative,
       displayName: 'Apple native playback',
@@ -131,7 +131,12 @@ void main() {
           VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported),
           VideoCodecComputeCapability(codec: 'hevc', support: CapabilitySupport.unknown),
         ]),
-        audio: const AudioCapabilities(engine: PlaybackEngineAudioCapabilities(decodeCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.supported})),
+        audio: const AudioCapabilities(
+          device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported),
+          route: CurrentAudioRoute(passthrough: CapabilitySupport.unknown),
+          sink: ConnectedSinkCapabilities(),
+          effective: EffectiveAudioCapabilities(fidelity: CapabilitySupport.supported),
+        ),
         backend: backend,
       ),
       backend,
@@ -139,12 +144,15 @@ void main() {
 
     final rule = profile.deviceProfile.directPlayRules.singleWhere((rule) => rule.containers.contains('mp4'));
     expect(rule.videoCodecs, <String>['h264']);
-    expect(rule.audioCodecs, <String>['aac']);
+    expect(rule.audioCodecs, contains('aac'));
+    expect(rule.audioCodecs, isNot(contains('flac')));
     expect(profile.deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['h264']);
+    expect(profile.deviceProfile.audioCodecRules.map((rule) => rule.codec), contains('aac'));
+    expect(profile.deviceProfile.audioCodecRules.map((rule) => rule.codec), isNot(contains('flac')));
     expect(profile.deviceProfile.subtitleRules, isEmpty);
   });
 
-  test('unknown runtime audio capability drops apple direct play rule', () {
+  test('explicitly unsupported PCM output prevents decoded audio advertisement', () {
     const backend = PlaybackBackendDescriptor(
       id: PlaybackBackendIds.appleNative,
       displayName: 'Apple native playback',
@@ -155,6 +163,7 @@ void main() {
     final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
       _environment(
         compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'h264', support: CapabilitySupport.supported)]),
+        audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.unsupported)),
         backend: backend,
       ),
       backend,
@@ -162,6 +171,27 @@ void main() {
 
     expect(profile.deviceProfile.directPlayRules, isEmpty);
     expect(profile.deviceProfile.audioCodecRules, isEmpty);
+  });
+
+  test('passthrough remains separate from decoded PCM support', () {
+    final support = const RuntimeEffectivePlaybackProfileResolver().audioPassthroughSupport(
+      _environment(
+        audio: const AudioCapabilities(
+          device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported, passthrough: CapabilitySupport.unknown),
+          route: CurrentAudioRoute(passthrough: CapabilitySupport.unknown),
+          sink: ConnectedSinkCapabilities(passthroughCodecs: <String, CapabilitySupport>{'aac': CapabilitySupport.unknown}),
+        ),
+      ),
+      const PlaybackBackendCapabilities(
+        id: 'test',
+        name: 'Test',
+        audioCodecs: <String>['aac'],
+        passthrough: CapabilitySupport.supported,
+      ),
+      'aac',
+    );
+
+    expect(support, CapabilitySupport.unknown);
   });
 }
 

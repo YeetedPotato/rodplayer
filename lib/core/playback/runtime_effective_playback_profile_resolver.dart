@@ -110,10 +110,9 @@ class RuntimeEffectivePlaybackProfileResolver implements EffectivePlaybackProfil
   }
 
   CapabilitySupport _audioCodecSupport(PlaybackEnvironment environment, PlaybackBackendCapabilities backend, String codec) {
-    final engineCodec = environment.audio.engine.decodeCodecs[codec] ?? CapabilitySupport.unknown;
     return RuntimeCapabilityIntersection.combine(<CapabilitySupport>[
       backend.audioCodecSupport(codec),
-      engineCodec,
+      environment.audio.device.pcmOutput,
     ]);
   }
 }
