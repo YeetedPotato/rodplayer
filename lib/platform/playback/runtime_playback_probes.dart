@@ -60,6 +60,7 @@ RuntimePlaybackEnvironmentProvider createDefaultRuntimePlaybackEnvironmentProvid
   RuntimeNetworkContext? networkContext,
   PlaybackProbeDiagnosticSink? onDiagnostic,
   NativePlaybackCapabilityBridge bridge = const MethodChannelNativePlaybackCapabilityBridge(),
+  PlaybackBackendRegistry playbackBackendRegistry = const PlaybackBackendRegistry(),
 }) =>
     RuntimePlaybackEnvironmentProvider(
       identityProbe: PersistentDeviceIdentityProbe(identity: identity, identityStore: identityStore),
@@ -69,7 +70,7 @@ RuntimePlaybackEnvironmentProvider createDefaultRuntimePlaybackEnvironmentProvid
         const FlutterDisplayCapabilityProbe(),
       ]),
       audioProbe: NativeAudioCapabilityProbe(bridge: bridge),
-      backendProbe: RegistryPlaybackBackendProbe(platformFamily: platformFamilyForCurrentTarget()),
+      backendProbe: RegistryPlaybackBackendProbe(platformFamily: platformFamilyForCurrentTarget(), registry: playbackBackendRegistry),
       networkContext: networkContext,
       onDiagnostic: onDiagnostic,
     );

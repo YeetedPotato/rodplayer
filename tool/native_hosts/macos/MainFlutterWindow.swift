@@ -1,10 +1,12 @@
 import Cocoa
+import AVFoundation
 import CoreAudio
 import FlutterMacOS
 import VideoToolbox
 
 class MainFlutterWindow: NSWindow, FlutterStreamHandler {
   private var events: FlutterEventSink?
+  private let applePlayback = ApplePlaybackManager()
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -24,6 +26,12 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
       }
     FlutterEventChannel(name: "rodplayer/playback_capability_events", binaryMessenger: messenger)
       .setStreamHandler(self)
+    FlutterMethodChannel(name: "rodplayer/apple_playback", binaryMessenger: messenger)
+      .setMethodCallHandler(applePlayback.handle)
+    FlutterEventChannel(name: "rodplayer/apple_playback_events", binaryMessenger: messenger)
+      .setStreamHandler(applePlayback)
+    flutterViewController.registrar(forPlugin: "RodPlayerApplePlayback")
+      .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     super.awakeFromNib()
@@ -110,5 +118,177 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
     var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     guard AudioObjectGetPropertyData(deviceId, &address, 0, nil, &size, &value) == noErr else { return nil }
     return value
+  }
+}
+
+private final class ApplePlaybackManager: NSObject, FlutterStreamHandler {
+  private var players: [String: ApplePlaybackSession] = [:]
+  private var eventSink: FlutterEventSink?
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "create":
+      guard let args = call.arguments as? [String: Any], let text = args["url"] as? String, let url = URL(string: text) else {
+        result(FlutterError(code: "bad_url", message: "Missing playback URL", details: nil))
+        return
+      }
+      let handle = UUID().uuidString
+      players[handle] = ApplePlaybackSession(handle: handle, url: url) { [weak self] payload in self?.eventSink?(payload) }
+      result(handle)
+    case "play": command(call, result) { $0.play() }
+    case "pause": command(call, result) { $0.pause() }
+    case "seek": command(call, result) { session in
+      let millis = ((call.arguments as? [String: Any])?["positionMillis"] as? NSNumber)?.doubleValue ?? 0
+      session.seek(milliseconds: millis)
+    }
+    case "stop": command(call, result) { $0.stop() }
+    case "volume": command(call, result) { session in
+      let volume = ((call.arguments as? [String: Any])?["volume"] as? NSNumber)?.floatValue ?? 100
+      session.setVolume(volume / 100)
+    }
+    case "mute": command(call, result) { session in
+      let muted = ((call.arguments as? [String: Any])?["muted"] as? Bool) ?? false
+      session.setMuted(muted)
+    }
+    case "dispose":
+      guard let handle = (call.arguments as? [String: Any])?["handle"] as? String else {
+        result(FlutterError(code: "bad_handle", message: "Missing player handle", details: nil))
+        return
+      }
+      players.removeValue(forKey: handle)?.dispose()
+      result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func player(for handle: String) -> AVPlayer? { players[handle]?.player }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func command(_ call: FlutterMethodCall, _ result: @escaping FlutterResult, _ action: (ApplePlaybackSession) -> Void) {
+    guard let handle = (call.arguments as? [String: Any])?["handle"] as? String, let session = players[handle] else {
+      result(FlutterError(code: "bad_handle", message: "Unknown player handle", details: nil))
+      return
+    }
+    action(session)
+    result(nil)
+  }
+}
+
+private final class ApplePlaybackSession {
+  let handle: String
+  let player: AVPlayer
+  private let emit: ([String: Any]) -> Void
+  private var timeObserver: Any?
+  private var statusObservation: NSKeyValueObservation?
+  private var timeControlObservation: NSKeyValueObservation?
+  private var durationObservation: NSKeyValueObservation?
+  private var disposed = false
+
+  init(handle: String, url: URL, emit: @escaping ([String: Any]) -> Void) {
+    self.handle = handle
+    self.emit = emit
+    let item = AVPlayerItem(url: url)
+    player = AVPlayer(playerItem: item)
+    statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in self?.statusChanged(item) }
+    durationObservation = item.observe(\.duration, options: [.new]) { [weak self] _, _ in self?.sendState() }
+    timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in self?.sendState() }
+    timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 2), queue: .main) { [weak self] _ in self?.sendState() }
+    NotificationCenter.default.addObserver(self, selector: #selector(ended), name: .AVPlayerItemDidPlayToEndTime, object: item)
+    sendState()
+  }
+
+  func play() { player.play(); sendState() }
+  func pause() { player.pause(); sendState() }
+  func stop() { player.pause(); player.seek(to: .zero); sendState() }
+  func seek(milliseconds: Double) { player.seek(to: CMTime(seconds: milliseconds / 1000, preferredTimescale: 600)); sendState() }
+  func setVolume(_ value: Float) { player.volume = min(max(value, 0), 1); sendState() }
+  func setMuted(_ value: Bool) { player.isMuted = value; sendState() }
+
+  @objc private func ended() {
+    sendState(ended: true)
+  }
+
+  private func statusChanged(_ item: AVPlayerItem) {
+    if item.status == .failed {
+      sendState(error: item.error?.localizedDescription ?? "AVPlayer item failed")
+    } else {
+      sendState()
+    }
+  }
+
+  private func sendState(error: String? = nil, ended: Bool = false) {
+    guard !disposed else { return }
+    let duration = player.currentItem?.duration.seconds ?? 0
+    emit([
+      "handle": handle,
+      "playing": player.rate != 0,
+      "buffering": player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+      "positionMillis": milliseconds(player.currentTime().seconds),
+      "durationMillis": milliseconds(duration),
+      "volume": Double(player.volume * 100),
+      "muted": player.isMuted,
+      "error": error as Any,
+      "ended": ended,
+    ])
+  }
+
+  private func milliseconds(_ seconds: Double) -> Int {
+    return seconds.isFinite ? max(0, Int(seconds * 1000)) : 0
+  }
+
+  func dispose() {
+    guard !disposed else { return }
+    disposed = true
+    player.pause()
+    if let observer = timeObserver { player.removeTimeObserver(observer) }
+    statusObservation?.invalidate()
+    timeControlObservation?.invalidate()
+    durationObservation?.invalidate()
+    NotificationCenter.default.removeObserver(self)
+    player.replaceCurrentItem(with: nil)
+  }
+}
+
+private final class ApplePlaybackPlatformView: NSView, FlutterPlatformView {
+  private let playerLayer = AVPlayerLayer()
+
+  init(frame: CGRect, handle: String?, manager: ApplePlaybackManager) {
+    super.init(frame: frame)
+    wantsLayer = true
+    layer = playerLayer
+    playerLayer.videoGravity = .resizeAspect
+    if let handle = handle { playerLayer.player = manager.player(for: handle) }
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  func view() -> NSView { self }
+}
+
+private final class ApplePlaybackViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let manager: ApplePlaybackManager
+
+  init(manager: ApplePlaybackManager) {
+    self.manager = manager
+    super.init()
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+
+  func create(withViewIdentifier viewId: Int64, arguments args: Any?) -> NSView {
+    let handle = (args as? [String: Any])?["handle"] as? String
+    return ApplePlaybackPlatformView(frame: .zero, handle: handle, manager: manager)
   }
 }

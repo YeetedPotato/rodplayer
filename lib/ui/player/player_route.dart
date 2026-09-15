@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
+import 'package:rodplayer/platform/playback/apple_native_playback_runtime.dart';
+import 'package:rodplayer/platform/playback/runtime_playback_probes.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
 import 'package:uuid/uuid.dart';
 
@@ -22,12 +25,20 @@ class PlayerRoute extends StatefulWidget {
 }
 
 class _PlayerRouteState extends State<PlayerRoute> {
-  final PlaybackRuntimeRegistry _runtimeRegistry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime()]);
+  late final AppleNativePlaybackRuntime _appleNativeRuntime = AppleNativePlaybackRuntime();
+  late final PlaybackRuntimeRegistry _runtimeRegistry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackRuntime(), _appleNativeRuntime]);
   late final Future<_PreparedPlayback> _prepared = _prepare();
   PlaybackRuntimeCoordinator? _coordinator;
 
   Future<_PreparedPlayback> _prepare() async {
-    final plan = await PlaybackNegotiator(client: widget.client).negotiate(itemId: widget.itemId);
+    final plan = await PlaybackNegotiator(
+      client: widget.client,
+      environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
+        identity: widget.client.identity,
+        playbackBackendRegistry: PlaybackBackendRegistry(appleNativeAvailable: _appleNativeRuntime.isAvailable),
+      ),
+      runtimeRegistry: _runtimeRegistry,
+    ).negotiate(itemId: widget.itemId);
     final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
     final coordinator = PlaybackRuntimeCoordinator(registry: _runtimeRegistry, session: logicalSession);
     _coordinator = coordinator;
