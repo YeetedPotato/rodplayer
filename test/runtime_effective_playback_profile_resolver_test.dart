@@ -250,6 +250,85 @@ void main() {
     expect(profile.deviceProfile.directPlayRules, isEmpty);
     expect(profile.deviceProfile.audioCodecRules, isEmpty);
   });
+
+  test('compatibility software decode retains codecs without marking hardware decode supported', () {
+    const resolver = RuntimeEffectivePlaybackProfileResolver();
+    final environment = _environment(
+      compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[
+        VideoCodecComputeCapability(codec: 'hevc', support: CapabilitySupport.supported),
+        VideoCodecComputeCapability(codec: 'vp9', support: CapabilitySupport.unknown),
+        VideoCodecComputeCapability(codec: 'av1', support: CapabilitySupport.unsupported),
+      ]),
+      audio: const AudioCapabilities(device: DeviceAudioCapabilities(pcmOutput: CapabilitySupport.supported)),
+    );
+    const appleNative = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.appleNative,
+      displayName: 'Apple native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.appleNativeCapabilities,
+    );
+    const appleCompatibility = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.appleCompatibility,
+      displayName: 'Apple compatibility playback',
+      availability: BackendAvailability.available,
+      priority: 20,
+      capabilities: PlaybackBackendRegistry.appleCompatibilityCapabilities,
+    );
+    const androidNative = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidNative,
+      displayName: 'Android native playback',
+      availability: BackendAvailability.available,
+      priority: 10,
+      capabilities: PlaybackBackendRegistry.androidNativeCapabilities,
+    );
+    const androidCompatibility = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidCompatibility,
+      displayName: 'Android compatibility playback',
+      availability: BackendAvailability.available,
+      priority: 20,
+      capabilities: PlaybackBackendRegistry.androidCompatibilityCapabilities,
+    );
+
+    final appleNativeProfile = resolver.resolve(environment, appleNative);
+    final appleCompatibilityProfile = resolver.resolve(environment, appleCompatibility);
+    final androidNativeProfile = resolver.resolve(environment, androidNative);
+    final androidCompatibilityProfile = resolver.resolve(environment, androidCompatibility);
+
+    expect(appleNativeProfile.deviceProfile.videoCodecRules.map((rule) => rule.codec), <String>['hevc']);
+    expect(appleCompatibilityProfile.deviceProfile.videoCodecRules.map((rule) => rule.codec), contains('vp9'));
+    expect(androidNativeProfile.deviceProfile.videoCodecRules.map((rule) => rule.codec), isNot(contains('av1')));
+    expect(androidCompatibilityProfile.deviceProfile.videoCodecRules.map((rule) => rule.codec), contains('av1'));
+    expect(appleCompatibilityProfile.deviceProfile.directPlayRules.single.videoCodecs, contains('vp9'));
+    expect(androidCompatibilityProfile.deviceProfile.directPlayRules.single.videoCodecs, contains('av1'));
+    expect(appleCompatibilityProfile.capabilities.hardwareDecode, CapabilitySupport.unknown);
+    expect(androidCompatibilityProfile.capabilities.hardwareDecode, CapabilitySupport.unknown);
+  });
+
+  test('unknown backend codec support never becomes supported through software decode', () {
+    const backend = PlaybackBackendDescriptor(
+      id: PlaybackBackendIds.androidCompatibility,
+      displayName: 'Android compatibility playback',
+      availability: BackendAvailability.available,
+      priority: 20,
+      capabilities: PlaybackBackendCapabilities(
+        id: PlaybackBackendIds.androidCompatibility,
+        name: 'Android compatibility playback',
+        videoCodecs: <String>[],
+        softwareDecode: CapabilitySupport.supported,
+        videoCodecRules: <VideoCodecCapabilityRule>[VideoCodecCapabilityRule(codec: 'vp9')],
+      ),
+    );
+    final profile = const RuntimeEffectivePlaybackProfileResolver().resolve(
+      _environment(
+        compute: const ComputeCapabilities(videoCodecs: <VideoCodecComputeCapability>[VideoCodecComputeCapability(codec: 'vp9', support: CapabilitySupport.unknown)]),
+        backend: backend,
+      ),
+      backend,
+    );
+
+    expect(profile.deviceProfile.videoCodecRules, isEmpty);
+  });
 }
 
 PlaybackEnvironment _environment({

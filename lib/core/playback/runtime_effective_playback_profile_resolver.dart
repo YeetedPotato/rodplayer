@@ -101,6 +101,8 @@ class RuntimeEffectivePlaybackProfileResolver implements EffectivePlaybackProfil
       ]);
 
   CapabilitySupport _videoCodecSupport(PlaybackEnvironment environment, PlaybackBackendCapabilities backend, String codec) {
+    final backendCodec = backend.videoCodecSupport(codec);
+    if (backendCodec != CapabilitySupport.supported) return backendCodec;
     var deviceCodec = CapabilitySupport.unknown;
     for (final entry in environment.compute.videoCodecs) {
       if (entry.codec == codec) {
@@ -108,11 +110,13 @@ class RuntimeEffectivePlaybackProfileResolver implements EffectivePlaybackProfil
         break;
       }
     }
-    return RuntimeCapabilityIntersection.combine(<CapabilitySupport>[
-      backend.videoCodecSupport(codec),
-      deviceCodec,
-    ]);
+    if (deviceCodec == CapabilitySupport.supported) return CapabilitySupport.supported;
+    if (_supportsCompatibilitySoftwareDecode(backend)) return CapabilitySupport.supported;
+    return deviceCodec;
   }
+
+  bool _supportsCompatibilitySoftwareDecode(PlaybackBackendCapabilities backend) =>
+      (backend.id == PlaybackBackendIds.appleCompatibility || backend.id == PlaybackBackendIds.androidCompatibility) && backend.softwareDecode == CapabilitySupport.supported;
 
   CapabilitySupport _audioCodecSupport(PlaybackEnvironment environment, PlaybackBackendCapabilities backend, String codec) {
     return RuntimeCapabilityIntersection.combine(<CapabilitySupport>[

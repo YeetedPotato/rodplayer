@@ -32,7 +32,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
-import `is`.xyz.mpv.MPVLib
+import dev.jdtech.mpv.MPVLib
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
@@ -219,7 +219,7 @@ private class AndroidCompatibilityPlaybackManager(private val context: Context) 
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "ping" -> result.success(runCatching { MPVLib.create(context); true }.getOrElse { false })
+            "ping" -> result.success(runCatching { Class.forName("dev.jdtech.mpv.MPVLib"); true }.getOrElse { false })
             "create" -> {
                 val url = call.argument<String>("url")
                 if (url.isNullOrBlank()) {
@@ -285,6 +285,7 @@ private class AndroidCompatibilityPlaybackSession(
     private val emit: (Map<String, Any?>) -> Unit,
 ) : MPVLib.EventObserver, MPVLib.LogObserver {
     private val handler = Handler(Looper.getMainLooper())
+    private val mpv: MPVLib = MPVLib.create(context) ?: throw IllegalStateException("Unable to create mpv playback context")
     private var disposed = false
     private var muted = false
     private var desiredVolume = 1f
@@ -296,50 +297,49 @@ private class AndroidCompatibilityPlaybackSession(
     }
 
     init {
-        MPVLib.create(context)
-        MPVLib.addObserver(this)
-        MPVLib.addLogObserver(this)
-        MPVLib.init()
-        MPVLib.command(arrayOf("loadfile", url))
+        mpv.addObserver(this)
+        mpv.addLogObserver(this)
+        mpv.init()
+        mpv.command(arrayOf("loadfile", url))
         handler.post(positionTick)
         sendState()
     }
 
     fun attachSurface(holder: SurfaceHolder?) {
         if (disposed) return
-        if (holder == null) MPVLib.detachSurface() else MPVLib.attachSurface(holder.surface)
+        if (holder == null) mpv.detachSurface() else mpv.attachSurface(holder.surface)
     }
 
     fun play() {
-        MPVLib.setPropertyBoolean("pause", false)
+        mpv.setPropertyBoolean("pause", false)
         sendState()
     }
 
     fun pause() {
-        MPVLib.setPropertyBoolean("pause", true)
+        mpv.setPropertyBoolean("pause", true)
         sendState()
     }
 
     fun seek(positionMillis: Long) {
-        MPVLib.command(arrayOf("seek", (positionMillis / 1000.0).toString(), "absolute"))
+        mpv.command(arrayOf("seek", (positionMillis / 1000.0).toString(), "absolute"))
         sendState()
     }
 
     fun stop() {
-        MPVLib.command(arrayOf("stop"))
+        mpv.command(arrayOf("stop"))
         sendState()
     }
 
     fun setVolume(value: Float) {
         desiredVolume = value.coerceIn(0f, 1f)
-        if (!muted) MPVLib.setPropertyDouble("volume", desiredVolume * 100.0)
+        if (!muted) mpv.setPropertyDouble("volume", desiredVolume * 100.0)
         sendState()
     }
 
     fun setMuted(value: Boolean) {
         muted = value
-        MPVLib.setPropertyBoolean("mute", muted)
-        if (!muted) MPVLib.setPropertyDouble("volume", desiredVolume * 100.0)
+        mpv.setPropertyBoolean("mute", muted)
+        if (!muted) mpv.setPropertyDouble("volume", desiredVolume * 100.0)
         sendState()
     }
 
@@ -361,10 +361,10 @@ private class AndroidCompatibilityPlaybackSession(
         if (disposed) return
         emit(mapOf(
             "handle" to handle,
-            "playing" to !(MPVLib.getPropertyBoolean("pause") ?: false),
+            "playing" to !(mpv.getPropertyBoolean("pause") ?: false),
             "buffering" to false,
-            "positionMillis" to (((MPVLib.getPropertyDouble("time-pos") ?: 0.0) * 1000).toLong()),
-            "durationMillis" to (((MPVLib.getPropertyDouble("duration") ?: 0.0) * 1000).toLong()),
+            "positionMillis" to (((mpv.getPropertyDouble("time-pos") ?: 0.0) * 1000).toLong()),
+            "durationMillis" to (((mpv.getPropertyDouble("duration") ?: 0.0) * 1000).toLong()),
             "volume" to (desiredVolume * 100.0),
             "muted" to muted,
             "error" to error,
@@ -376,11 +376,11 @@ private class AndroidCompatibilityPlaybackSession(
         if (disposed) return
         disposed = true
         handler.removeCallbacks(positionTick)
-        MPVLib.detachSurface()
-        MPVLib.command(arrayOf("stop"))
-        MPVLib.removeObserver(this)
-        MPVLib.removeLogObserver(this)
-        MPVLib.destroy()
+        runCatching { mpv.detachSurface() }
+        runCatching { mpv.command(arrayOf("stop")) }
+        mpv.removeObserver(this)
+        mpv.removeLogObserver(this)
+        mpv.destroy()
     }
 }
 

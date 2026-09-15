@@ -10,7 +10,6 @@ import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/platform/playback/compatibility_playback_runtimes.dart';
 
 void main() {
@@ -72,6 +71,22 @@ void main() {
     expect(bridge.commands.where((command) => command == 'dispose:h1'), hasLength(1));
   });
 
+  test('compatibility runtime handles stay independent', () async {
+    final bridge = _FakeBridge(available: true);
+    final runtime = AndroidCompatibilityPlaybackRuntime(bridge: bridge, confirmedHostAvailable: true);
+    final first = await runtime.open(_plan(engineId: 'android_compatibility', uri: Uri.parse('https://media/first')));
+    final second = await runtime.open(_plan(engineId: 'android_compatibility', uri: Uri.parse('https://media/second')));
+
+    await first.engine.dispose();
+    await second.engine.play();
+
+    expect(bridge.createdUris, <Uri>[Uri.parse('https://media/first'), Uri.parse('https://media/second')]);
+    expect(bridge.commands, contains('dispose:h1'));
+    expect(bridge.commands, contains('play:h2'));
+    expect(bridge.commands, isNot(contains('dispose:h2')));
+  });
+
+
   test('compatibility profiles are separate and conservative', () {
     final apple = const PlaybackBackendRegistry(appleCompatibilityAvailable: true).backendsFor(PlatformFamily.ios);
     final android = const PlaybackBackendRegistry(androidCompatibilityAvailable: true).backendsFor(PlatformFamily.android);
@@ -98,13 +113,25 @@ void main() {
     final macos = File('tool/native_hosts/macos/MainFlutterWindow.swift').readAsStringSync();
 
     expect(patcher, contains('MobileVLCKit'));
-    expect(patcher, contains('io.github.thankimanish:mpv-android-lib'));
+    expect(patcher, contains('dev.jdtech.mpv:libmpv:1.0.0'));
     expect(android, contains('rodplayer/android_compatibility_playback'));
-    expect(android, contains('MPVLib.destroy()'));
+    expect(android, contains('dev.jdtech.mpv.MPVLib'));
+    expect(android, contains('private val mpv: MPVLib'));
+    expect(android, contains('MPVLib.create(context)'));
+    expect(android, contains('mpv.destroy()'));
+    expect(android, contains('sessions[handle] = AndroidCompatibilityPlaybackSession'));
+    expect(android, isNot(contains('MPVLib.destroy()')));
     expect(ios, contains('rodplayer/apple_compatibility_playback'));
     expect(ios, contains('VLCMediaPlayer'));
     expect(macos, contains('rodplayer/apple_compatibility_playback'));
     expect(macos, contains('VLCKit'));
+  });
+
+  test('native template handshake does not create playback context', () {
+    final android = File('tool/native_hosts/android/MainActivity.kt').readAsStringSync();
+
+    expect(android, contains('Class.forName("dev.jdtech.mpv.MPVLib")'));
+    expect(android, isNot(contains('"ping" -> result.success(runCatching { MPVLib.create(context)')));
   });
 }
 

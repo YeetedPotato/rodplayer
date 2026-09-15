@@ -279,7 +279,7 @@ class CompatibilityPlaybackVideoSurface implements PlaybackVideoSurface {
 }
 
 class AppleCompatibilityPlaybackRuntime extends _CompatibilityPlaybackRuntime {
-  AppleCompatibilityPlaybackRuntime({CompatibilityPlaybackBridge? bridge, bool? confirmedHostAvailable})
+  AppleCompatibilityPlaybackRuntime({CompatibilityPlaybackBridge? bridge, super.confirmedHostAvailable})
       : super(
           backendId: PlaybackBackendIds.appleCompatibility,
           bridge: bridge ??
@@ -288,7 +288,6 @@ class AppleCompatibilityPlaybackRuntime extends _CompatibilityPlaybackRuntime {
                 methodChannelName: 'rodplayer/apple_compatibility_playback',
                 eventChannelName: 'rodplayer/apple_compatibility_playback_events',
               ),
-          confirmedHostAvailable: confirmedHostAvailable,
           viewType: 'rodplayer/apple_compatibility_playback_view',
           platform: defaultTargetPlatform == TargetPlatform.macOS ? TargetPlatform.macOS : TargetPlatform.iOS,
         );
@@ -305,11 +304,10 @@ class AppleCompatibilityPlaybackRuntime extends _CompatibilityPlaybackRuntime {
 }
 
 class AndroidCompatibilityPlaybackRuntime extends _CompatibilityPlaybackRuntime {
-  AndroidCompatibilityPlaybackRuntime({CompatibilityPlaybackBridge? bridge, bool? confirmedHostAvailable})
+  AndroidCompatibilityPlaybackRuntime({CompatibilityPlaybackBridge? bridge, super.confirmedHostAvailable})
       : super(
           backendId: PlaybackBackendIds.androidCompatibility,
           bridge: bridge ?? const MethodChannelCompatibilityPlaybackBridge(platform: TargetPlatform.android, methodChannelName: 'rodplayer/android_compatibility_playback', eventChannelName: 'rodplayer/android_compatibility_playback_events'),
-          confirmedHostAvailable: confirmedHostAvailable,
           viewType: 'rodplayer/android_compatibility_playback_view',
           platform: TargetPlatform.android,
         );
@@ -326,18 +324,18 @@ abstract class _CompatibilityPlaybackRuntime implements PlaybackBackendRuntime {
     required this.bridge,
     required this.viewType,
     required this.platform,
-    bool? confirmedHostAvailable,
-  }) : _confirmedHostAvailable = confirmedHostAvailable;
+    this.confirmedHostAvailable,
+  });
 
   @override
   final String backendId;
   final CompatibilityPlaybackBridge bridge;
   final String viewType;
   final TargetPlatform platform;
-  final bool? _confirmedHostAvailable;
+  final bool? confirmedHostAvailable;
 
   @override
-  bool get isAvailable => _confirmedHostAvailable ?? bridge.isHostAvailable;
+  bool get isAvailable => confirmedHostAvailable ?? bridge.isHostAvailable;
 
   @override
   Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {

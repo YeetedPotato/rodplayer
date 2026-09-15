@@ -31,19 +31,25 @@ def patch_android_gradle() -> None:
     dependencies = [
         'implementation "androidx.media3:media3-exoplayer:1.4.1"',
         'implementation "androidx.media3:media3-ui:1.4.1"',
-        'implementation "io.github.thankimanish:mpv-android-lib:0.1.12"',
+        'implementation "dev.jdtech.mpv:libmpv:1.0.0"',
     ]
     if groovy.exists():
         text = groovy.read_text()
         if "io.github.thankimanish:mpv-android-lib" in text:
+            groovy.write_text(text.replace("io.github.thankimanish:mpv-android-lib:0.1.12", "dev.jdtech.mpv:libmpv:1.0.0"))
+            return
+        if "dev.jdtech.mpv:libmpv" in text:
             return
         block = "\ndependencies {\n" + "\n".join(f"    {line}" for line in dependencies) + "\n}\n"
         groovy.write_text(text + block)
     elif kotlin.exists():
         text = kotlin.read_text()
         if "io.github.thankimanish:mpv-android-lib" in text:
+            kotlin.write_text(text.replace("io.github.thankimanish:mpv-android-lib:0.1.12", "dev.jdtech.mpv:libmpv:1.0.0"))
             return
-        block = '\ndependencies {\n    implementation("androidx.media3:media3-exoplayer:1.4.1")\n    implementation("androidx.media3:media3-ui:1.4.1")\n    implementation("io.github.thankimanish:mpv-android-lib:0.1.12")\n}\n'
+        if "dev.jdtech.mpv:libmpv" in text:
+            return
+        block = '\ndependencies {\n    implementation("androidx.media3:media3-exoplayer:1.4.1")\n    implementation("androidx.media3:media3-ui:1.4.1")\n    implementation("dev.jdtech.mpv:libmpv:1.0.0")\n}\n'
         kotlin.write_text(text + block)
 
 
