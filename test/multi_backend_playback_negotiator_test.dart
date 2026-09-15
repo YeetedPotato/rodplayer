@@ -8,6 +8,9 @@ import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/multi_backend_playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
+
+import 'fakes/test_playback_engine.dart';
 
 void main() {
   test('only available routable backends produce PlaybackInfo requests', () async {
@@ -222,7 +225,7 @@ Future<PlaybackPlanDecision> _negotiate(
   List<PlaybackBackendRuntime> runtimes = const <PlaybackBackendRuntime>[_Runtime('media_kit')],
 }) {
   final environment = _environment(backends ?? <PlaybackBackendDescriptor>[_backend('media_kit')]);
-  return MultiBackendPlaybackNegotiator(requester: requester, runtimeRegistry: PlaybackBackendRuntimeRegistry(runtimes: runtimes)).negotiate(environment: environment, itemId: 'item');
+  return MultiBackendPlaybackNegotiator(requester: requester, runtimeRegistry: PlaybackRuntimeRegistry(runtimes: runtimes)).negotiate(environment: environment, itemId: 'item');
 }
 
 PlaybackEnvironment _environment(List<PlaybackBackendDescriptor> backends) {
@@ -364,6 +367,16 @@ class _Runtime implements PlaybackBackendRuntime {
 
   @override
   final String backendId;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
+    final engine = TestPlaybackEngine(id: backendId);
+    await engine.load(plan);
+    return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine);
+  }
 }
 
 class _FakeTrackSelectionController implements TrackSelectionController {

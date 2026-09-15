@@ -4,9 +4,9 @@ import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
-import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
 
 abstract interface class PlaybackInfoRequester {
   String? get userId;
@@ -140,44 +140,18 @@ int _preservationTier(PlaybackPlan plan) {
   return 1;
 }
 
-abstract interface class PlaybackBackendRuntime {
-  String get backendId;
-}
-
-class PlaybackBackendRuntimeRegistry {
-  const PlaybackBackendRuntimeRegistry({this.runtimes = const <PlaybackBackendRuntime>[]});
-
-  final List<PlaybackBackendRuntime> runtimes;
-
-  PlaybackBackendRuntime? resolve(String backendId) {
-    for (final runtime in runtimes) {
-      if (runtime.backendId == backendId) return runtime;
-    }
-    return null;
-  }
-
-  bool canRoute(String backendId) => backendId == PlaybackBackendIds.mediaKit || resolve(backendId) != null;
-}
-
-class MediaKitPlaybackBackendRuntime implements PlaybackBackendRuntime {
-  const MediaKitPlaybackBackendRuntime();
-
-  @override
-  String get backendId => PlaybackBackendIds.mediaKit;
-}
-
 class MultiBackendPlaybackNegotiator {
   MultiBackendPlaybackNegotiator({
     required this.requester,
     this.profileMapper = const JellyfinDeviceProfileMapper(),
     this.scorer = const PlaybackPlanScorer(),
-    this.runtimeRegistry = const PlaybackBackendRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[MediaKitPlaybackBackendRuntime()]),
+    this.runtimeRegistry = const PlaybackRuntimeRegistry(),
   });
 
   final PlaybackInfoRequester requester;
   final JellyfinDeviceProfileMapper profileMapper;
   final PlaybackPlanScorer scorer;
-  final PlaybackBackendRuntimeRegistry runtimeRegistry;
+  final PlaybackRuntimeRegistry runtimeRegistry;
 
   Future<PlaybackPlanDecision> negotiate({
     required PlaybackEnvironment environment,
@@ -187,7 +161,7 @@ class MultiBackendPlaybackNegotiator {
   }) async {
     final candidates = <PlaybackBackendCandidate>[];
     for (final backend in environment.backends.where((backend) => backend.availability == BackendAvailability.available)) {
-      if (!runtimeRegistry.canRoute(backend.id)) {
+      if (!runtimeRegistry.canExecute(backend.id)) {
         candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'No playback runtime registered'));
         continue;
       }
