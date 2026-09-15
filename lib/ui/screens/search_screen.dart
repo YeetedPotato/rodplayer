@@ -8,9 +8,11 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({required this.client, this.embedded = false, super.key});
+  const SearchScreen({required this.client, this.embedded = false, this.focusNode, this.autofocus = true, super.key});
   final JellyfinApiClient client;
   final bool embedded;
+  final FocusNode? focusNode;
+  final bool autofocus;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -18,7 +20,8 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  late final FocusNode _focusNode;
+  bool get _ownsFocusNode => widget.focusNode == null;
   Timer? _debounce;
   List<JellyfinSearchHint> _results = const [];
   List<String> _recent = const [];
@@ -29,6 +32,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    _focusNode = widget.focusNode ?? FocusNode();
     _loadRecent();
   }
 
@@ -70,7 +74,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _title(JellyfinSearchHint item) => item.title.isEmpty ? 'Untitled' : item.title;
 
   @override
-  void dispose() { _debounce?.cancel(); _controller.dispose(); _focusNode.dispose(); super.dispose(); }
+  void dispose() { _debounce?.cancel(); _controller.dispose(); if (_ownsFocusNode) _focusNode.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +83,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final columns = width >= 1200 ? 6 : width >= 850 ? 4 : width >= 560 ? 3 : 2;
     final content = CustomScrollView(key: const PageStorageKey<String>('search-scroll'), slivers: [
         SliverPadding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 12), sliver: SliverToBoxAdapter(child: TextField(
-          controller: _controller, focusNode: _focusNode, autofocus: true, textInputAction: TextInputAction.search,
+          controller: _controller, focusNode: _focusNode, autofocus: widget.autofocus, textInputAction: TextInputAction.search,
           onChanged: _onChanged, onSubmitted: (value) { _debounce?.cancel(); if (value.trim().isNotEmpty) _search(value.trim()); },
           decoration: InputDecoration(hintText: 'Search movies, shows, and music...', prefixIcon: const Icon(Icons.search), suffixIcon: _controller.text.isEmpty ? null : IconButton(icon: const Icon(Icons.clear), onPressed: () { _controller.clear(); _onChanged(''); setState(() {}); })),
         ))),

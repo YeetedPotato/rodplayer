@@ -30,11 +30,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _reloadAll() {
-    _load((items) => _resume = items, () => widget.client.getResumeItems());
-    _load((items) => _nextUp = items, () => widget.client.getNextUp());
-    _load((items) => _movies = items, () => widget.client.getLatestMovies(limit: 12));
-    _load((items) => _shows = items, () => widget.client.getLatestTvShows(limit: 12));
+    _reloadResume();
+    _reloadNextUp();
+    _reloadMovies();
+    _reloadShows();
   }
+
+  void _reloadResume() => _load((items) => _resume = items, () => widget.client.getResumeItems());
+  void _reloadNextUp() => _load((items) => _nextUp = items, () => widget.client.getNextUp());
+  void _reloadMovies() => _load((items) => _movies = items, () => widget.client.getLatestMovies(limit: 12));
+  void _reloadShows() => _load((items) => _shows = items, () => widget.client.getLatestTvShows(limit: 12));
 
   Future<void> _load<T extends JellyfinLibraryItem>(void Function(_Load<T>) assign, Future<List<T>> Function() request) async {
     setState(() => assign(const _Load.loading()));
@@ -60,11 +65,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return CustomScrollView(
       key: const PageStorageKey<String>('home-scroll'),
       slivers: [
-        SliverToBoxAdapter(child: _HomeHero(item: hero, client: widget.client, onPlay: hero == null ? null : () => _play(hero.id))),
-        _shelf<ResumableItem>('Continue Watching', _resume, 16 / 9, (item) => _resumeSubtitle(item), progress: _progress),
-        _shelf<NextUpItem>('Next Up', _nextUp, 16 / 9, _episodeSubtitle),
-        _shelf<JellyfinLibraryItem>('Latest Movies', _movies, 2 / 3, (item) => item.productionYear?.toString() ?? 'Movie'),
-        _shelf<JellyfinLibraryItem>('Latest TV Shows', _shows, 2 / 3, (item) => item.productionYear?.toString() ?? 'Series', playable: false),
+        if (hero != null) SliverToBoxAdapter(child: _HomeHero(item: hero, client: widget.client, onPlay: () => _play(hero.id))),
+        _shelf<ResumableItem>('Continue Watching', _resume, 16 / 9, (item) => _resumeSubtitle(item), _reloadResume, progress: _visualProgress),
+        _shelf<NextUpItem>('Next Up', _nextUp, 16 / 9, _episodeSubtitle, _reloadNextUp),
+        _shelf<JellyfinLibraryItem>('Latest Movies', _movies, 2 / 3, (item) => item.productionYear?.toString() ?? 'Movie', _reloadMovies),
+        _shelf<JellyfinLibraryItem>('Latest TV Shows', _shows, 2 / 3, (item) => item.productionYear?.toString() ?? 'Series', _reloadShows, playable: false),
         if (loaded && !anyContent) const SliverFillRemaining(hasScrollBody: false, child: _HomeEmpty()),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ],
@@ -72,15 +77,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   JellyfinLibraryItem? get _heroItem {
-    if (_resume.items.isNotEmpty) return _resume.items.first;
-    if (_nextUp.items.isNotEmpty) return _nextUp.items.first;
-    if (_movies.items.isNotEmpty) return _movies.items.first;
+    for (final item in _resume.items) {
+      if (_playable(item)) return item;
+    }
+    for (final item in _nextUp.items) {
+      if (_playable(item)) return item;
+    }
+    for (final item in _movies.items) {
+      if (_playable(item)) return item;
+    }
     return null;
   }
 
-  Widget _shelf<T extends JellyfinLibraryItem>(String title, _Load<T> state, double aspectRatio, String Function(T) subtitle, {double? Function(T)? progress, bool playable = true}) {
+  Widget _shelf<T extends JellyfinLibraryItem>(String title, _Load<T> state, double aspectRatio, String Function(T) subtitle, VoidCallback onRetry, {double? Function(T)? progress, bool playable = true}) {
     if (state.loading) return SliverToBoxAdapter(child: _ShelfLoading(title: title));
-    if (state.error != null) return SliverToBoxAdapter(child: _ShelfError(title: title, onRetry: _reloadAll));
+    if (state.error != null) return SliverToBoxAdapter(child: _ShelfError(title: title, onRetry: onRetry));
     if (state.items.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
     return SliverToBoxAdapter(
       child: SmartShelf(
@@ -112,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
               if (item.overview != null) ...[const SizedBox(height: 12), Text(item.overview!, maxLines: 4, overflow: TextOverflow.ellipsis)],
               const SizedBox(height: 20),
-              FilledButton.icon(onPressed: playable ? () { Navigator.pop(context); _play(item.id); } : null, icon: const Icon(Icons.play_arrow), label: Text(_progress(item) == null ? 'Play' : 'Resume')),
+              FilledButton.icon(onPressed: playable ? () { Navigator.pop(context); _play(item.id); } : null, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
             ]),
           ),
         ),
@@ -121,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _HomeHero extends StatelessWidget {
   const _HomeHero({required this.item, required this.client, required this.onPlay});
-  final JellyfinLibraryItem? item;
+  final JellyfinLibraryItem item;
   final JellyfinApiClient client;
   final VoidCallback? onPlay;
 
@@ -130,8 +141,7 @@ class _HomeHero extends StatelessWidget {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final size = MediaQuery.sizeOf(context);
     final height = size.width < 650 ? 290.0 : 380.0;
-    final item = this.item;
-    final imageUrl = item?.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 85) ?? item?.imageUrl(client.baseUrl, quality: 85);
+    final imageUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 85) ?? item.imageUrl(client.baseUrl, quality: 85);
     return SizedBox(
       height: height,
       child: Stack(fit: StackFit.expand, children: [
@@ -144,15 +154,13 @@ class _HomeHero extends StatelessWidget {
             alignment: Alignment.bottomLeft,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
-              child: item == null
-                  ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('RodPlayer', style: Theme.of(context).textTheme.displaySmall), const SizedBox(height: 8), Text('Your Jellyfin library is ready when content appears.', style: TextStyle(color: theme.textSecondary))])
-                  : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(_title(item), maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: size.width < 650 ? 30 : 42)),
                       const SizedBox(height: 8),
                       Text(_heroSubtitle(item), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary)),
                       if (item.overview != null) ...[const SizedBox(height: 12), Text(item.overview!, maxLines: size.width < 650 ? 2 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))],
                       const SizedBox(height: 18),
-                      FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(_progress(item) == null ? 'Play' : 'Resume')),
+                      FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
                     ]),
             ),
           ),
@@ -202,7 +210,7 @@ String _episodeSubtitle(NextUpItem item) {
   return [item.seriesName, code].whereType<String>().where((part) => part.isNotEmpty).join(' · ').ifEmpty(item.rawType ?? 'Episode');
 }
 String _heroSubtitle(JellyfinLibraryItem item) => [item.seriesName, item.productionYear?.toString(), item.officialRating, item.communityRating == null ? null : '★ ${item.communityRating}'].whereType<String>().where((part) => part.isNotEmpty).join(' · ');
-double? _progress(JellyfinLibraryItem item) {
+double? _rawProgress(JellyfinLibraryItem item) {
   final percent = item.playedPercentage;
   if (percent != null) return (percent / 100).clamp(0, 1).toDouble();
   final position = item.playbackPositionTicks;
@@ -210,6 +218,11 @@ double? _progress(JellyfinLibraryItem item) {
   if (position == null || runtime == null || runtime <= 0) return null;
   return (position / runtime).clamp(0, 1).toDouble();
 }
+double? _visualProgress(JellyfinLibraryItem item) {
+  final progress = _rawProgress(item);
+  return progress == null || progress <= 0 ? null : progress;
+}
+bool _hasMeaningfulResumeProgress(JellyfinLibraryItem item) => (_rawProgress(item) ?? 0) > 0;
 
 extension on String {
   String ifEmpty(String fallback) => isEmpty ? fallback : this;

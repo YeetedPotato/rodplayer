@@ -16,8 +16,22 @@ class RodPlayerAppShell extends StatefulWidget {
 
 class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   int _index = 0;
+  final FocusNode _searchFocusNode = FocusNode(debugLabel: 'RodPlayer search');
 
-  void _select(int index) => setState(() => _index = index);
+  @override
+  void dispose() {
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _select(int index, {bool focusSearch = false}) {
+    setState(() => _index = index);
+    if (focusSearch) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _searchFocusNode.requestFocus();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,8 +40,8 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     final directional = media.navigationMode == NavigationMode.directional;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => _select(1),
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => _select(1),
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => _select(1, focusSearch: true),
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => _select(1, focusSearch: true),
       },
       child: Focus(
         autofocus: true,
@@ -35,7 +49,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
           final compact = constraints.maxWidth < 720 && !directional;
           final body = IndexedStack(index: _index, children: [
             HomeScreen(client: widget.client),
-            SearchScreen(client: widget.client, embedded: true),
+            SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false),
           ]);
           if (compact) {
             return Scaffold(
@@ -44,7 +58,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
               body: SafeArea(bottom: false, child: body),
               bottomNavigationBar: NavigationBar(
                 selectedIndex: _index,
-                onDestinationSelected: _select,
+                onDestinationSelected: (index) => _select(index),
                 destinations: const [
                   NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
                   NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
@@ -56,7 +70,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
             backgroundColor: theme.obsidian,
             body: SafeArea(
               child: Row(children: [
-                _SideNav(selectedIndex: _index, directional: directional, onSelect: _select, onLogout: widget.onLogout),
+                _SideNav(selectedIndex: _index, directional: directional, onSelect: (index) => _select(index), onLogout: widget.onLogout),
                 Expanded(child: body),
               ]),
             ),
