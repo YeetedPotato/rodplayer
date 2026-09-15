@@ -189,6 +189,59 @@ void main() {
       expect(second.compute.hardwareVideoDecoding, CapabilitySupport.supported);
     });
   });
+
+  group('Checked-in host payload shapes', () {
+    test('Android host payload shape decodes conservatively', () {
+      final compute = NativeComputeProbeResult.fromJson(<String, Object?>{
+        'hardwareVideoDecoding': 'supported',
+        'videoDecoders': <Object?>[
+          <String, Object?>{'codec': 'video/hevc', 'support': 'supported', 'hardwareAccelerated': 'supported', 'maxWidth': 3840},
+          <String, Object?>{'codec': 'video/av01', 'support': 'supported', 'softwareOnly': 'supported'},
+        ],
+      });
+      final display = NativeDisplayProbeResult.fromJson(<String, Object?>{'width': 3840, 'height': 2160, 'refreshRate': 59.94, 'hdr10Output': 'supported'});
+      final audio = NativeAudioProbeResult.fromJson(<String, Object?>{
+        'routeName': 'HDMI',
+        'pcmOutput': 'supported',
+        'passthroughCodecs': <String, Object?>{'ac3': 'supported'},
+      });
+
+      expect(const NativeComputeCapabilityAdapter().convert(compute).value!.videoCodecs.map((codec) => codec.codec).toList(), <String>['hevc', 'av1']);
+      expect(const NativeDisplayCapabilityAdapter().convert(display).value!.output.hdr10, CapabilitySupport.supported);
+      expect(const NativeAudioCapabilityAdapter().convert(audio).value!.sink.passthroughCodecs['ac3'], CapabilitySupport.supported);
+    });
+
+    test('Apple host payload shape leaves unproven capabilities unknown', () {
+      final compute = NativeComputeProbeResult.fromJson(<String, Object?>{
+        'hardwareVideoDecoding': 'supported',
+        'videoDecoders': <Object?>[
+          <String, Object?>{'codec': 'h264', 'support': 'supported', 'hardwareAccelerated': 'supported'},
+          <String, Object?>{'codec': 'hevc', 'support': 'supported', 'hardwareAccelerated': 'supported'},
+        ],
+      });
+      final display = NativeDisplayProbeResult.fromJson(<String, Object?>{'width': 1920, 'height': 1080, 'pixelRatio': 2.0, 'genericHdrOutput': 'supported'});
+      final audio = NativeAudioProbeResult.fromJson(<String, Object?>{'routeName': 'Built-in Speakers', 'pcmOutput': 'supported'});
+
+      expect(const NativeComputeCapabilityAdapter().convert(compute).value!.hdrMetadataDecode.dolbyVision, CapabilitySupport.unknown);
+      expect(const NativeDisplayCapabilityAdapter().convert(display).value!.output.nativeHdr10Plus, CapabilitySupport.unknown);
+      expect(const NativeAudioCapabilityAdapter().convert(audio).value!.sink.passthroughCodecs, isEmpty);
+    });
+
+    test('Windows host payload shape does not promote absent HDR or passthrough', () {
+      final compute = NativeComputeProbeResult.fromJson(<String, Object?>{
+        'hardwareVideoDecoding': 'supported',
+        'videoDecoders': <Object?>[
+          <String, Object?>{'codec': 'h264', 'support': 'supported', 'hardwareAccelerated': 'supported'},
+        ],
+      });
+      final display = NativeDisplayProbeResult.fromJson(<String, Object?>{'width': 2560, 'height': 1440, 'refreshRate': 60.0});
+      final audio = NativeAudioProbeResult.fromJson(<String, Object?>{'routeName': 'Default Output', 'pcmOutput': 'supported', 'maxChannels': 2});
+
+      expect(const NativeComputeCapabilityAdapter().convert(compute).value!.videoCodecs.single.codec, 'h264');
+      expect(const NativeDisplayCapabilityAdapter().convert(display).value!.output.hdr10, CapabilitySupport.unknown);
+      expect(const NativeAudioCapabilityAdapter().convert(audio).value!.sink.passthroughCodecs, isEmpty);
+    });
+  });
 }
 
 class _FakeBridge implements NativePlaybackCapabilityBridge {
