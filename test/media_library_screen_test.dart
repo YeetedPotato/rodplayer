@@ -93,19 +93,26 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: client, kind: JellyfinLibraryKind.movies)));
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -3000));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextButton, 'Retry loading more'), findsOneWidget);
+    Future<void> jumpToLibraryBottom() async {
+      final position =
+          tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+    }
+
+    await jumpToLibraryBottom();
+    expect(
+      find.widgetWithText(TextButton, 'Retry loading more'),
+      findsOneWidget,
+    );
     await tester.scrollUntilVisible(find.text('Movie 0'), -900, scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     expect(find.text('Movie 0'), findsWidgets);
-    final scrollableState =
-        tester.state<ScrollableState>(find.byType(Scrollable).first);
-
-    scrollableState.position.jumpTo(
-      scrollableState.position.maxScrollExtent,
-    );
-    await tester.pumpAndSettle();
+    await jumpToLibraryBottom();
 
     expect(
       find.widgetWithText(TextButton, 'Retry loading more'),
