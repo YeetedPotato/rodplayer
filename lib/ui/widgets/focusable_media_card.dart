@@ -106,20 +106,26 @@ class _Metadata extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
-          if (constraints.hasBoundedHeight && constraints.maxHeight < 44) {
+          final bounded = constraints.hasBoundedHeight;
+          final maxHeight = constraints.maxHeight;
+          final textScale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.4);
+          if (bounded && maxHeight < 52 * textScale) {
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
             );
           }
-          final showSubtitle = subtitle != null && (!constraints.hasBoundedHeight || constraints.maxHeight >= 58);
+          final showSubtitle = subtitle != null && (!bounded || maxHeight >= 76 * textScale);
+          final titleLines = showSubtitle && (!bounded || maxHeight >= 104 * textScale) ? 2 : 1;
+          final titleText = Text(title, maxLines: titleLines, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700));
+          final subtitleText = showSubtitle ? Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textSecondary)) : null;
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Text(title, maxLines: showSubtitle ? 2 : 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min, children: [
+              if (bounded) Flexible(child: titleText) else titleText,
               if (showSubtitle) ...[
                 const SizedBox(height: 3),
-                Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textSecondary)),
+                if (bounded) Flexible(child: subtitleText!) else subtitleText!,
               ],
             ]),
           );
