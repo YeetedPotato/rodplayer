@@ -1,0 +1,380 @@
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/api/jellyfin_device_profile_mapper.dart';
+import 'package:rodplayer/core/api/models/media_source_info.dart';
+import 'package:rodplayer/core/api/models/play_method.dart';
+import 'package:rodplayer/core/api/models/playback_info_request.dart';
+import 'package:rodplayer/core/api/models/playback_info_response.dart';
+import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
+
+abstract interface class PlaybackInfoRequester {
+  String? get userId;
+  Future<PlaybackInfoResponse> getPlaybackInfo(PlaybackInfoRequest request);
+  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(PlaybackBackendDescriptor backend, PlaybackInfoRequest request);
+  Uri buildDirectPlayUri({required String itemId, required String mediaSourceId, String? playSessionId, int? audioStreamIndex, int? subtitleStreamIndex});
+  Uri? resolvePlaybackUri(String uriText);
+}
+
+class JellyfinPlaybackInfoRequester implements PlaybackInfoRequester {
+  const JellyfinPlaybackInfoRequester(this.client);
+
+  final JellyfinApiClient client;
+
+  @override
+  String? get userId => client.userId;
+
+  @override
+  Future<PlaybackInfoResponse> getPlaybackInfo(PlaybackInfoRequest request) => client.getPlaybackInfo(request);
+
+  @override
+  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(PlaybackBackendDescriptor backend, PlaybackInfoRequest request) => getPlaybackInfo(request);
+
+  @override
+  Uri buildDirectPlayUri({required String itemId, required String mediaSourceId, String? playSessionId, int? audioStreamIndex, int? subtitleStreamIndex}) => client.buildDirectPlayUri(
+        itemId: itemId,
+        mediaSourceId: mediaSourceId,
+        playSessionId: playSessionId,
+        audioStreamIndex: audioStreamIndex,
+        subtitleStreamIndex: subtitleStreamIndex,
+      );
+
+  @override
+  Uri? resolvePlaybackUri(String uriText) => client.resolvePlaybackUri(uriText);
+}
+
+class PlaybackBackendCandidate {
+  const PlaybackBackendCandidate({
+    required this.backend,
+    this.effectiveProfile,
+    this.response,
+    this.source,
+    this.plan,
+    this.score,
+    this.rejectionReason,
+  });
+
+  final PlaybackBackendDescriptor backend;
+  final EffectivePlaybackProfile? effectiveProfile;
+  final PlaybackInfoResponse? response;
+  final MediaSourceInfo? source;
+  final PlaybackPlan? plan;
+  final PlaybackPlanScore? score;
+  final String? rejectionReason;
+
+  bool get isUsable => plan != null && score != null && rejectionReason == null;
+}
+
+class PlaybackPlanScore {
+  const PlaybackPlanScore({required this.total, required this.components});
+
+  final int total;
+  final Map<String, int> components;
+}
+
+class PlaybackPlanDecision {
+  const PlaybackPlanDecision({
+    required this.selected,
+    required this.candidates,
+  });
+
+  final PlaybackBackendCandidate selected;
+  final List<PlaybackBackendCandidate> candidates;
+
+  PlaybackPlan get plan => selected.plan!;
+  String get selectedBackendId => selected.backend.id;
+  PlaybackPlanScore get score => selected.score!;
+  List<PlaybackBackendCandidate> get rejectedCandidates => candidates.where((candidate) => !candidate.isUsable).toList(growable: false);
+  List<PlaybackBackendCandidate> get orderedUsableCandidates {
+    final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
+      ..sort(_compareCandidates);
+    return usable;
+  }
+}
+
+class PlaybackPlanScorer {
+  const PlaybackPlanScorer();
+
+  PlaybackPlanScore score(PlaybackPlan plan, EffectivePlaybackProfile effectiveProfile) {
+    final c = <String, int>{};
+    c['preservationTier'] = _preservationTier(plan) * 10000;
+    c['video'] = switch (plan.videoOperation) {
+      VideoOperation.copy => 300,
+      VideoOperation.transcode => -220,
+      VideoOperation.none => 0,
+      VideoOperation.unknown => 0,
+    };
+    c['audio'] = switch (plan.audioOperation) {
+      AudioOperation.copy => 120,
+      AudioOperation.transcode => -70,
+      AudioOperation.none => 0,
+      AudioOperation.unknown => 0,
+    };
+    c['subtitle'] = switch (plan.subtitleOperation) {
+      SubtitleOperation.native => 50,
+      SubtitleOperation.external => 45,
+      SubtitleOperation.burnIn => -100,
+      SubtitleOperation.none => 0,
+      SubtitleOperation.unknown => 0,
+    };
+    c['hdr'] = switch (plan.hdrHandling) {
+      HdrHandling.preserve => 80,
+      HdrHandling.toneMapToSdr => -80,
+      HdrHandling.none => 0,
+      HdrHandling.unknown => 0,
+    };
+    c['container'] = plan.containerChanged ? -30 : 0;
+    c['hardwareDecode'] = switch (effectiveProfile.capabilities.hardwareDecode) {
+      CapabilitySupport.supported => 20,
+      CapabilitySupport.unsupported => -20,
+      CapabilitySupport.unknown => 0,
+    };
+    c['audioPreservation'] = effectiveProfile.capabilities.passthrough == CapabilitySupport.supported ? 20 : 0;
+    return PlaybackPlanScore(total: c.values.fold<int>(0, (sum, value) => sum + value), components: Map<String, int>.unmodifiable(c));
+  }
+}
+
+int _preservationTier(PlaybackPlan plan) {
+  final deliveryMode = plan.deliveryMode ?? _deliveryMode(plan.playMethod);
+  if (deliveryMode == PlaybackDeliveryMode.directPlay) return 7;
+  if (plan.videoOperation == VideoOperation.copy && plan.audioOperation == AudioOperation.transcode) return 6;
+  if (deliveryMode == PlaybackDeliveryMode.directStream) return 5;
+  if (plan.videoOperation == VideoOperation.copy) return 4;
+  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.copy) return 3;
+  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.transcode) return 2;
+  return 1;
+}
+
+class MultiBackendPlaybackNegotiator {
+  MultiBackendPlaybackNegotiator({
+    required this.requester,
+    this.profileMapper = const JellyfinDeviceProfileMapper(),
+    this.scorer = const PlaybackPlanScorer(),
+    this.runtimeRegistry = const PlaybackRuntimeRegistry(),
+  });
+
+  final PlaybackInfoRequester requester;
+  final JellyfinDeviceProfileMapper profileMapper;
+  final PlaybackPlanScorer scorer;
+  final PlaybackRuntimeRegistry runtimeRegistry;
+
+  Future<PlaybackPlanDecision> negotiate({
+    required PlaybackEnvironment environment,
+    required String itemId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) async {
+    final candidates = <PlaybackBackendCandidate>[];
+    for (final backend in environment.backends.where((backend) => backend.availability == BackendAvailability.available)) {
+      if (!runtimeRegistry.canExecute(backend.id)) {
+        candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'No playback runtime registered'));
+        continue;
+      }
+      try {
+        candidates.addAll(await _candidatesForBackend(
+          environment: environment,
+          backend: backend,
+          itemId: itemId,
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+        ));
+      } on Object catch (error) {
+        candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'PlaybackInfo request failed: $error'));
+      }
+    }
+    final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
+      ..sort(_compareCandidates);
+    if (usable.isEmpty) {
+      final failures = candidates.where((candidate) => candidate.rejectionReason?.startsWith('PlaybackInfo request failed:') == true).toList(growable: false);
+      if (failures.isNotEmpty && failures.length == candidates.length) {
+        throw ServerConnectionException('PlaybackInfo failed for all executable backends: ${failures.map((c) => '${c.backend.id}: ${c.rejectionReason}').join('; ')}');
+      }
+      throw ServerConnectionException('Server returned no playable media source: ${candidates.map((c) => '${c.backend.id}: ${c.rejectionReason ?? 'no usable candidate'}').join('; ')}');
+    }
+    return PlaybackPlanDecision(selected: usable.first, candidates: candidates);
+  }
+
+  Future<List<PlaybackBackendCandidate>> _candidatesForBackend({
+    required PlaybackEnvironment environment,
+    required PlaybackBackendDescriptor backend,
+    required String itemId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) async {
+    final profile = environment.effectiveProfileFor(backend.id);
+    final response = await requester.getPlaybackInfoForBackend(backend, PlaybackInfoRequest(
+      itemId: itemId,
+      userId: requester.userId,
+      deviceProfile: profileMapper.map(environment, backend.capabilities),
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      maxStreamingBitrate: environment.network.maxStreamingBitrate,
+    ));
+    final candidates = <PlaybackBackendCandidate>[];
+    for (final source in response.mediaSources) {
+      final plan = _planFor(
+        itemId: itemId,
+        playSessionId: response.playSessionId,
+        source: source,
+        engineId: backend.id,
+        audioStreamIndex: audioStreamIndex,
+        subtitleStreamIndex: subtitleStreamIndex,
+      );
+      candidates.add(PlaybackBackendCandidate(
+        backend: backend,
+        effectiveProfile: profile,
+        response: response,
+        source: source,
+        plan: plan,
+        score: plan == null ? null : scorer.score(plan, profile),
+        rejectionReason: plan == null ? 'Server response had no authoritative playback URL' : null,
+      ));
+    }
+    if (candidates.isEmpty) {
+      candidates.add(PlaybackBackendCandidate(backend: backend, effectiveProfile: profile, response: response, rejectionReason: 'Server returned no media sources'));
+    }
+    return candidates;
+  }
+
+  PlaybackPlan? _planFor({
+    required String itemId,
+    required String? playSessionId,
+    required MediaSourceInfo source,
+    required String engineId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) {
+    final method = source.playMethod ?? _methodFromSource(source);
+    final selectedAudio = audioStreamIndex ?? source.defaultAudioStreamIndex;
+    final selectedSubtitle = subtitleStreamIndex ?? source.defaultSubtitleStreamIndex;
+    final playbackUri = switch (method) {
+      PlayMethod.directPlay => requester.buildDirectPlayUri(
+          itemId: itemId,
+          mediaSourceId: source.id.isEmpty ? itemId : source.id,
+          playSessionId: playSessionId,
+          audioStreamIndex: selectedAudio,
+          subtitleStreamIndex: selectedSubtitle,
+        ),
+      PlayMethod.directStream => _resolvedServerUri(source.directStreamUrl ?? source.transcodingUrl),
+      PlayMethod.transcode => _resolvedServerUri(source.transcodingUrl),
+    };
+    if (playbackUri == null) return null;
+    return PlaybackPlan(
+      itemId: itemId,
+      mediaSourceId: source.id.isEmpty ? itemId : source.id,
+      playSessionId: playSessionId,
+      playMethod: method,
+      playbackUri: playbackUri,
+      engineId: engineId,
+      source: source,
+      selectedAudioStreamIndex: selectedAudio,
+      selectedSubtitleStreamIndex: selectedSubtitle,
+      transcodeReasons: source.transcodingReasons,
+      videoCopied: source.videoCopied ?? method != PlayMethod.transcode,
+      audioCopied: source.audioCopied ?? method != PlayMethod.transcode,
+      containerChanged: source.containerChanged ?? false,
+      deliveryMode: _deliveryMode(method),
+      videoOperation: _videoOperation(method, source),
+      audioOperation: _audioOperation(method, source),
+      subtitleOperation: _subtitleOperation(source, selectedSubtitle),
+      hdrHandling: _hdrHandling(source),
+    );
+  }
+
+  Uri? _resolvedServerUri(String? uriText) {
+    if (uriText == null || uriText.isEmpty) return null;
+    return requester.resolvePlaybackUri(uriText);
+  }
+
+  PlayMethod _methodFromSource(MediaSourceInfo source) {
+    if (source.supportsDirectPlay == true) return PlayMethod.directPlay;
+    if (source.supportsDirectStream == true) return PlayMethod.directStream;
+    if (source.supportsTranscoding == true) return PlayMethod.transcode;
+    if (source.directStreamUrl != null && source.directStreamUrl!.isNotEmpty) return PlayMethod.directStream;
+    if (source.transcodingUrl != null && source.transcodingUrl!.isNotEmpty) return PlayMethod.transcode;
+    return PlayMethod.directPlay;
+  }
+}
+
+int _compareCandidates(PlaybackBackendCandidate a, PlaybackBackendCandidate b) {
+  final score = b.score!.total.compareTo(a.score!.total);
+  if (score != 0) return score;
+  final priority = a.backend.priority.compareTo(b.backend.priority);
+  if (priority != 0) return priority;
+  final backend = a.backend.id.compareTo(b.backend.id);
+  if (backend != 0) return backend;
+  return (a.plan?.mediaSourceId ?? '').compareTo(b.plan?.mediaSourceId ?? '');
+}
+
+PlaybackDeliveryMode _deliveryMode(PlayMethod method) => switch (method) {
+      PlayMethod.directPlay => PlaybackDeliveryMode.directPlay,
+      PlayMethod.directStream => PlaybackDeliveryMode.directStream,
+      PlayMethod.transcode => PlaybackDeliveryMode.transcode,
+    };
+
+VideoOperation _videoOperation(PlayMethod method, MediaSourceInfo source) {
+  if (source.videoStreams.isEmpty) return VideoOperation.none;
+  if (method == PlayMethod.transcode) {
+    if (source.videoCopied == true) return VideoOperation.copy;
+    if (source.videoCopied == false) return VideoOperation.transcode;
+    return VideoOperation.unknown;
+  }
+  return VideoOperation.copy;
+}
+
+AudioOperation _audioOperation(PlayMethod method, MediaSourceInfo source) {
+  if (source.audioStreams.isEmpty) return AudioOperation.none;
+  if (method == PlayMethod.transcode) {
+    if (source.audioCopied == true) return AudioOperation.copy;
+    if (source.audioCopied == false) return AudioOperation.transcode;
+    return AudioOperation.unknown;
+  }
+  return AudioOperation.copy;
+}
+
+SubtitleOperation _subtitleOperation(MediaSourceInfo source, int? selectedSubtitle) {
+  final subtitles = source.subtitleStreams;
+  if (selectedSubtitle == null && subtitles.isEmpty) return SubtitleOperation.none;
+  final selected = subtitles.where((stream) => stream.index == selectedSubtitle).firstOrNull;
+  if (selected == null) return subtitles.isEmpty ? SubtitleOperation.none : SubtitleOperation.unknown;
+  if (selected.deliveryUrl != null || selected.isExternal == true) return SubtitleOperation.external;
+  if (selected.isTextSubtitleStream == true) return SubtitleOperation.native;
+  return SubtitleOperation.burnIn;
+}
+
+HdrHandling _hdrHandling(MediaSourceInfo source) {
+  final hasHdr = source.videoStreams.any((stream) {
+    final range = '${stream.videoRange ?? ''} ${stream.videoRangeType ?? ''} ${stream.profile ?? ''}'.toLowerCase();
+    return range.contains('hdr') || range.contains('dolby vision') || range.contains('hlg');
+  });
+  if (!hasHdr) return HdrHandling.none;
+  final reasons = source.transcodingReasons.join(' ').toLowerCase();
+  if (reasons.contains('tonemap') || reasons.contains('tone map')) return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(source.raw, const <String>{'tonemap', 'tone_map', 'toneMap'})) return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(source.raw, const <String>{'hdrpreserved', 'hdr_preserved', 'preservehdr', 'preserve_hdr'})) return HdrHandling.preserve;
+  return HdrHandling.unknown;
+}
+
+bool _hasAffirmativeRawFlag(Map<String, dynamic> raw, Set<String> names) {
+  for (final entry in raw.entries) {
+    final normalized = entry.key.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+    if (names.map((name) => name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase()).contains(normalized) && _isAffirmative(entry.value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _isAffirmative(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value?.toString().trim().toLowerCase();
+  return text == 'true' || text == '1' || text == 'yes' || text == 'y' || text == 'preserve' || text == 'preserved' || text == 'tonemap' || text == 'tone map';
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    return iterator.moveNext() ? iterator.current : null;
+  }
+}

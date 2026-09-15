@@ -58,6 +58,8 @@ jobs:
           cache: true
       - name: Generate Android project
         run: flutter create --platforms=android .
+      - name: Apply checked-in Android native playback handlers
+        run: python3 tool/apply_native_hosts.py android
       - name: Configure Android TV and Fire TV manifest
         run: |
           python3 - <<'PY'
@@ -102,6 +104,8 @@ jobs:
         with: {channel: stable, cache: true}
       - name: Generate macOS project
         run: flutter create --platforms=macos .
+      - name: Apply checked-in macOS native playback handlers
+        run: python3 tool/apply_native_hosts.py macos
       - run: flutter pub get
       - name: Analyze Dart code
         run: |
@@ -128,6 +132,8 @@ jobs:
         with: {channel: stable, cache: true}
       - name: Generate Windows project
         run: flutter create --platforms=windows .
+      - name: Apply checked-in Windows native playback handlers
+        run: python tool/apply_native_hosts.py windows
       - run: flutter pub get
       - name: Analyze Dart code
         shell: bash
@@ -155,6 +161,8 @@ jobs:
         with: {channel: stable, architecture: arm64, cache: true}
       - name: Generate iOS project
         run: flutter create --platforms=ios .
+      - name: Apply checked-in iOS native playback handlers
+        run: python3 tool/apply_native_hosts.py ios
       - name: Configure CocoaPods and unsigned build
         run: |
           python3 - <<'PY'

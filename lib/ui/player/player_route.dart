@@ -5,7 +5,10 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
+import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
+import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
+import 'package:rodplayer/platform/playback/runtime_playback_probes.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
 import 'package:uuid/uuid.dart';
 
@@ -20,21 +23,30 @@ class PlayerRoute extends StatefulWidget {
 }
 
 class _PlayerRouteState extends State<PlayerRoute> {
-  late final MediaKitPlaybackEngine engine = MediaKitPlaybackEngine();
   late final Future<_PreparedPlayback> _prepared = _prepare();
+  PlaybackRuntimeCoordinator? _coordinator;
 
   Future<_PreparedPlayback> _prepare() async {
-    final plan = await PlaybackNegotiator(client: widget.client).negotiate(itemId: widget.itemId);
-    await engine.load(plan);
-    return _PreparedPlayback(
-      plan: plan,
-      session: LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan),
-    );
+    final runtimes = await createPlatformPlaybackRuntimes();
+    final decision = await PlaybackNegotiator(
+      client: widget.client,
+      environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
+        identity: widget.client.identity,
+        playbackBackendRegistry: runtimes.backendRegistry,
+      ),
+      runtimeRegistry: runtimes.registry,
+    ).negotiateDecision(itemId: widget.itemId);
+    final plan = decision.plan;
+    final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
+    final coordinator = PlaybackRuntimeCoordinator(registry: runtimes.registry, session: logicalSession);
+    _coordinator = coordinator;
+    final runtimeSession = await coordinator.activateCandidates(decision.orderedUsableCandidates);
+    return _PreparedPlayback(plan: runtimeSession.plan, session: logicalSession, runtimeSession: runtimeSession);
   }
 
   @override
   void dispose() {
-    unawaited(engine.dispose());
+    unawaited(_coordinator?.dispose() ?? Future<void>.value());
     super.dispose();
   }
 
@@ -50,8 +62,8 @@ class _PlayerRouteState extends State<PlayerRoute> {
           }
           final prepared = snapshot.data!;
           return VideoPlayerView(
-            engine: engine,
-            surface: MediaKitPlaybackVideoSurface(engine),
+            engine: prepared.runtimeSession.engine,
+            surface: prepared.runtimeSession.surface!,
             client: widget.client,
             itemId: widget.itemId,
             logicalSession: prepared.session,
@@ -61,7 +73,8 @@ class _PlayerRouteState extends State<PlayerRoute> {
 }
 
 class _PreparedPlayback {
-  const _PreparedPlayback({required this.plan, required this.session});
+  const _PreparedPlayback({required this.plan, required this.session, required this.runtimeSession});
   final PlaybackPlan plan;
   final LogicalPlaybackSession session;
+  final PlaybackRuntimeSession runtimeSession;
 }

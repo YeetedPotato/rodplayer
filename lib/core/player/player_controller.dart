@@ -8,7 +8,9 @@ import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_coordinator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
+import 'package:rodplayer/core/player/track_controller.dart';
 
 /// The media_kit/mpv playback backend. mpv options are deliberately centralized
 /// so platform views and the HUD remain independent of transport details.
@@ -213,3 +215,35 @@ class MediaKitPlaybackVideoSurface implements PlaybackVideoSurface {
   @override
   Widget build(BuildContext context) => Video(controller: engine.controller, controls: AdaptiveVideoControls);
 }
+
+class MediaKitPlaybackRuntime implements PlaybackBackendRuntime {
+  MediaKitPlaybackRuntime({this.engineFactory = _defaultEngineFactory});
+
+  final MediaKitPlaybackEngine Function() engineFactory;
+
+  @override
+  String get backendId => 'media_kit';
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
+    final engine = engineFactory();
+    try {
+      await engine.load(plan);
+    } on Object {
+      await engine.dispose();
+      rethrow;
+    }
+    return PlaybackRuntimeSession(
+      runtimeId: backendId,
+      plan: plan,
+      engine: engine,
+      surface: MediaKitPlaybackVideoSurface(engine),
+      tracks: MediaKitTrackSelectionController.forPlan(engine.player, plan),
+    );
+  }
+}
+
+MediaKitPlaybackEngine _defaultEngineFactory() => MediaKitPlaybackEngine();
