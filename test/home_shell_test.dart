@@ -127,6 +127,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect((client.resumeCalls, client.nextUpCalls, client.movieCalls, client.showCalls), (1, 2, 1, 1));
+    await tester.scrollUntilVisible(find.text('Resume Movie'), -300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.text('Resume Movie'), findsWidgets);
     await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
