@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 
+#include <windows.h>
 #include <audioclient.h>
 #include <d3d11.h>
 #include <flutter/event_channel.h>
@@ -8,9 +9,10 @@
 #include <flutter/generated_plugin_registrant.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+#include <propkey.h>
+#include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
-#include <windows.h>
 
 #include <memory>
 #include <optional>
@@ -82,7 +84,8 @@ EncodableMap ProbeDisplay() {
 }
 
 EncodableMap ProbeAudio() {
-  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  HRESULT coinit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  bool should_uninitialize = SUCCEEDED(coinit);
   IMMDeviceEnumerator* enumerator = nullptr;
   IMMDevice* device = nullptr;
   EncodableMap payload;
@@ -113,6 +116,7 @@ EncodableMap ProbeAudio() {
   }
   if (device) device->Release();
   if (enumerator) enumerator->Release();
+  if (should_uninitialize) CoUninitialize();
   return payload;
 }
 
