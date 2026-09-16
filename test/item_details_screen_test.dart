@@ -141,12 +141,14 @@ void main() {
 
   testWidgets('compact long metadata and directional focus are stable', (tester) async {
     final client = _DetailClient(item: _movie('m', 'A Very Long Movie Title That Should Wrap Without Overflow'));
-    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'm'), size: const Size(390, 760), textScale: 1.25));
+    String? played;
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'm', onPlayItem: (_, id) => played = id), size: const Size(390, 760), textScale: 1.25));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(tester.takeException(), isNull);
+    if (played != null) expect(played, 'm');
   });
 }
 

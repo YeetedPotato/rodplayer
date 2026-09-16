@@ -44,6 +44,7 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'Movie One', progress: 25)]), kind: JellyfinLibraryKind.movies, onPlayItem: (_, id) => played = id)));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(_card('Movie One'));
     await tester.tap(_card('Movie One'));
     await tester.pumpAndSettle();
 
@@ -57,6 +58,7 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_series('s1', 'Series One')]), kind: JellyfinLibraryKind.tvShows)));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(_card('Series One'));
     await tester.tap(_card('Series One'));
     await tester.pumpAndSettle();
 
