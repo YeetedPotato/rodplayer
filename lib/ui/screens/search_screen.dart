@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -91,13 +92,16 @@ class _SearchScreenState extends State<SearchScreen> {
         else if (_error != null) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.cloud_off_outlined, title: 'Search unavailable', detail: 'Check your RodPlayer connection and try again.'))
         else if (_query.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _RecentSearches(items: _recent, onSelect: (value) { _controller.text = value; _search(value); }))
         else if (_results.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _Message(icon: Icons.search_off, title: 'No results', detail: 'Try a different title, artist, or keyword.'))
-        else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), onTap: () => _showDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),
+        else SliverPadding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 32), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, index) { final item = _results[index]; return FocusableMediaCard(title: _title(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), onTap: () => _openDetails(item)); }, childCount: _results.length), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, crossAxisSpacing: 16, mainAxisSpacing: 18, childAspectRatio: .68))),
       ]);
     if (widget.embedded) return ColoredBox(color: theme.obsidian, child: content);
     return Scaffold(backgroundColor: theme.obsidian, appBar: AppBar(title: const Text('Search'), centerTitle: false), body: content);
   }
 
-  void _showDetails(JellyfinSearchHint item) { final id = item.id.isEmpty ? null : item.id; showModalBottomSheet<void>(context: context, builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(item.subtitle()), const SizedBox(height: 20), FilledButton.icon(onPressed: id == null ? null : () => Navigator.pop(context), icon: const Icon(Icons.play_arrow), label: const Text('Play'))])))); }
+  void _openDetails(JellyfinSearchHint item) {
+    if (item.id.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id)));
+  }
 }
 
 class _Message extends StatelessWidget { const _Message({required this.icon, required this.title, required this.detail}); final IconData icon; final String title, detail; @override Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: Colors.white38), const SizedBox(height: 16), Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), const SizedBox(height: 8), Text(detail, style: const TextStyle(color: Colors.white60))])); }

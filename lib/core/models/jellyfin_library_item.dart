@@ -32,12 +32,14 @@ class JellyfinUserData {
     this.played = false,
     this.playbackPositionTicks,
     this.playedPercentage,
+    this.unplayedItemCount,
   });
 
   final bool isFavorite;
   final bool played;
   final int? playbackPositionTicks;
   final double? playedPercentage;
+  final int? unplayedItemCount;
 
   factory JellyfinUserData.fromJson(Object? value, {Map<String, dynamic> fallback = const <String, dynamic>{}}) {
     final json = value is Map ? Map<String, dynamic>.from(value) : const <String, dynamic>{};
@@ -46,8 +48,30 @@ class JellyfinUserData {
       played: _bool(json['Played'] ?? fallback['Played']) ?? false,
       playbackPositionTicks: _integer(json['PlaybackPositionTicks'] ?? fallback['PlaybackPositionTicks']),
       playedPercentage: _double(json['PlayedPercentage'] ?? fallback['PlayedPercentage']),
+      unplayedItemCount: _integer(json['UnplayedItemCount'] ?? fallback['UnplayedItemCount']),
     );
   }
+}
+
+class JellyfinPerson {
+  const JellyfinPerson({
+    required this.id,
+    required this.name,
+    this.role,
+    this.type,
+  });
+
+  final String id;
+  final String name;
+  final String? role;
+  final String? type;
+
+  factory JellyfinPerson.fromJson(Map<String, dynamic> json) => JellyfinPerson(
+        id: _string(json['Id']) ?? '',
+        name: _string(json['Name']) ?? '',
+        role: _string(json['Role']),
+        type: _string(json['Type']),
+      );
 }
 
 class JellyfinItemsPage<T> {
@@ -71,15 +95,23 @@ class JellyfinLibraryItem {
     this.seriesName,
     this.seriesId,
     this.seasonId,
+    this.seasonName,
     this.parentId,
     this.seasonNumber,
     this.episodeNumber,
     this.productionYear,
     this.premiereDate,
+    this.endDate,
     this.overview,
     this.officialRating,
     this.communityRating,
     this.tagline,
+    this.genres = const <String>[],
+    this.studios = const <String>[],
+    this.people = const <JellyfinPerson>[],
+    this.status,
+    this.childCount,
+    this.recursiveItemCount,
     this.playbackPositionTicks,
     this.playedPercentage,
     this.runTimeTicks,
@@ -98,15 +130,23 @@ class JellyfinLibraryItem {
   final String? seriesName;
   final String? seriesId;
   final String? seasonId;
+  final String? seasonName;
   final String? parentId;
   final int? seasonNumber;
   final int? episodeNumber;
   final int? productionYear;
   final DateTime? premiereDate;
+  final DateTime? endDate;
   final String? overview;
   final String? officialRating;
   final double? communityRating;
   final String? tagline;
+  final List<String> genres;
+  final List<String> studios;
+  final List<JellyfinPerson> people;
+  final String? status;
+  final int? childCount;
+  final int? recursiveItemCount;
   final int? playbackPositionTicks;
   final double? playedPercentage;
   final int? runTimeTicks;
@@ -136,15 +176,23 @@ class JellyfinLibraryItem {
       seriesName: _string(json['SeriesName']),
       seriesId: _string(json['SeriesId']),
       seasonId: _string(json['SeasonId']),
+      seasonName: _string(json['SeasonName']),
       parentId: _string(json['ParentId']),
       seasonNumber: _integer(json['ParentIndexNumber'] ?? json['SeasonNumber']),
       episodeNumber: _integer(json['IndexNumber']),
       productionYear: _integer(json['ProductionYear']),
       premiereDate: _date(json['PremiereDate']),
+      endDate: _date(json['EndDate']),
       overview: _string(json['Overview']),
       officialRating: _string(json['OfficialRating']),
       communityRating: _double(json['CommunityRating']),
       tagline: _tagline(json),
+      genres: _strings(json['Genres']),
+      studios: _studios(json['Studios']),
+      people: _people(json['People']),
+      status: _string(json['Status']),
+      childCount: _integer(json['ChildCount']),
+      recursiveItemCount: _integer(json['RecursiveItemCount']),
       playbackPositionTicks: userData.playbackPositionTicks ?? _integer(json['PlaybackPositionTicks']),
       playedPercentage: userData.playedPercentage ?? _double(json['PlayedPercentage']),
       runTimeTicks: _integer(json['RunTimeTicks']),
@@ -185,15 +233,23 @@ class NextUpItem extends JellyfinLibraryItem {
     super.seriesName,
     super.seriesId,
     super.seasonId,
+    super.seasonName,
     super.parentId,
     super.seasonNumber,
     super.episodeNumber,
     super.productionYear,
     super.premiereDate,
+    super.endDate,
     super.overview,
     super.officialRating,
     super.communityRating,
     super.tagline,
+    super.genres,
+    super.studios,
+    super.people,
+    super.status,
+    super.childCount,
+    super.recursiveItemCount,
     super.playbackPositionTicks,
     super.playedPercentage,
     super.runTimeTicks,
@@ -215,15 +271,23 @@ class NextUpItem extends JellyfinLibraryItem {
         seriesName: item.seriesName,
         seriesId: item.seriesId,
         seasonId: item.seasonId,
+        seasonName: item.seasonName,
         parentId: item.parentId,
         seasonNumber: item.seasonNumber,
         episodeNumber: item.episodeNumber,
         productionYear: item.productionYear,
         premiereDate: item.premiereDate,
+        endDate: item.endDate,
         overview: item.overview,
         officialRating: item.officialRating,
         communityRating: item.communityRating,
         tagline: item.tagline,
+        genres: item.genres,
+        studios: item.studios,
+        people: item.people,
+        status: item.status,
+        childCount: item.childCount,
+        recursiveItemCount: item.recursiveItemCount,
         playbackPositionTicks: item.playbackPositionTicks,
         playedPercentage: item.playedPercentage,
         runTimeTicks: item.runTimeTicks,
@@ -245,15 +309,23 @@ class ResumableItem extends JellyfinLibraryItem {
     super.seriesName,
     super.seriesId,
     super.seasonId,
+    super.seasonName,
     super.parentId,
     super.seasonNumber,
     super.episodeNumber,
     super.productionYear,
     super.premiereDate,
+    super.endDate,
     super.overview,
     super.officialRating,
     super.communityRating,
     super.tagline,
+    super.genres,
+    super.studios,
+    super.people,
+    super.status,
+    super.childCount,
+    super.recursiveItemCount,
     super.playbackPositionTicks,
     super.playedPercentage,
     super.runTimeTicks,
@@ -275,15 +347,23 @@ class ResumableItem extends JellyfinLibraryItem {
         seriesName: item.seriesName,
         seriesId: item.seriesId,
         seasonId: item.seasonId,
+        seasonName: item.seasonName,
         parentId: item.parentId,
         seasonNumber: item.seasonNumber,
         episodeNumber: item.episodeNumber,
         productionYear: item.productionYear,
         premiereDate: item.premiereDate,
+        endDate: item.endDate,
         overview: item.overview,
         officialRating: item.officialRating,
         communityRating: item.communityRating,
         tagline: item.tagline,
+        genres: item.genres,
+        studios: item.studios,
+        people: item.people,
+        status: item.status,
+        childCount: item.childCount,
+        recursiveItemCount: item.recursiveItemCount,
         playbackPositionTicks: item.playbackPositionTicks,
         playedPercentage: item.playedPercentage,
         runTimeTicks: item.runTimeTicks,
@@ -425,4 +505,17 @@ List<String> _strings(Object? value) {
   if (value is List) return List<String>.unmodifiable(value.map((item) => '$item'));
   final single = _string(value);
   return single == null || single.isEmpty ? const <String>[] : <String>[single];
+}
+List<String> _studios(Object? value) {
+  if (value is! List) return const <String>[];
+  final studios = <String>[];
+  for (final item in value) {
+    final name = item is Map ? _string(item['Name']) : _string(item);
+    if (name != null && name.trim().isNotEmpty) studios.add(name);
+  }
+  return List<String>.unmodifiable(studios);
+}
+List<JellyfinPerson> _people(Object? value) {
+  if (value is! List) return const <JellyfinPerson>[];
+  return List<JellyfinPerson>.unmodifiable(value.whereType<Map>().map((item) => JellyfinPerson.fromJson(Map<String, dynamic>.from(item))));
 }

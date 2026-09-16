@@ -192,7 +192,8 @@ void main() {
     await tester.ensureVisible(find.text('Latest Series').first);
     await tester.tap(find.text('Latest Series').first);
     await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Play')).onPressed, isNull);
+    expect(find.text('Latest Series'), findsWidgets);
+    expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
   });
 
   testWidgets('progress semantics handle unknown zero positive and clamp', (tester) async {
@@ -290,4 +291,13 @@ class _FakeHomeClient extends JellyfinApiClient {
     String? parentId,
   }) async =>
       JellyfinItemsPage<JellyfinLibraryItem>(items: const <JellyfinLibraryItem>[], totalRecordCount: 0, startIndex: startIndex);
+
+  @override
+  Future<JellyfinLibraryItem> getItem(String itemId) async => <JellyfinLibraryItem>[...resume, ...nextUp, ...movies, ...shows].firstWhere((item) => item.id == itemId, orElse: () => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Item'}));
+
+  @override
+  Future<List<JellyfinLibraryItem>> getSeasons({required String seriesId}) async => const <JellyfinLibraryItem>[];
+
+  @override
+  Future<List<JellyfinLibraryItem>> getEpisodes({required String seriesId, required String seasonId}) async => const <JellyfinLibraryItem>[];
 }

@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
-import 'package:rodplayer/ui/player/player_route.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 
 typedef LibraryPlayItemCallback = void Function(BuildContext context, String itemId);
 
@@ -130,12 +131,6 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
     }
   }
 
-  void _play(String itemId) {
-    final callback = widget.onPlayItem;
-    if (callback != null) return callback(context, itemId);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
@@ -158,7 +153,7 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 16, mainAxisSpacing: 18),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final item = _items[index];
-                    return FocusableMediaCard(title: _itemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: 2 / 3, onTap: () => _showQuickSheet(item));
+                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: 2 / 3, onTap: () => _openDetails(item));
                   }, childCount: _items.length),
                 );
               }),
@@ -178,23 +173,9 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
     return 6;
   }
 
-  void _showQuickSheet(JellyfinLibraryItem item) {
-    final playable = widget.kind == JellyfinLibraryKind.movies && item.id.isNotEmpty;
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text(_itemTitle(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-            if (_metadata(item).isNotEmpty) ...[const SizedBox(height: 8), Text(_metadata(item))],
-            if (item.overview != null) ...[const SizedBox(height: 12), Text(item.overview!, maxLines: 4, overflow: TextOverflow.ellipsis)],
-            const SizedBox(height: 20),
-            FilledButton.icon(onPressed: playable ? () { Navigator.pop(context); _play(item.id); } : null, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
-          ]),
-        ),
-      ),
-    );
+  void _openDetails(JellyfinLibraryItem item) {
+    if (item.id.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
   }
 
   String get _title => widget.kind == JellyfinLibraryKind.movies ? 'Movies' : 'TV Shows';
@@ -282,15 +263,3 @@ class _LoadMoreFooter extends StatelessWidget {
     return const SizedBox(height: 24);
   }
 }
-
-String _itemTitle(JellyfinLibraryItem item) => item.title.isEmpty ? 'Untitled' : item.title;
-String _metadata(JellyfinLibraryItem item) => [item.productionYear?.toString(), item.officialRating, item.communityRating == null ? null : '★ ${item.communityRating}'].whereType<String>().where((part) => part.isNotEmpty).join(' · ');
-double? _rawProgress(JellyfinLibraryItem item) {
-  final percent = item.playedPercentage;
-  if (percent != null) return (percent / 100).clamp(0, 1).toDouble();
-  final position = item.playbackPositionTicks;
-  final runtime = item.runTimeTicks;
-  if (position == null || runtime == null || runtime <= 0) return null;
-  return (position / runtime).clamp(0, 1).toDouble();
-}
-bool _hasMeaningfulResumeProgress(JellyfinLibraryItem item) => (_rawProgress(item) ?? 0) > 0;

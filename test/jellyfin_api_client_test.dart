@@ -181,6 +181,29 @@ void main() {
     expect(item.id, 'item');
   });
 
+  test('series detail APIs request seasons and episodes with authenticated user', () async {
+    final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
+          'Items': <Map<String, dynamic>>[
+            <String, dynamic>{'Id': request.url.path.endsWith('/Seasons') ? 'season' : 'episode', 'Name': 'Item'}
+          ],
+          'TotalRecordCount': 1,
+          'StartIndex': 0,
+        }), 200));
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+
+    final seasons = await client.getSeasons(seriesId: 'series');
+    final episodes = await client.getEpisodes(seriesId: 'series', seasonId: 'season id');
+
+    expect(mock.requests[0].url.path, '/jellyfin/Shows/series/Seasons');
+    expect(mock.requests[0].url.queryParameters, containsPair('UserId', 'user'));
+    expect(mock.requests[0].url.queryParameters, containsPair('EnableImages', 'true'));
+    expect(mock.requests[0].url.queryParameters, containsPair('EnableUserData', 'true'));
+    expect(mock.requests[1].url.path, '/jellyfin/Shows/series/Episodes');
+    expect(mock.requests[1].url.queryParameters, containsPair('SeasonId', 'season id'));
+    expect(seasons.single.id, 'season');
+    expect(episodes.single.id, 'episode');
+  });
+
   test('search encodes term and returns typed hints', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
           'SearchHints': <Map<String, dynamic>>[

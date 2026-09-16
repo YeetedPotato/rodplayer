@@ -14,11 +14,16 @@ void main() {
       'OfficialRating': 'PG-13',
       'CommunityRating': 7.5,
       'Taglines': <String>['Tag', 'Second'],
+      'Genres': <String>['Drama', 'Sci-Fi'],
+      'Studios': <Map<String, dynamic>>[<String, dynamic>{'Name': 'Studio'}],
+      'People': <Map<String, dynamic>>[<String, dynamic>{'Id': 'p1', 'Name': 'Actor', 'Role': 'Lead', 'Type': 'Actor'}],
       'RunTimeTicks': 1200000000,
+      'ChildCount': 3,
+      'RecursiveItemCount': 7,
       'PrimaryImageAspectRatio': 0.7,
       'ImageTags': <String, dynamic>{'Primary': 'p', 'Thumb': 't'},
       'BackdropImageTags': <String>['b'],
-      'UserData': <String, dynamic>{'IsFavorite': true, 'Played': true, 'PlaybackPositionTicks': 1000, 'PlayedPercentage': 50.5},
+      'UserData': <String, dynamic>{'IsFavorite': true, 'Played': true, 'PlaybackPositionTicks': 1000, 'PlayedPercentage': 50.5, 'UnplayedItemCount': 4},
     });
 
     expect(item.id, 'movie 1');
@@ -31,6 +36,11 @@ void main() {
     expect(item.officialRating, 'PG-13');
     expect(item.communityRating, 7.5);
     expect(item.tagline, 'Tag');
+    expect(item.genres, <String>['Drama', 'Sci-Fi']);
+    expect(item.studios, <String>['Studio']);
+    expect(item.people.single.name, 'Actor');
+    expect(item.childCount, 3);
+    expect(item.recursiveItemCount, 7);
     expect(item.runTimeTicks, 1200000000);
     expect(item.primaryImageTag, 'p');
     expect(item.backdropImageTag, 'b');
@@ -40,6 +50,7 @@ void main() {
     expect(item.played, isTrue);
     expect(item.playbackPositionTicks, 1000);
     expect(item.playedPercentage, 50.5);
+    expect(item.userData.unplayedItemCount, 4);
     expect(item.imageUrl('https://server'), 'https://server/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.raw['Name'], 'Film');
@@ -60,6 +71,7 @@ void main() {
       'SeriesName': 'Show',
       'SeriesId': 'series',
       'SeasonId': 'season',
+      'SeasonName': 'Season Two',
       'ParentId': 'parent',
       'ParentIndexNumber': 2,
       'IndexNumber': 3,
@@ -70,6 +82,7 @@ void main() {
     expect(episode.seriesName, 'Show');
     expect(episode.seriesId, 'series');
     expect(episode.seasonId, 'season');
+    expect(episode.seasonName, 'Season Two');
     expect(episode.parentId, 'parent');
     expect(episode.seasonNumber, 2);
     expect(episode.episodeNumber, 3);

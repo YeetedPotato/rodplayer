@@ -42,6 +42,9 @@ void main() {
 
     expect(find.text('Typed Result'), findsOneWidget);
     expect(find.text('Movie'), findsOneWidget);
+    await tester.tap(find.text('Typed Result'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
   });
 
   testWidgets('missing image does not create invalid network URL', (tester) async {
@@ -76,4 +79,7 @@ class _FakeContentClient extends JellyfinApiClient {
 
   @override
   Future<List<JellyfinSearchHint>> search({required String query, int limit = 20}) async => searchResults;
+
+  @override
+  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Typed Result', 'Type': 'Movie'});
 }

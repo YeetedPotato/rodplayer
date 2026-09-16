@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
 
 typedef PlayItemCallback = void Function(BuildContext context, String itemId);
@@ -80,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _shelf<ResumableItem>('Continue Watching', _resume, 16 / 9, (item) => _resumeSubtitle(item), _reloadResume, progress: _visualProgress),
         _shelf<NextUpItem>('Next Up', _nextUp, 16 / 9, _episodeSubtitle, _reloadNextUp),
         _shelf<JellyfinLibraryItem>('Latest Movies', _movies, 2 / 3, (item) => item.productionYear?.toString() ?? 'Movie', _reloadMovies),
-        _shelf<JellyfinLibraryItem>('Latest TV Shows', _shows, 2 / 3, (item) => item.productionYear?.toString() ?? 'Series', _reloadShows, playable: false),
+        _shelf<JellyfinLibraryItem>('Latest TV Shows', _shows, 2 / 3, (item) => item.productionYear?.toString() ?? 'Series', _reloadShows),
         if (loaded && !anyContent) const SliverFillRemaining(hasScrollBody: false, child: _HomeEmpty()),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ],
@@ -100,7 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  Widget _shelf<T extends JellyfinLibraryItem>(String title, _Load<T> state, double aspectRatio, String Function(T) subtitle, VoidCallback onRetry, {double? Function(T)? progress, bool playable = true}) {
+  Widget _shelf<T extends JellyfinLibraryItem>(String title, _Load<T> state, double aspectRatio, String Function(T) subtitle, VoidCallback onRetry, {double? Function(T)? progress}) {
     if (state.loading) return SliverToBoxAdapter(child: _ShelfLoading(title: title));
     if (state.error != null) return SliverToBoxAdapter(child: _ShelfError(title: title, onRetry: onRetry));
     if (state.items.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -118,27 +120,17 @@ class _HomeScreenState extends State<HomeScreen> {
             imageUrl: item.imageUrl(widget.client.baseUrl),
             progress: progress?.call(item),
             aspectRatio: aspectRatio,
-            onTap: () => _showItem(item, playable: playable && _playable(item)),
+            onTap: () => _openDetails(item),
           );
         },
       ),
     );
   }
 
-  void _showItem(JellyfinLibraryItem item, {required bool playable}) => showModalBottomSheet<void>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Text(_title(item), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-              if (item.overview != null) ...[const SizedBox(height: 12), Text(item.overview!, maxLines: 4, overflow: TextOverflow.ellipsis)],
-              const SizedBox(height: 20),
-              FilledButton.icon(onPressed: playable ? () { Navigator.pop(context); _play(item.id); } : null, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
-            ]),
-          ),
-        ),
-      );
+  void _openDetails(JellyfinLibraryItem item) {
+    if (item.id.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
+  }
 }
 
 class _HomeHero extends StatelessWidget {
@@ -172,7 +164,7 @@ class _HomeHero extends StatelessWidget {
                       Text(_heroSubtitle(item), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary)),
                       if (item.overview != null) ...[SizedBox(height: compact ? 8 : 12), Text(item.overview!, maxLines: compact ? 1 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))],
                       SizedBox(height: compact ? 12 : 18),
-                      FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(_hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
+                      FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
                     ]),
             ),
           ),
@@ -212,29 +204,15 @@ class _Load<T extends JellyfinLibraryItem> {
   final bool loading;
 }
 
-String _title(JellyfinLibraryItem item) => item.title.isEmpty ? 'Untitled' : item.title;
-bool _playable(JellyfinLibraryItem item) => item.id.isNotEmpty && (item.kind == JellyfinItemKind.movie || item.kind == JellyfinItemKind.episode || item.kind == JellyfinItemKind.audio);
+String _title(JellyfinLibraryItem item) => mediaItemTitle(item);
+bool _playable(JellyfinLibraryItem item) => isDirectlyPlayable(item);
 String _resumeSubtitle(ResumableItem item) => item.productionYear?.toString() ?? item.rawType ?? 'Resume';
 String _episodeSubtitle(NextUpItem item) {
-  final season = item.seasonNumber == null ? null : 'S${item.seasonNumber!.toString().padLeft(2, '0')}';
-  final episode = item.episodeNumber == null ? null : 'E${item.episodeNumber!.toString().padLeft(2, '0')}';
-  final code = season == null && episode == null ? null : '${season ?? ''}${episode ?? ''}';
+  final code = episodeCode(item).ifEmpty('');
   return [item.seriesName, code].whereType<String>().where((part) => part.isNotEmpty).join(' · ').ifEmpty(item.rawType ?? 'Episode');
 }
 String _heroSubtitle(JellyfinLibraryItem item) => [item.seriesName, item.productionYear?.toString(), item.officialRating, item.communityRating == null ? null : '★ ${item.communityRating}'].whereType<String>().where((part) => part.isNotEmpty).join(' · ');
-double? _rawProgress(JellyfinLibraryItem item) {
-  final percent = item.playedPercentage;
-  if (percent != null) return (percent / 100).clamp(0, 1).toDouble();
-  final position = item.playbackPositionTicks;
-  final runtime = item.runTimeTicks;
-  if (position == null || runtime == null || runtime <= 0) return null;
-  return (position / runtime).clamp(0, 1).toDouble();
-}
-double? _visualProgress(JellyfinLibraryItem item) {
-  final progress = _rawProgress(item);
-  return progress == null || progress <= 0 ? null : progress;
-}
-bool _hasMeaningfulResumeProgress(JellyfinLibraryItem item) => (_rawProgress(item) ?? 0) > 0;
+double? _visualProgress(JellyfinLibraryItem item) => visualProgress(item);
 
 extension on String {
   String ifEmpty(String fallback) => isEmpty ? fallback : this;

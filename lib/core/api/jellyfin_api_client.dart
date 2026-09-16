@@ -155,7 +155,28 @@ class JellyfinApiClient {
         key: 'SearchHints',
       ).items;
 
-  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Items', itemId], const <String, Object?>{}), headers: headers)));
+  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Items', itemId], <String, Object?>{'Fields': _detailFields}), headers: headers)));
+
+  Future<List<JellyfinLibraryItem>> getSeasons({required String seriesId}) async => _page(
+        _jsonObject(await _client.get(_uri(<String>['Shows', seriesId, 'Seasons'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'Fields': _detailFields,
+          'EnableImages': true,
+          'EnableUserData': true,
+        }), headers: headers)),
+        JellyfinLibraryItem.fromJson,
+      ).items;
+
+  Future<List<JellyfinLibraryItem>> getEpisodes({required String seriesId, required String seasonId}) async => _page(
+        _jsonObject(await _client.get(_uri(<String>['Shows', seriesId, 'Episodes'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'SeasonId': seasonId,
+          'Fields': _detailFields,
+          'EnableImages': true,
+          'EnableUserData': true,
+        }), headers: headers)),
+        JellyfinLibraryItem.fromJson,
+      ).items;
 
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
     required JellyfinLibraryKind kind,
@@ -237,3 +258,4 @@ class JellyfinApiClient {
 }
 
 int? _int(Object? value) => value is num ? value.toInt() : int.tryParse('$value');
+const _detailFields = 'PrimaryImageAspectRatio,Overview,ParentId,Taglines,Genres,Studios,People,Status,EndDate,ChildCount,RecursiveItemCount';

@@ -41,7 +41,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Series One'));
     await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Play')).onPressed, isNull);
+    expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
   });
 
   testWidgets('initial error, empty, and compact large text states are stable', (tester) async {
@@ -217,4 +217,20 @@ class _LibraryClient extends JellyfinApiClient {
     if (completer != null && startIndex == 0) return completer.future;
     return Future<JellyfinItemsPage<JellyfinLibraryItem>>.value(pages[startIndex] ?? JellyfinItemsPage<JellyfinLibraryItem>(items: const <JellyfinLibraryItem>[], totalRecordCount: startIndex, startIndex: startIndex));
   }
+
+  @override
+  Future<JellyfinLibraryItem> getItem(String itemId) async {
+    for (final page in pages.values) {
+      for (final item in page.items) {
+        if (item.id == itemId) return item;
+      }
+    }
+    return JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Item'});
+  }
+
+  @override
+  Future<List<JellyfinLibraryItem>> getSeasons({required String seriesId}) async => const <JellyfinLibraryItem>[];
+
+  @override
+  Future<List<JellyfinLibraryItem>> getEpisodes({required String seriesId, required String seasonId}) async => const <JellyfinLibraryItem>[];
 }
