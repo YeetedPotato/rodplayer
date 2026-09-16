@@ -98,6 +98,12 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.widgetWithText(FilledButton, 'Save preferences'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
     final saveButton = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Save preferences'),
     );
