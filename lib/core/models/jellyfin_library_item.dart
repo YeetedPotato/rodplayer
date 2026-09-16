@@ -59,19 +59,25 @@ class JellyfinPerson {
     required this.name,
     this.role,
     this.type,
+    this.primaryImageTag,
   });
 
   final String id;
   final String name;
   final String? role;
   final String? type;
+  final String? primaryImageTag;
 
-  factory JellyfinPerson.fromJson(Map<String, dynamic> json) => JellyfinPerson(
+  factory JellyfinPerson.fromJson(Map<String, dynamic> json) {
+    final imageTags = json['ImageTags'] is Map ? Map<String, dynamic>.from(json['ImageTags'] as Map) : const <String, dynamic>{};
+    return JellyfinPerson(
         id: _string(json['Id']) ?? '',
         name: _string(json['Name']) ?? '',
         role: _string(json['Role']),
         type: _string(json['Type']),
+        primaryImageTag: _string(json['PrimaryImageTag'] ?? imageTags['Primary']),
       );
+  }
 }
 
 class JellyfinItemsPage<T> {
@@ -504,7 +510,7 @@ DateTime? _date(Object? value) => value == null ? null : DateTime.tryParse('$val
 List<String> _strings(Object? value) {
   if (value is List) return List<String>.unmodifiable(value.map((item) => '$item'));
   final single = _string(value);
-  return single == null || single.isEmpty ? const <String>[] : <String>[single];
+  return single == null || single.isEmpty ? const <String>[] : List<String>.unmodifiable(<String>[single]);
 }
 List<String> _studios(Object? value) {
   if (value is! List) return const <String>[];

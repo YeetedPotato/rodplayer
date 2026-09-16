@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -194,6 +196,43 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
   });
 
+  testWidgets('Home shelf cards open item details while hero remains direct playback', (tester) async {
+    String? played;
+    await tester.pumpWidget(app(home(_FakeHomeClient(), onPlayItem: (_, id) => played = id)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Resume').first);
+    expect(played, 'resume');
+    await tester.tap(find.text('Resume Movie').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(find.text('Resume Movie'), findsWidgets);
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
+    await tester.pumpAndSettle();
+    expect(find.text('Resume Movie'), findsWidgets);
+
+    await tester.scrollUntilVisible(find.text('Next Episode'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Next Episode'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(find.textContaining('Show'), findsWidgets);
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Latest Movie'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Latest Series'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
+  });
+
   testWidgets('progress semantics handle unknown zero positive and clamp', (tester) async {
     await tester.pumpWidget(app(home(_FakeHomeClient(resume: <ResumableItem>[ResumableItem.fromJson(<String, dynamic>{'Id': 'resume', 'Name': 'Unknown', 'Type': 'Movie'})]))));
     await tester.pumpAndSettle();
@@ -237,7 +276,7 @@ class _FakeHomeClient extends JellyfinApiClient {
         nextUp = nextUp ?? <NextUpItem>[NextUpItem.fromJson(<String, dynamic>{'Id': 'episode', 'Name': 'Next Episode', 'Type': 'Episode', 'SeriesName': 'Show', 'ParentIndexNumber': 1, 'IndexNumber': 2})],
         movies = movies ?? <JellyfinLibraryItem>[JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'movie', 'Name': 'Latest Movie', 'Type': 'Movie', 'ProductionYear': 2024})],
         shows = shows ?? <JellyfinLibraryItem>[JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'series', 'Name': 'Latest Series', 'Type': 'Series'})],
-        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http.Client());
+        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   _FakeHomeClient.empty()
       : this(resume: const <ResumableItem>[], nextUp: const <NextUpItem>[], movies: const <JellyfinLibraryItem>[], shows: const <JellyfinLibraryItem>[]);

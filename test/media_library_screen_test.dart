@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
 
 import 'test_support.dart';
@@ -34,6 +36,32 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_series('s1', 'Series One')]), kind: JellyfinLibraryKind.tvShows)));
     await tester.pumpAndSettle();
     expect(find.text('Series One'), findsOneWidget);
+  });
+
+  testWidgets('Movie library card opens details and plays through injected seam', (tester) async {
+    String? played;
+    await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'Movie One', progress: 25)]), kind: JellyfinLibraryKind.movies, onPlayItem: (_, id) => played = id)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Movie One'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Resume'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
+    expect(played, 'm1');
+  });
+
+  testWidgets('Series library card opens details without fabricated Play', (tester) async {
+    await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_series('s1', 'Series One')]), kind: JellyfinLibraryKind.tvShows)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Series One'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(find.text('Series One'), findsWidgets);
+    expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
   });
 
   testWidgets('initial error, empty, and compact large text states are stable', (tester) async {
@@ -183,7 +211,7 @@ class _LibraryClient extends JellyfinApiClient {
   })  : pages = pages ?? {0: JellyfinItemsPage<JellyfinLibraryItem>(items: items ?? <JellyfinLibraryItem>[], totalRecordCount: items?.length ?? 0, startIndex: 0)},
         failStarts = failStarts ?? <int>{},
         delayed = delayed ?? <JellyfinLibrarySort, Completer<JellyfinItemsPage<JellyfinLibraryItem>>>{},
-        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http.Client());
+        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final Map<int, JellyfinItemsPage<JellyfinLibraryItem>> pages;
   final bool failInitial;

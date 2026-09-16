@@ -16,8 +16,10 @@ void main() {
       'Taglines': <String>['Tag', 'Second'],
       'Genres': <String>['Drama', 'Sci-Fi'],
       'Studios': <Map<String, dynamic>>[<String, dynamic>{'Name': 'Studio'}],
-      'People': <Map<String, dynamic>>[<String, dynamic>{'Id': 'p1', 'Name': 'Actor', 'Role': 'Lead', 'Type': 'Actor'}],
+      'People': <Map<String, dynamic>>[<String, dynamic>{'Id': 'p1', 'Name': 'Actor', 'Role': 'Lead', 'Type': 'Actor', 'ImageTags': <String, dynamic>{'Primary': 'person-p'}}],
       'RunTimeTicks': 1200000000,
+      'Status': 'Continuing',
+      'EndDate': '2025-02-03T00:00:00Z',
       'ChildCount': 3,
       'RecursiveItemCount': 7,
       'PrimaryImageAspectRatio': 0.7,
@@ -39,6 +41,9 @@ void main() {
     expect(item.genres, <String>['Drama', 'Sci-Fi']);
     expect(item.studios, <String>['Studio']);
     expect(item.people.single.name, 'Actor');
+    expect(item.people.single.primaryImageTag, 'person-p');
+    expect(item.status, 'Continuing');
+    expect(item.endDate, DateTime.utc(2025, 2, 3));
     expect(item.childCount, 3);
     expect(item.recursiveItemCount, 7);
     expect(item.runTimeTicks, 1200000000);
@@ -51,6 +56,10 @@ void main() {
     expect(item.playbackPositionTicks, 1000);
     expect(item.playedPercentage, 50.5);
     expect(item.userData.unplayedItemCount, 4);
+    expect(() => item.genres.add('x'), throwsUnsupportedError);
+    expect(() => item.studios.add('x'), throwsUnsupportedError);
+    expect(() => item.people.add(const JellyfinPerson(id: 'x', name: 'x')), throwsUnsupportedError);
+    expect(() => item.backdropImageTags.add('x'), throwsUnsupportedError);
     expect(item.imageUrl('https://server'), 'https://server/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.raw['Name'], 'Film');
@@ -102,14 +111,24 @@ void main() {
   });
 
   test('missing optional fields and unknown type stay conservative', () {
-    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'x', 'Name': 'Mystery', 'Type': 'Weird', 'ProductionYear': 'not-a-number'});
+    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'x', 'Name': 'Mystery', 'Type': 'Weird', 'ProductionYear': 'not-a-number', 'EndDate': 'not-a-date', 'BackdropImageTag': 'single'});
 
     expect(item.kind, JellyfinItemKind.unknown);
     expect(item.rawType, 'Weird');
     expect(item.productionYear, isNull);
+    expect(item.endDate, isNull);
     expect(item.runTimeTicks, isNull);
     expect(item.primaryImageTag, isNull);
+    expect(item.backdropImageTags, <String>['single']);
+    expect(() => item.backdropImageTags.add('x'), throwsUnsupportedError);
     expect(item.imageUrl('https://server'), isNull);
+  });
+
+  test('sparse M4 collections stay conservative', () {
+    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'x', 'Name': 'Sparse', 'Genres': 'bad', 'Studios': 'bad', 'People': 'bad'});
+    expect(item.genres, isEmpty);
+    expect(item.studios, isEmpty);
+    expect(item.people, isEmpty);
   });
 
   test('search hint prefers Id and supports legacy ItemId', () {

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/browse_screen.dart';
+import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -42,6 +44,25 @@ void main() {
 
     expect(find.text('Typed Result'), findsOneWidget);
     expect(find.text('Movie'), findsOneWidget);
+    await tester.tap(find.text('Typed Result'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    expect(client.itemRequests, <String>['item']);
+  });
+
+  testWidgets('Search empty-ID result does not open fake playback route', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final client = _FakeContentClient(searchResults: <JellyfinSearchHint>[JellyfinSearchHint.fromJson(<String, dynamic>{'Name': 'No Id', 'Type': 'Movie'})]);
+
+    await tester.pumpWidget(app(SearchScreen(client: client)));
+    await tester.enterText(find.byType(TextField), 'typed');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('No Id'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ItemDetailsScreen), findsNothing);
+    expect(client.itemRequests, isEmpty);
   });
 
   testWidgets('missing image does not create invalid network URL', (tester) async {
@@ -62,11 +83,12 @@ class _FakeContentClient extends JellyfinApiClient {
     this.resume = const <ResumableItem>[],
     this.nextUp = const <NextUpItem>[],
     this.searchResults = const <JellyfinSearchHint>[],
-  }) : super(baseUrl: 'https://server', identity: testIdentity, client: http.Client());
+  }) : super(baseUrl: 'https://server', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final List<ResumableItem> resume;
   final List<NextUpItem> nextUp;
   final List<JellyfinSearchHint> searchResults;
+  final itemRequests = <String>[];
 
   @override
   Future<List<ResumableItem>> getResumeItems({int limit = 12}) async => resume;
@@ -78,5 +100,8 @@ class _FakeContentClient extends JellyfinApiClient {
   Future<List<JellyfinSearchHint>> search({required String query, int limit = 20}) async => searchResults;
 
   @override
-  Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Typed Result', 'Type': 'Movie'});
+  Future<JellyfinLibraryItem> getItem(String itemId) async {
+    itemRequests.add(itemId);
+    return JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Typed Result', 'Type': 'Movie'});
+  }
 }

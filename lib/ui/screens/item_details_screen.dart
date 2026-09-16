@@ -78,7 +78,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         _item = item;
         _loadingItem = false;
       });
-      if (item.kind == JellyfinItemKind.series) unawaited(_loadSeasons(item.id, generation));
+      if (item.kind == JellyfinItemKind.series && item.id.isNotEmpty) unawaited(_loadSeasons(item.id, generation));
     } catch (error) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -97,9 +97,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     try {
       final seasons = await widget.client.getSeasons(seriesId: seriesId);
       if (!mounted || generation != _generation) return;
+      final seen = <String>{};
       JellyfinLibraryItem? firstSeason;
       for (final season in seasons) {
-        if (season.id.isNotEmpty) {
+        if (season.id.isNotEmpty && seen.add(season.id)) {
           firstSeason = season;
           break;
         }
@@ -233,14 +234,12 @@ class _DetailsBody extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 24, compact ? 20 : 36, 24),
             sliver: SliverToBoxAdapter(child: _Header(item: item, client: client, compact: compact, onPlay: onPlay)),
           ),
-          if (item.kind == JellyfinItemKind.series)
+          if (item.kind == JellyfinItemKind.series) ...[
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 36),
+              padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 16),
               sliver: SliverToBoxAdapter(
-                child: _SeriesSection(
-                  client: client,
+                child: _SeriesControls(
                   seasons: seasons,
-                  episodes: episodes,
                   selectedSeasonId: selectedSeasonId,
                   loadingSeasons: loadingSeasons,
                   loadingEpisodes: loadingEpisodes,
@@ -249,10 +248,21 @@ class _DetailsBody extends StatelessWidget {
                   onSeasonChanged: onSeasonChanged,
                   onRetrySeasons: onRetrySeasons,
                   onRetryEpisodes: onRetryEpisodes,
-                  onEpisodeTap: onEpisodeTap,
                 ),
               ),
             ),
+            if (!loadingSeasons && seasonsError == null && _selectableSeasons(seasons).isNotEmpty && !loadingEpisodes && episodesError == null && episodes.isNotEmpty)
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 36),
+                sliver: _EpisodeGrid(client: client, episodes: episodes, onEpisodeTap: onEpisodeTap),
+              ),
+            if (!loadingSeasons && seasonsError == null && _selectableSeasons(seasons).isNotEmpty && !loadingEpisodes && episodesError == null && episodes.isEmpty)
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 36),
+                sliver: const SliverToBoxAdapter(child: _Message(icon: Icons.video_library_outlined, title: 'No episodes found')),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
         ]);
       });
 }
@@ -280,6 +290,8 @@ class _Header extends StatelessWidget {
       if (item.tagline != null) ...[const SizedBox(height: 10), Text(item.tagline!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontStyle: FontStyle.italic))],
       if (item.overview != null) ...[const SizedBox(height: 14), Text(item.overview!, maxLines: compact ? 5 : 8, overflow: TextOverflow.ellipsis)],
       if (item.genres.isNotEmpty) ...[const SizedBox(height: 12), Text(item.genres.take(4).join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
+      if (item.studios.isNotEmpty) ...[const SizedBox(height: 8), Text('Studios: ${item.studios.take(3).join(', ')}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
+      if (item.people.isNotEmpty) ...[const SizedBox(height: 8), Text('Cast: ${item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
       const SizedBox(height: 18),
       if (onPlay != null) FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
     ]);
@@ -291,18 +303,21 @@ class _Header extends StatelessWidget {
 
   String _subtitle(JellyfinLibraryItem item) => [
         item.kind == JellyfinItemKind.episode ? item.seriesName : null,
+        item.kind == JellyfinItemKind.episode ? item.seasonName : null,
+        item.kind == JellyfinItemKind.episode ? episodeCode(item) : null,
         item.productionYear?.toString(),
+        _dateLabel(item.premiereDate),
         item.officialRating,
         item.communityRating == null ? null : '★ ${item.communityRating}',
+        item.status,
+        _dateLabel(item.endDate),
         if (item.runTime != null) _duration(item.runTime!),
       ].whereType<String>().where((part) => part.isNotEmpty).join(' · ');
 }
 
-class _SeriesSection extends StatelessWidget {
-  const _SeriesSection({
-    required this.client,
+class _SeriesControls extends StatelessWidget {
+  const _SeriesControls({
     required this.seasons,
-    required this.episodes,
     required this.selectedSeasonId,
     required this.loadingSeasons,
     required this.loadingEpisodes,
@@ -311,12 +326,9 @@ class _SeriesSection extends StatelessWidget {
     required this.onSeasonChanged,
     required this.onRetrySeasons,
     required this.onRetryEpisodes,
-    required this.onEpisodeTap,
   });
 
-  final JellyfinApiClient client;
   final List<JellyfinLibraryItem> seasons;
-  final List<JellyfinLibraryItem> episodes;
   final String? selectedSeasonId;
   final bool loadingSeasons;
   final bool loadingEpisodes;
@@ -325,13 +337,14 @@ class _SeriesSection extends StatelessWidget {
   final ValueChanged<String> onSeasonChanged;
   final VoidCallback onRetrySeasons;
   final VoidCallback onRetryEpisodes;
-  final ValueChanged<JellyfinLibraryItem> onEpisodeTap;
 
   @override
   Widget build(BuildContext context) {
     if (loadingSeasons) return const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
     if (seasonsError != null) return _Message(icon: Icons.cloud_off_outlined, title: 'Seasons unavailable', action: TextButton(onPressed: onRetrySeasons, child: const Text('Retry')));
     if (seasons.isEmpty) return const _Message(icon: Icons.tv_outlined, title: 'No seasons found');
+    final selectableSeasons = _selectableSeasons(seasons);
+    if (selectableSeasons.isEmpty) return const _Message(icon: Icons.tv_outlined, title: 'No selectable seasons found');
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text('Episodes', style: Theme.of(context).textTheme.titleLarge)),
@@ -341,7 +354,7 @@ class _SeriesSection extends StatelessWidget {
             value: selectedSeasonId,
             isExpanded: true,
             underline: const SizedBox.shrink(),
-            items: seasons.where((season) => season.id.isNotEmpty).map((season) => DropdownMenuItem<String>(value: season.id, child: Text(_seasonTitle(season), maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
+            items: selectableSeasons.map((season) => DropdownMenuItem<String>(value: season.id, child: Text(_seasonTitle(season), maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
             onChanged: (value) {
               if (value != null) onSeasonChanged(value);
             },
@@ -353,37 +366,43 @@ class _SeriesSection extends StatelessWidget {
         const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
       else if (episodesError != null)
         _Message(icon: Icons.cloud_off_outlined, title: 'Episodes unavailable', action: TextButton(onPressed: onRetryEpisodes, child: const Text('Retry')))
-      else if (episodes.isEmpty)
-        const _Message(icon: Icons.video_library_outlined, title: 'No episodes found')
-      else
-        LayoutBuilder(builder: (context, constraints) {
-          final columns = constraints.maxWidth < 540 ? 2 : constraints.maxWidth < 840 ? 3 : 4;
-          return GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: episodes.length,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .72, crossAxisSpacing: 14, mainAxisSpacing: 16),
-            itemBuilder: (context, index) {
-              final episode = episodes[index];
-              final code = episodeCode(episode);
-              return FocusableMediaCard(
-                title: mediaItemTitle(episode),
-                subtitle: [code, episode.runTime == null ? null : _duration(episode.runTime!)].whereType<String>().where((part) => part.isNotEmpty).join(' · '),
-                imageUrl: episode.imageUrl(client.baseUrl),
-                progress: visualProgress(episode),
-                onTap: () => onEpisodeTap(episode),
-              );
-            },
-          );
-        }),
     ]);
   }
 
   String _seasonTitle(JellyfinLibraryItem season) {
     if (season.seasonName != null && season.seasonName!.trim().isNotEmpty) return season.seasonName!;
     if (season.title.isNotEmpty) return season.title;
+    if (season.seasonNumber == 0) return 'Specials';
     return season.seasonNumber == null ? 'Season' : 'Season ${season.seasonNumber}';
   }
+}
+
+class _EpisodeGrid extends StatelessWidget {
+  const _EpisodeGrid({required this.client, required this.episodes, required this.onEpisodeTap});
+  final JellyfinApiClient client;
+  final List<JellyfinLibraryItem> episodes;
+  final ValueChanged<JellyfinLibraryItem> onEpisodeTap;
+
+  @override
+  Widget build(BuildContext context) => SliverLayoutBuilder(builder: (context, constraints) {
+        final width = constraints.crossAxisExtent;
+        final columns = width < 540 ? 1 : width < 960 ? 2 : 3;
+        return SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: 1.15, crossAxisSpacing: 14, mainAxisSpacing: 16),
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final episode = episodes[index];
+            final code = episodeCode(episode);
+            return FocusableMediaCard(
+              title: mediaItemTitle(episode),
+              subtitle: [code, _dateLabel(episode.premiereDate), episode.runTime == null ? null : _duration(episode.runTime!)].whereType<String>().where((part) => part.isNotEmpty).join(' · '),
+              imageUrl: episode.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
+              aspectRatio: 16 / 9,
+              progress: visualProgress(episode),
+              onTap: () => onEpisodeTap(episode),
+            );
+          }, childCount: episodes.length),
+        );
+      });
 }
 
 class _Message extends StatelessWidget {
@@ -401,4 +420,9 @@ String _duration(Duration duration) {
   final minutes = duration.inMinutes.remainder(60);
   if (hours <= 0) return '${minutes}m';
   return '${hours}h ${minutes}m';
+}
+String? _dateLabel(DateTime? value) => value == null ? null : '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+List<JellyfinLibraryItem> _selectableSeasons(List<JellyfinLibraryItem> seasons) {
+  final seen = <String>{};
+  return List<JellyfinLibraryItem>.unmodifiable(seasons.where((season) => season.id.isNotEmpty && seen.add(season.id)));
 }

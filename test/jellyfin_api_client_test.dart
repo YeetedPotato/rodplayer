@@ -181,27 +181,48 @@ void main() {
     expect(item.id, 'item');
   });
 
-  test('series detail APIs request seasons and episodes with authenticated user', () async {
+  test('getSeasons requests user-aware typed seasons', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
           'Items': <Map<String, dynamic>>[
-            <String, dynamic>{'Id': request.url.path.endsWith('/Seasons') ? 'season' : 'episode', 'Name': 'Item'}
+            <String, dynamic>{'Id': 'season 1', 'Name': 'Season 1', 'Type': 'Season'},
+            <String, dynamic>{'Name': 'Missing ID', 'Type': 'Season'},
           ],
           'TotalRecordCount': 1,
           'StartIndex': 0,
         }), 200));
     final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
 
-    final seasons = await client.getSeasons(seriesId: 'series');
-    final episodes = await client.getEpisodes(seriesId: 'series', seasonId: 'season id');
+    final seasons = await client.getSeasons(seriesId: 'series/id');
 
-    expect(mock.requests[0].url.path, '/jellyfin/Shows/series/Seasons');
-    expect(mock.requests[0].url.queryParameters, containsPair('UserId', 'user'));
-    expect(mock.requests[0].url.queryParameters, containsPair('EnableImages', 'true'));
-    expect(mock.requests[0].url.queryParameters, containsPair('EnableUserData', 'true'));
-    expect(mock.requests[1].url.path, '/jellyfin/Shows/series/Episodes');
-    expect(mock.requests[1].url.queryParameters, containsPair('SeasonId', 'season id'));
-    expect(seasons.single.id, 'season');
-    expect(episodes.single.id, 'episode');
+    final uri = mock.requests.single.url;
+    expect(uri.path, '/jellyfin/Shows/series%2Fid/Seasons');
+    expect(uri.queryParameters, containsPair('UserId', 'user'));
+    expect(uri.queryParameters, containsPair('EnableImages', 'true'));
+    expect(uri.queryParameters, containsPair('EnableUserData', 'true'));
+    expect(uri.queryParameters['Fields'], contains('People'));
+    expect(seasons.map((item) => item.title), <String>['Season 1', 'Missing ID']);
+    expect(seasons.last.id, '');
+  });
+
+  test('getEpisodes requests exact season without arbitrary limit', () async {
+    final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
+          'Items': <Map<String, dynamic>>[
+            <String, dynamic>{'Id': 'e1', 'Name': 'Episode 1', 'Type': 'Episode', 'SeriesName': 'Show', 'ParentIndexNumber': 1, 'IndexNumber': 1},
+            <String, dynamic>{'Id': 'e2', 'Name': 'Episode 2', 'Type': 'Episode', 'SeriesName': 'Show', 'ParentIndexNumber': 1, 'IndexNumber': 2},
+          ],
+        }), 200));
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+
+    final episodes = await client.getEpisodes(seriesId: 'series/id', seasonId: 'season id');
+
+    final uri = mock.requests.single.url;
+    expect(uri.path, '/jellyfin/Shows/series%2Fid/Episodes');
+    expect(uri.queryParameters, containsPair('UserId', 'user'));
+    expect(uri.queryParameters, containsPair('SeasonId', 'season id'));
+    expect(uri.queryParameters, containsPair('EnableImages', 'true'));
+    expect(uri.queryParameters, containsPair('EnableUserData', 'true'));
+    expect(uri.queryParameters.containsKey('Limit'), isFalse);
+    expect(episodes.map((item) => item.episodeNumber), <int?>[1, 2]);
   });
 
   test('search encodes term and returns typed hints', () async {
