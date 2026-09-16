@@ -193,7 +193,7 @@ class JellyfinLibraryItem {
       officialRating: _string(json['OfficialRating']),
       communityRating: _double(json['CommunityRating']),
       tagline: _tagline(json),
-      genres: _strings(json['Genres']),
+      genres: _stringList(json['Genres']),
       studios: _studios(json['Studios']),
       people: _people(json['People']),
       status: _string(json['Status']),
@@ -512,6 +512,7 @@ List<String> _strings(Object? value) {
   final single = _string(value);
   return single == null || single.isEmpty ? const <String>[] : List<String>.unmodifiable(<String>[single]);
 }
+List<String> _stringList(Object? value) => value is List ? List<String>.unmodifiable(value.map((item) => '$item')) : const <String>[];
 List<String> _studios(Object? value) {
   if (value is! List) return const <String>[];
   final studios = <String>[];
