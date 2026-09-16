@@ -65,6 +65,7 @@ void main() {
     expect(client.episodeRequests, <String>['s1']);
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
     expect(find.text('Specials'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Episode One'), 260, scrollable: find.byType(Scrollable).first);
     expect(find.text('Episode One'), findsOneWidget);
     tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).onChanged?.call('s2');
     await tester.pumpAndSettle();
@@ -104,6 +105,7 @@ void main() {
     expect(find.text('Episodes unavailable'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Retry'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Episode One'), 260, scrollable: find.byType(Scrollable).first);
     expect(find.text('Episode One'), findsOneWidget);
   });
 
@@ -130,6 +132,7 @@ void main() {
     await tester.pumpAndSettle();
     s1.complete(<JellyfinLibraryItem>[_episode('e1', 'Stale')]);
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Fresh'), 260, scrollable: find.byType(Scrollable).first);
     expect(find.text('Fresh'), findsOneWidget);
     expect(find.text('Stale'), findsNothing);
   });
