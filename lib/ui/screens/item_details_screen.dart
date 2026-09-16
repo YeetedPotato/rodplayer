@@ -30,13 +30,16 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   JellyfinLibraryItem? _item;
   List<JellyfinLibraryItem> _seasons = const <JellyfinLibraryItem>[];
   List<JellyfinLibraryItem> _episodes = const <JellyfinLibraryItem>[];
+  List<JellyfinLibraryItem> _similar = const <JellyfinLibraryItem>[];
   String? _selectedSeasonId;
   Object? _itemError;
   Object? _seasonsError;
   Object? _episodesError;
+  Object? _similarError;
   bool _loadingItem = true;
   bool _loadingSeasons = false;
   bool _loadingEpisodes = false;
+  bool _loadingSimilar = false;
   int _generation = 0;
   int _episodeGeneration = 0;
 
@@ -59,13 +62,16 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       _item = null;
       _seasons = const <JellyfinLibraryItem>[];
       _episodes = const <JellyfinLibraryItem>[];
+      _similar = const <JellyfinLibraryItem>[];
       _selectedSeasonId = null;
       _itemError = null;
       _seasonsError = null;
       _episodesError = null;
+      _similarError = null;
       _loadingItem = true;
       _loadingSeasons = false;
       _loadingEpisodes = false;
+      _loadingSimilar = false;
     });
     unawaited(_loadItemBody(generation));
   }
@@ -79,6 +85,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         _loadingItem = false;
       });
       if (item.kind == JellyfinItemKind.series && item.id.isNotEmpty) unawaited(_loadSeasons(item.id, generation));
+      if (_supportsSimilar(item)) unawaited(_loadSimilar(item.id, generation));
     } catch (error) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -146,6 +153,28 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
   }
 
+  Future<void> _loadSimilar(String itemId, int generation) async {
+    setState(() {
+      _similarError = null;
+      _loadingSimilar = true;
+    });
+    try {
+      final items = await widget.client.getSimilarItems(itemId: itemId);
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _similar = items;
+        _loadingSimilar = false;
+      });
+    } catch (error) {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _similarError = error;
+          _loadingSimilar = false;
+        });
+      }
+    }
+  }
+
   void _play(String itemId) {
     final callback = widget.onPlayItem;
     if (callback != null) return callback(context, itemId);
@@ -153,6 +182,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   void _openEpisode(JellyfinLibraryItem item) {
+    _openItem(item);
+  }
+
+  void _openItem(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
   }
@@ -177,16 +210,21 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     selectedSeasonId: _selectedSeasonId,
                     loadingSeasons: _loadingSeasons,
                     loadingEpisodes: _loadingEpisodes,
+                    loadingSimilar: _loadingSimilar,
                     seasonsError: _seasonsError,
                     episodesError: _episodesError,
+                    similarError: _similarError,
+                    similar: _similar,
                     onSeasonChanged: (seasonId) => unawaited(_loadEpisodes(seriesId: _item!.id, seasonId: seasonId)),
                     onRetrySeasons: () => unawaited(_loadSeasons(_item!.id, _generation)),
                     onRetryEpisodes: () {
                       final seasonId = _selectedSeasonId;
                       if (seasonId != null) unawaited(_loadEpisodes(seriesId: _item!.id, seasonId: seasonId));
                     },
+                    onRetrySimilar: () => unawaited(_loadSimilar(_item!.id, _generation)),
                     onPlay: isDirectlyPlayable(_item!) ? () => _play(_item!.id) : null,
                     onEpisodeTap: _openEpisode,
+                    onSimilarTap: _openItem,
                   ),
       ),
     );
@@ -202,13 +240,18 @@ class _DetailsBody extends StatelessWidget {
     required this.selectedSeasonId,
     required this.loadingSeasons,
     required this.loadingEpisodes,
+    required this.loadingSimilar,
     required this.seasonsError,
     required this.episodesError,
+    required this.similarError,
+    required this.similar,
     required this.onSeasonChanged,
     required this.onRetrySeasons,
     required this.onRetryEpisodes,
+    required this.onRetrySimilar,
     required this.onPlay,
     required this.onEpisodeTap,
+    required this.onSimilarTap,
   });
 
   final JellyfinLibraryItem item;
@@ -218,13 +261,18 @@ class _DetailsBody extends StatelessWidget {
   final String? selectedSeasonId;
   final bool loadingSeasons;
   final bool loadingEpisodes;
+  final bool loadingSimilar;
   final Object? seasonsError;
   final Object? episodesError;
+  final Object? similarError;
+  final List<JellyfinLibraryItem> similar;
   final ValueChanged<String> onSeasonChanged;
   final VoidCallback onRetrySeasons;
   final VoidCallback onRetryEpisodes;
+  final VoidCallback onRetrySimilar;
   final VoidCallback? onPlay;
   final ValueChanged<JellyfinLibraryItem> onEpisodeTap;
+  final ValueChanged<JellyfinLibraryItem> onSimilarTap;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
@@ -262,6 +310,21 @@ class _DetailsBody extends StatelessWidget {
                 sliver: const SliverToBoxAdapter(child: _Message(icon: Icons.video_library_outlined, title: 'No episodes found')),
               ),
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
+          if (loadingSimilar || similarError != null || similar.isNotEmpty) ...[
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 12),
+              sliver: SliverToBoxAdapter(child: Text('More Like This', style: Theme.of(context).textTheme.titleLarge)),
+            ),
+            if (loadingSimilar)
+              const SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())))
+            else if (similarError != null)
+              SliverToBoxAdapter(child: _Message(icon: Icons.explore_off_outlined, title: 'Similar items unavailable', action: TextButton(onPressed: onRetrySimilar, child: const Text('Retry'))))
+            else
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 36),
+                sliver: _SimilarGrid(client: client, items: similar, onTap: onSimilarTap),
+              ),
           ],
         ]);
       });
@@ -405,6 +468,31 @@ class _EpisodeGrid extends StatelessWidget {
       });
 }
 
+class _SimilarGrid extends StatelessWidget {
+  const _SimilarGrid({required this.client, required this.items, required this.onTap});
+  final JellyfinApiClient client;
+  final List<JellyfinLibraryItem> items;
+  final ValueChanged<JellyfinLibraryItem> onTap;
+
+  @override
+  Widget build(BuildContext context) => SliverLayoutBuilder(builder: (context, constraints) {
+        final width = constraints.crossAxisExtent;
+        final columns = width < 520 ? 2 : width < 760 ? 3 : width < 980 ? 4 : 5;
+        return SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 14, mainAxisSpacing: 16),
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final item = items[index];
+            return FocusableMediaCard(
+              title: mediaItemTitle(item),
+              subtitle: item.subtitle(),
+              imageUrl: item.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
+              onTap: () => onTap(item),
+            );
+          }, childCount: items.length),
+        );
+      });
+}
+
 class _Message extends StatelessWidget {
   const _Message({required this.icon, required this.title, this.action});
   final IconData icon;
@@ -426,3 +514,4 @@ List<JellyfinLibraryItem> _selectableSeasons(List<JellyfinLibraryItem> seasons) 
   final seen = <String>{};
   return List<JellyfinLibraryItem>.unmodifiable(seasons.where((season) => season.id.isNotEmpty && seen.add(season.id)));
 }
+bool _supportsSimilar(JellyfinLibraryItem item) => item.id.isNotEmpty && (item.kind == JellyfinItemKind.movie || item.kind == JellyfinItemKind.series || item.kind == JellyfinItemKind.episode);

@@ -100,6 +100,19 @@ class _FakeContentClient extends JellyfinApiClient {
   Future<List<JellyfinSearchHint>> search({required String query, int limit = 20}) async => searchResults;
 
   @override
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getSearchItemsPage({required String query, JellyfinSearchType type = JellyfinSearchType.all, String? genre, int startIndex = 0, int limit = 48}) async => JellyfinItemsPage<JellyfinLibraryItem>(
+        items: searchResults.map((hint) => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': hint.id, 'Name': hint.title, 'Type': hint.rawType})).toList(),
+        totalRecordCount: searchResults.length,
+        startIndex: startIndex,
+      );
+
+  @override
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getDiscoveryItemsPage({required JellyfinDiscoveryKind kind, JellyfinDiscoverySort sort = JellyfinDiscoverySort.topRated, String? genre, int startIndex = 0, int limit = 48}) async => JellyfinItemsPage<JellyfinLibraryItem>(items: const <JellyfinLibraryItem>[], totalRecordCount: 0, startIndex: startIndex);
+
+  @override
+  Future<List<String>> getGenres() async => const <String>[];
+
+  @override
   Future<JellyfinLibraryItem> getItem(String itemId) async {
     itemRequests.add(itemId);
     return JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': itemId, 'Name': 'Typed Result', 'Type': 'Movie'});

@@ -51,6 +51,38 @@ enum JellyfinLibraryFilter {
   final String? filter;
 }
 
+enum JellyfinSearchType {
+  all('All', 'Movie,Series,Episode,Audio'),
+  movies('Movies', 'Movie'),
+  tvShows('TV Shows', 'Series'),
+  episodes('Episodes', 'Episode'),
+  music('Music', 'Audio');
+
+  const JellyfinSearchType(this.label, this.includeItemTypes);
+  final String label;
+  final String includeItemTypes;
+}
+
+enum JellyfinDiscoveryKind {
+  movies('Movies', 'Movie'),
+  tvShows('TV Shows', 'Series');
+
+  const JellyfinDiscoveryKind(this.label, this.includeItemType);
+  final String label;
+  final String includeItemType;
+}
+
+enum JellyfinDiscoverySort {
+  topRated('Top Rated', 'CommunityRating', 'Descending'),
+  recentlyAdded('Recently Added', 'DateCreated', 'Descending'),
+  releaseDate('Release Date', 'PremiereDate', 'Descending');
+
+  const JellyfinDiscoverySort(this.label, this.sortBy, this.sortOrder);
+  final String label;
+  final String sortBy;
+  final String sortOrder;
+}
+
 class JellyfinApiClient {
   JellyfinApiClient({
     required String baseUrl,
@@ -155,6 +187,69 @@ class JellyfinApiClient {
         key: 'SearchHints',
       ).items;
 
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getSearchItemsPage({
+    required String query,
+    JellyfinSearchType type = JellyfinSearchType.all,
+    String? genre,
+    int startIndex = 0,
+    int limit = 48,
+  }) async =>
+      _page(
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'SearchTerm': query,
+          'IncludeItemTypes': type.includeItemTypes,
+          'Recursive': true,
+          'StartIndex': startIndex,
+          'Limit': limit,
+          'EnableTotalRecordCount': true,
+          'EnableImages': true,
+          'EnableUserData': true,
+          if (genre != null && genre.trim().isNotEmpty) 'Genres': genre.trim(),
+          'Fields': _detailFields,
+        }), headers: headers)),
+        JellyfinLibraryItem.fromJson,
+      );
+
+  Future<JellyfinItemsPage<JellyfinLibraryItem>> getDiscoveryItemsPage({
+    required JellyfinDiscoveryKind kind,
+    JellyfinDiscoverySort sort = JellyfinDiscoverySort.topRated,
+    String? genre,
+    int startIndex = 0,
+    int limit = 48,
+  }) async =>
+      _page(
+        _jsonObject(await _client.get(_uri(<String>['Items'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'IncludeItemTypes': kind.includeItemType,
+          'Recursive': true,
+          'StartIndex': startIndex,
+          'Limit': limit,
+          'SortBy': sort.sortBy,
+          'SortOrder': sort.sortOrder,
+          'EnableTotalRecordCount': true,
+          'EnableImages': true,
+          'EnableUserData': true,
+          if (genre != null && genre.trim().isNotEmpty) 'Genres': genre.trim(),
+          'Fields': _detailFields,
+        }), headers: headers)),
+        JellyfinLibraryItem.fromJson,
+      );
+
+  Future<List<String>> getGenres() async {
+    final page = _page(
+      _jsonObject(await _client.get(_uri(<String>['Genres'], <String, Object?>{
+        'UserId': _requireUserId(),
+        'IncludeItemTypes': 'Movie,Series',
+        'SortBy': 'SortName',
+        'SortOrder': 'Ascending',
+        'EnableTotalRecordCount': false,
+      }), headers: headers)),
+      (json) => '${json['Name'] ?? ''}'.trim(),
+    );
+    return List<String>.unmodifiable(page.items.where((name) => name.isNotEmpty));
+  }
+
   Future<JellyfinLibraryItem> getItem(String itemId) async => JellyfinLibraryItem.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Items', itemId], <String, Object?>{'Fields': _detailFields}), headers: headers)));
 
   Future<List<JellyfinLibraryItem>> getSeasons({required String seriesId}) async => _page(
@@ -174,6 +269,15 @@ class JellyfinApiClient {
           'Fields': _detailFields,
           'EnableImages': true,
           'EnableUserData': true,
+        }), headers: headers)),
+        JellyfinLibraryItem.fromJson,
+      ).items;
+
+  Future<List<JellyfinLibraryItem>> getSimilarItems({required String itemId, int limit = 12}) async => _page(
+        _jsonObject(await _client.get(_uri(<String>['Items', itemId, 'Similar'], <String, Object?>{
+          'UserId': _requireUserId(),
+          'Limit': limit,
+          'Fields': _detailFields,
         }), headers: headers)),
         JellyfinLibraryItem.fromJson,
       ).items;

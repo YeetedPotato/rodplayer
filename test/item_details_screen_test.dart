@@ -48,6 +48,28 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
   });
 
+  testWidgets('movie similar items load independently retry and open details', (tester) async {
+    final client = _DetailClient(item: _movie('movie', 'A Movie'), similar: <JellyfinLibraryItem>[_movie('similar', 'Similar Movie')], failSimilarOnce: true);
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
+    await tester.pumpAndSettle();
+
+    expect(client.similarRequests, <String>['movie']);
+    expect(find.text('A Movie'), findsWidgets);
+    expect(find.text('Similar items unavailable'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Retry').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Similar Movie'), 260, scrollable: find.byType(Scrollable).first);
+    expect(find.text('Similar Movie'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Similar Movie'));
+    await tester.pumpAndSettle();
+    expect(client.itemRequests.last, 'similar');
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+  });
+
   testWidgets('series seasons and episodes stay scoped and playable only at episode level', (tester) async {
     String? played;
     final client = _DetailClient(
@@ -78,6 +100,32 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Resume'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
     expect(played, 'e2');
+  });
+
+  testWidgets('similar requests are scoped by item type id and stale generation', (tester) async {
+    final oldItem = Completer<JellyfinLibraryItem>();
+    final oldSimilar = Completer<List<JellyfinLibraryItem>>();
+    final client = _DetailClient(item: _movie('new', 'New'), pendingItems: <String, Completer<JellyfinLibraryItem>>{'old': oldItem}, pendingSimilar: <String, Completer<List<JellyfinLibraryItem>>>{'old': oldSimilar});
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'old')));
+    await tester.pump();
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'new')));
+    await tester.pumpAndSettle();
+    oldItem.complete(_movie('old', 'Old'));
+    oldSimilar.complete(<JellyfinLibraryItem>[_movie('stale', 'Stale Similar')]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('New'), findsWidgets);
+    expect(find.text('Stale Similar'), findsNothing);
+
+    final seasonClient = _DetailClient(item: _season('season', 'Season'));
+    await tester.pumpWidget(app(ItemDetailsScreen(client: seasonClient, itemId: 'season')));
+    await tester.pumpAndSettle();
+    expect(seasonClient.similarRequests, isEmpty);
+
+    final emptyClient = _DetailClient(item: _movie('', 'No Id'));
+    await tester.pumpWidget(app(ItemDetailsScreen(client: emptyClient, itemId: 'lookup')));
+    await tester.pumpAndSettle();
+    expect(emptyClient.similarRequests, isEmpty);
   });
 
   testWidgets('series with empty id and id-less seasons do not request invalid episodes', (tester) async {
@@ -173,19 +221,36 @@ JellyfinLibraryItem _season(String id, String name, {int? seasonNumber = 0}) => 
 JellyfinLibraryItem _episode(String id, String name, {int? season, int? episode, double? progress}) => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': id, 'Name': name, 'Type': 'Episode', 'SeriesName': 'A Series', 'SeasonName': 'Season Two', 'ParentIndexNumber': season, 'IndexNumber': episode, if (progress != null) 'UserData': <String, dynamic>{'PlayedPercentage': progress}});
 
 class _DetailClient extends JellyfinApiClient {
-  _DetailClient({required this.item, this.seasons = const <JellyfinLibraryItem>[], this.episodesBySeason = const <String, List<JellyfinLibraryItem>>{}, this.pendingItems = const <String, Completer<JellyfinLibraryItem>>{}, this.pendingEpisodes = const <String, Completer<List<JellyfinLibraryItem>>>{}, this.failItemOnce = false, this.failSeasonsOnce = false, this.failEpisodesOnce = false})
+  _DetailClient({
+    required this.item,
+    this.seasons = const <JellyfinLibraryItem>[],
+    this.episodesBySeason = const <String, List<JellyfinLibraryItem>>{},
+    this.similar = const <JellyfinLibraryItem>[],
+    this.pendingItems = const <String, Completer<JellyfinLibraryItem>>{},
+    this.pendingEpisodes = const <String, Completer<List<JellyfinLibraryItem>>>{},
+    this.pendingSimilar = const <String, Completer<List<JellyfinLibraryItem>>>{},
+    this.failItemOnce = false,
+    this.failSeasonsOnce = false,
+    this.failEpisodesOnce = false,
+    this.failSimilarOnce = false,
+  })
       : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
   final JellyfinLibraryItem item;
   final List<JellyfinLibraryItem> seasons;
   final Map<String, List<JellyfinLibraryItem>> episodesBySeason;
+  final List<JellyfinLibraryItem> similar;
   final Map<String, Completer<JellyfinLibraryItem>> pendingItems;
   final Map<String, Completer<List<JellyfinLibraryItem>>> pendingEpisodes;
-  bool failItemOnce, failSeasonsOnce, failEpisodesOnce;
+  final Map<String, Completer<List<JellyfinLibraryItem>>> pendingSimilar;
+  bool failItemOnce, failSeasonsOnce, failEpisodesOnce, failSimilarOnce;
   final seasonRequests = <String>[];
   final episodeRequests = <String>[];
+  final similarRequests = <String>[];
+  final itemRequests = <String>[];
 
   @override
   Future<JellyfinLibraryItem> getItem(String itemId) {
+    itemRequests.add(itemId);
     if (failItemOnce) {
       failItemOnce = false;
       return Future<JellyfinLibraryItem>.error(StateError('item failed'));
@@ -220,5 +285,17 @@ class _DetailClient extends JellyfinApiClient {
     final pending = pendingEpisodes[seasonId];
     if (pending != null) return pending.future;
     return Future<List<JellyfinLibraryItem>>.value(episodesBySeason[seasonId] ?? const <JellyfinLibraryItem>[]);
+  }
+
+  @override
+  Future<List<JellyfinLibraryItem>> getSimilarItems({required String itemId, int limit = 12}) {
+    similarRequests.add(itemId);
+    if (failSimilarOnce) {
+      failSimilarOnce = false;
+      return Future<List<JellyfinLibraryItem>>.error(StateError('similar failed'));
+    }
+    final pending = pendingSimilar[itemId];
+    if (pending != null) return pending.future;
+    return Future<List<JellyfinLibraryItem>>.value(similar);
   }
 }
