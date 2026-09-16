@@ -77,6 +77,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       _loadingSeasons = false;
       _loadingEpisodes = false;
       _loadingSimilar = false;
+      _favoriteBusy = false;
+      _playedBusy = false;
     });
     unawaited(_loadItemBody(generation));
   }

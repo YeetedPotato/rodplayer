@@ -82,6 +82,67 @@ void main() {
     expect(find.widgetWithText(OutlinedButton, 'Mark watched'), findsNothing);
   });
 
+  testWidgets('item replacement clears stale favorite and watched busy states', (tester) async {
+    final favorite = Completer<void>();
+    final first = _DetailClient(
+      item: _movie('first', 'First'),
+      pendingFavorite: favorite,
+    );
+    final second = _DetailClient(item: _movie('second', 'Second'));
+
+    await tester.pumpWidget(
+      app(ItemDetailsScreen(client: first, itemId: 'first')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.widgetWithText(OutlinedButton, 'Add to favorites'),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(
+      app(ItemDetailsScreen(client: second, itemId: 'second')),
+    );
+    await tester.pumpAndSettle();
+
+    var favoriteButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Add to favorites'),
+    );
+    expect(favoriteButton.onPressed, isNotNull);
+
+    favorite.complete();
+    await tester.pumpAndSettle();
+
+    final watched = Completer<void>();
+    final third = _DetailClient(
+      item: _movie('third', 'Third'),
+      pendingPlayed: watched,
+    );
+    final fourth = _DetailClient(item: _movie('fourth', 'Fourth'));
+
+    await tester.pumpWidget(
+      app(ItemDetailsScreen(client: third, itemId: 'third')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.widgetWithText(OutlinedButton, 'Mark watched'),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(
+      app(ItemDetailsScreen(client: fourth, itemId: 'fourth')),
+    );
+    await tester.pumpAndSettle();
+
+    final watchedButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Mark watched'),
+    );
+    expect(watchedButton.onPressed, isNotNull);
+
+    watched.complete();
+    await tester.pumpAndSettle();
+  });
   testWidgets('movie similar items load independently retry and open details', (tester) async {
     final client = _DetailClient(item: _movie('movie', 'A Movie'), similar: <JellyfinLibraryItem>[_movie('similar', 'Similar Movie')], failSimilarOnce: true);
     await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
@@ -268,6 +329,8 @@ class _DetailClient extends JellyfinApiClient {
     this.failEpisodesOnce = false,
     this.failSimilarOnce = false,
     this.failFavoriteOnce = false,
+    this.pendingFavorite,
+    this.pendingPlayed,
   })
       : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
   final JellyfinLibraryItem item;
@@ -278,6 +341,8 @@ class _DetailClient extends JellyfinApiClient {
   final Map<String, Completer<List<JellyfinLibraryItem>>> pendingEpisodes;
   final Map<String, Completer<List<JellyfinLibraryItem>>> pendingSimilar;
   bool failItemOnce, failSeasonsOnce, failEpisodesOnce, failSimilarOnce, failFavoriteOnce;
+  final Completer<void>? pendingFavorite;
+  final Completer<void>? pendingPlayed;
   final seasonRequests = <String>[];
   final episodeRequests = <String>[];
   final similarRequests = <String>[];
@@ -343,10 +408,14 @@ class _DetailClient extends JellyfinApiClient {
       failFavoriteOnce = false;
       throw StateError('favorite');
     }
+    final pending = pendingFavorite;
+    if (pending != null) await pending.future;
   }
 
   @override
   Future<void> setPlayed({required String itemId, required bool played}) async {
     playedCalls.add('$itemId:$played');
+    final pending = pendingPlayed;
+    if (pending != null) await pending.future;
   }
 }

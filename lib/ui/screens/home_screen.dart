@@ -75,9 +75,17 @@ class _HomeScreenState extends State<HomeScreen> {
     if (callback != null) return callback(context, itemId);
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
     if (!mounted) return;
-    widget.onUserDataChanged?.call(JellyfinUserDataChange(itemId: itemId, playbackProgressMayHaveChanged: true));
-    _reloadResume();
-    _reloadNextUp();
+    final change = JellyfinUserDataChange(
+      itemId: itemId,
+      playbackProgressMayHaveChanged: true,
+    );
+    final onUserDataChanged = widget.onUserDataChanged;
+    if (onUserDataChanged != null) {
+      onUserDataChanged(change);
+    } else {
+      _reloadResume();
+      _reloadNextUp();
+    }
   }
 
   void _applyUserDataChange(JellyfinUserDataChange? change) {
