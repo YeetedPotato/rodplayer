@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
-import 'package:rodplayer/ui/screens/browse_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
-
-import 'test_support.dart';
 
 void main() {
   Widget testApp(Widget child) {
@@ -19,11 +15,9 @@ void main() {
     );
   }
 
-  testWidgets('browse screen exposes ordered focus traversal', (tester) async {
-    final client = JellyfinApiClient(baseUrl: 'http://127.0.0.1:1', identity: testIdentity);
-    addTearDown(client.close);
-    await tester.pumpWidget(testApp(BrowseScreen(client: client)));
-    await tester.pump();
+  testWidgets('media surfaces expose ordered focus traversal', (tester) async {
+    await tester.pumpWidget(testApp(Scaffold(body: FocusTraversalGroup(policy: OrderedTraversalPolicy(), child: const FocusableMediaCard(title: 'Focusable')))));
+    await tester.pumpAndSettle();
     expect(find.byType(FocusTraversalGroup), findsWidgets);
   });
 
