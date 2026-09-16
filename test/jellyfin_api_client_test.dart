@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
+import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 
 import 'test_support.dart';
 
@@ -363,6 +364,55 @@ void main() {
     final response = await client.getPlaybackInfo(const PlaybackInfoRequest(itemId: 'item', deviceProfile: <String, dynamic>{'Name': 'RodPlayer'}));
     expect(response.playSessionId, 'play');
     expect(response.mediaSources.single.id, 'source');
+  });
+
+  test('user profile endpoints map routes bodies and session logout', () async {
+    final seen = <http.BaseRequest>[];
+    final client = JellyfinApiClient(
+      baseUrl: '$base/jellyfin',
+      identity: testIdentity,
+      client: MockClient((request) async {
+        seen.add(request);
+        if (request.url.path == '/jellyfin/Users/user%20id') return http.Response(jsonEncode(<String, dynamic>{'Id': 'user id', 'Name': 'Current', 'Configuration': <String, dynamic>{'GroupedFolders': <String>['keep']}}), 200);
+        if (request.url.path == '/jellyfin/Users/Public') return http.Response(jsonEncode(<Map<String, dynamic>>[<String, dynamic>{'Id': 'a', 'Name': 'A'}, <String, dynamic>{'Id': 'b', 'Name': 'B'}]), 200);
+        if (request.url.path == '/jellyfin/Users/Configuration') {
+          final body = jsonDecode((request as http.Request).body) as Map<String, dynamic>;
+          expect(request.url.queryParameters['userId'], 'user id');
+          expect(body['GroupedFolders'], <String>['keep']);
+          expect(body['AudioLanguagePreference'], 'eng');
+          return http.Response('', 204);
+        }
+        if (request.url.path == '/jellyfin/Sessions/Logout') return http.Response('', 204);
+        return http.Response('missing', 404);
+      }),
+    )..userId = 'user id';
+
+    expect((await client.getCurrentUser()).name, 'Current');
+    client.userId = null;
+    expect((await client.getPublicUsers()).map((user) => user.name), <String>['A', 'B']);
+    client.userId = 'user id';
+    await client.updateCurrentUserConfiguration(const JellyfinUserConfiguration(raw: <String, dynamic>{'GroupedFolders': <String>['keep']}, audioLanguagePreference: 'eng'));
+    await client.reportSessionEnded();
+    final image = client.userPrimaryImageUri(const JellyfinUserProfile(id: 'user id', name: 'A', primaryImageTag: 'tag'))!;
+    expect(image.path, '/jellyfin/Users/user%20id/Images/Primary');
+    expect(image.queryParameters['tag'], 'tag');
+    expect(seen.map((request) => request.url.path), containsAll(<String>['/jellyfin/Users/user%20id', '/jellyfin/Users/Public', '/jellyfin/Users/Configuration', '/jellyfin/Sessions/Logout']));
+  });
+
+  test('configuration update falls back only for missing modern route', () async {
+    var calls = 0;
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      client: MockClient((request) async {
+        calls++;
+        if (calls == 1) return http.Response('', 404);
+        expect(request.url.path, '/Users/user/Configuration');
+        return http.Response('', 204);
+      }),
+    )..userId = 'user';
+    await client.updateCurrentUserConfiguration(const JellyfinUserConfiguration());
+    expect(calls, 2);
   });
 
   test('buildDirectPlayUri uses Jellyfin stream endpoint with auth and session query', () {

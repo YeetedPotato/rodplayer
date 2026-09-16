@@ -20,24 +20,26 @@ Future<void> main() async {
 }
 
 class RodPlayerApp extends StatelessWidget {
-  const RodPlayerApp({required this.preferences, required this.credentialStore, super.key});
+  const RodPlayerApp({required this.preferences, required this.credentialStore, this.clientFactory = _defaultClientFactory, super.key});
 
   final SharedPreferences preferences;
   final CredentialStore credentialStore;
+  final JellyfinClientFactory clientFactory;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'RodPlayer',
         theme: rodPlayerThemeData(),
-        home: RodPlayerShell(preferences: preferences, credentialStore: credentialStore),
+        home: RodPlayerShell(preferences: preferences, credentialStore: credentialStore, clientFactory: clientFactory),
       );
 }
 
 class RodPlayerShell extends StatefulWidget {
-  const RodPlayerShell({required this.preferences, required this.credentialStore, super.key});
+  const RodPlayerShell({required this.preferences, required this.credentialStore, this.clientFactory = _defaultClientFactory, super.key});
 
   final SharedPreferences preferences;
   final CredentialStore credentialStore;
+  final JellyfinClientFactory clientFactory;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
@@ -63,7 +65,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     final user = widget.preferences.getString(CredentialMigration.userIdKey);
     JellyfinApiClient? client;
     if (url != null && token != null && user != null && url.isNotEmpty && token.isNotEmpty && user.isNotEmpty) {
-      client = JellyfinApiClient(baseUrl: url, identity: identity)
+      client = widget.clientFactory(url, identity)
         ..accessToken = token
         ..userId = user;
     }
@@ -83,22 +85,38 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 
   Future<void> _logout() async {
-    await widget.preferences.remove(CredentialMigration.serverUrlKey);
+    await _clearSession(keepServerUrl: false);
+  }
+
+  Future<void> _switchProfile() async {
+    await _clearSession(keepServerUrl: true);
+  }
+
+  Future<void> _clearSession({required bool keepServerUrl}) async {
+    final client = _client;
+    if (client != null) {
+      try {
+        await client.reportSessionEnded();
+      } catch (_) {}
+    }
+    if (!keepServerUrl) await widget.preferences.remove(CredentialMigration.serverUrlKey);
     await widget.credentialStore.deleteToken(CredentialMigration.tokenKey);
     await widget.preferences.remove(CredentialMigration.userIdKey);
-    _client?.close();
+    client?.close();
     if (mounted) setState(() => _client = null);
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_client == null) return LoginScreen(identity: _identity!, onAuthenticated: _authenticated);
+    if (_client == null) return LoginScreen(identity: _identity!, initialServerUrl: widget.preferences.getString(CredentialMigration.serverUrlKey), clientFactory: widget.clientFactory, onAuthenticated: _authenticated);
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.maybePop(context)},
-      child: RodPlayerAppShell(client: _client!, onLogout: _logout),
+      child: RodPlayerAppShell(client: _client!, onLogout: _logout, onSwitchProfile: _switchProfile),
     );
   }
 }
 
 Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client, String itemId) => VideoPlayerView(engine: engine, surface: MediaKitPlaybackVideoSurface(engine), client: client, itemId: itemId);
+
+JellyfinApiClient _defaultClientFactory(String baseUrl, InstallationIdentity identity) => JellyfinApiClient(baseUrl: baseUrl, identity: identity);

@@ -36,7 +36,7 @@ void main() {
 
   testWidgets('authenticated shell defaults to Home and renders before futures finish', (tester) async {
     final client = _FakeHomeClient(pending: true);
-    await tester.pumpWidget(app(RodPlayerAppShell(client: client, onLogout: () async {})));
+    await tester.pumpWidget(app(RodPlayerAppShell(client: client, onLogout: () async {}, onSwitchProfile: () async {})));
 
     expect(find.text('RodPlayer'), findsOneWidget);
     expect(find.text('Home'), findsWidgets);
@@ -46,7 +46,7 @@ void main() {
   testWidgets('compact shell uses bottom navigation and switches Home/Search', (tester) async {
     setSurface(tester, const Size(390, 760));
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {})));
+    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {}, onSwitchProfile: () async {})));
     await tester.pumpAndSettle();
 
     expect(find.byType(NavigationBar), findsOneWidget);
@@ -66,7 +66,7 @@ void main() {
   testWidgets('expanded and directional shells use side navigation and expose logout', (tester) async {
     setSurface(tester, const Size(1200, 800));
     var loggedOut = false;
-    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async => loggedOut = true), navigationMode: NavigationMode.directional));
+    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async => loggedOut = true, onSwitchProfile: () async {}), navigationMode: NavigationMode.directional));
     await tester.pumpAndSettle();
 
     expect(find.byType(NavigationRail), findsOneWidget);
@@ -85,7 +85,7 @@ void main() {
 
   testWidgets('embedded search has no nested app bar and retains query state', (tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {})));
+    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {}, onSwitchProfile: () async {})));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.search).first);
@@ -102,7 +102,7 @@ void main() {
 
   testWidgets('Ctrl+K selects and focuses embedded Search', (tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {})));
+    await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {}, onSwitchProfile: () async {})));
     await tester.pumpAndSettle();
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);

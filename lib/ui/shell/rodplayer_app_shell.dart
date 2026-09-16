@@ -4,6 +4,7 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
+import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 
 enum RodPlayerDestination {
@@ -20,9 +21,10 @@ enum RodPlayerDestination {
 }
 
 class RodPlayerAppShell extends StatefulWidget {
-  const RodPlayerAppShell({required this.client, required this.onLogout, super.key});
+  const RodPlayerAppShell({required this.client, required this.onLogout, required this.onSwitchProfile, super.key});
   final JellyfinApiClient client;
   final Future<void> Function() onLogout;
+  final Future<void> Function() onSwitchProfile;
 
   @override
   State<RodPlayerAppShell> createState() => _RodPlayerAppShellState();
@@ -45,6 +47,12 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
         if (mounted) _searchFocusNode.requestFocus();
       });
     }
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => ProfileScreen(client: widget.client, onSwitchProfile: widget.onSwitchProfile, onLogout: widget.onLogout),
+    ));
   }
 
   @override
@@ -70,7 +78,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
           if (compact) {
             return Scaffold(
               backgroundColor: theme.obsidian,
-              appBar: AppBar(title: Text(_destination.title), actions: [_LogoutButton(onLogout: widget.onLogout)]),
+              appBar: AppBar(title: Text(_destination.title), actions: [_ProfileButton(onPressed: _openProfile), _LogoutButton(onLogout: widget.onLogout)]),
               body: SafeArea(bottom: false, child: body),
               bottomNavigationBar: NavigationBar(
                 selectedIndex: RodPlayerDestination.values.indexOf(_destination),
@@ -85,7 +93,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
             backgroundColor: theme.obsidian,
             body: SafeArea(
               child: Row(children: [
-                _SideNav(destination: _destination, directional: directional, onSelect: _select, onLogout: widget.onLogout),
+                _SideNav(destination: _destination, directional: directional, onSelect: _select, onProfile: _openProfile, onLogout: widget.onLogout),
                 Expanded(child: body),
               ]),
             ),
@@ -98,10 +106,11 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
 }
 
 class _SideNav extends StatelessWidget {
-  const _SideNav({required this.destination, required this.directional, required this.onSelect, required this.onLogout});
+  const _SideNav({required this.destination, required this.directional, required this.onSelect, required this.onProfile, required this.onLogout});
   final RodPlayerDestination destination;
   final bool directional;
   final ValueChanged<RodPlayerDestination> onSelect;
+  final VoidCallback onProfile;
   final Future<void> Function() onLogout;
 
   @override
@@ -125,7 +134,10 @@ class _SideNav extends StatelessWidget {
               ],
             ),
           ),
-          Padding(padding: const EdgeInsets.all(12), child: _LogoutButton(onLogout: onLogout)),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4, children: [_ProfileButton(onPressed: onProfile), _LogoutButton(onLogout: onLogout)]),
+          ),
         ]),
       ),
     );
@@ -138,4 +150,12 @@ class _LogoutButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => IconButton(tooltip: 'Log out', onPressed: onLogout, icon: const Icon(Icons.logout));
+}
+
+class _ProfileButton extends StatelessWidget {
+  const _ProfileButton({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(tooltip: 'Profile', onPressed: onPressed, icon: const Icon(Icons.account_circle_outlined));
 }

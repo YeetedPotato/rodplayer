@@ -5,6 +5,7 @@ import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
+import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 
 class JellyfinAuthException implements Exception {
   JellyfinAuthException(this.message);
@@ -152,6 +153,13 @@ class JellyfinApiClient {
     return Map<String, dynamic>.from(decoded);
   }
 
+  List<Map<String, dynamic>> _jsonList(http.Response response) {
+    _check(response);
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) throw ServerConnectionException('Server returned malformed JSON list');
+    return decoded.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(growable: false);
+  }
+
   JellyfinItemsPage<T> _page<T>(Map<String, dynamic> json, T Function(Map<String, dynamic>) parse, {String key = 'Items'}) {
     final values = (json[key] as List<dynamic>? ?? const <dynamic>[]).whereType<Map>().map((item) => parse(Map<String, dynamic>.from(item))).toList(growable: false);
     return JellyfinItemsPage<T>(items: values, totalRecordCount: _int(json['TotalRecordCount']), startIndex: _int(json['StartIndex']));
@@ -281,6 +289,32 @@ class JellyfinApiClient {
         }), headers: headers)),
         JellyfinLibraryItem.fromJson,
       ).items;
+
+  Future<JellyfinUserProfile> getCurrentUser() async => JellyfinUserProfile.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId()], const <String, Object?>{}), headers: headers)));
+
+  Future<List<JellyfinUserProfile>> getPublicUsers() async => List<JellyfinUserProfile>.unmodifiable(_jsonList(await _client.get(_uri(<String>['Users', 'Public'], const <String, Object?>{}), headers: headers)).map(JellyfinUserProfile.fromJson));
+
+  Future<void> updateCurrentUserConfiguration(JellyfinUserConfiguration configuration) async {
+    final id = _requireUserId();
+    final body = jsonEncode(configuration.toUpdateJson());
+    final response = await _client.post(_uri(<String>['Users', 'Configuration'], <String, Object?>{'userId': id}), headers: headers, body: body);
+    if (response.statusCode == 404 || response.statusCode == 405) {
+      final fallback = await _client.post(_uri(<String>['Users', id, 'Configuration'], const <String, Object?>{}), headers: headers, body: body);
+      _check(fallback);
+      return;
+    }
+    _check(response);
+  }
+
+  Future<void> reportSessionEnded() async {
+    final response = await _client.post(_uri(<String>['Sessions', 'Logout'], const <String, Object?>{}), headers: headers);
+    _check(response);
+  }
+
+  Uri? userPrimaryImageUri(JellyfinUserProfile profile) {
+    if (profile.id.trim().isEmpty || profile.primaryImageTag == null || profile.primaryImageTag!.trim().isEmpty) return null;
+    return _uri(<String>['Users', profile.id, 'Images', 'Primary'], <String, Object?>{'tag': profile.primaryImageTag});
+  }
 
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
     required JellyfinLibraryKind kind,
