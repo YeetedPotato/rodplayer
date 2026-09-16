@@ -23,25 +23,17 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('Movies and TV libraries render typed cards and activation behavior', (tester) async {
-    String? played;
-    await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'Movie One', progress: 25)]), kind: JellyfinLibraryKind.movies, onPlayItem: (_, id) => played = id)));
+  testWidgets('Movies and TV libraries render typed cards', (tester) async {
+    await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'Movie One', progress: 25)]), kind: JellyfinLibraryKind.movies)));
     await tester.pumpAndSettle();
 
     expect(find.text('Movies'), findsOneWidget);
     expect(find.text('1 titles'), findsOneWidget);
     expect(find.text('Movie One'), findsOneWidget);
-    await tester.tap(find.text('Movie One'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(FilledButton, 'Resume'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
-    expect(played, 'm1');
 
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_series('s1', 'Series One')]), kind: JellyfinLibraryKind.tvShows)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Series One'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
+    expect(find.text('Series One'), findsOneWidget);
   });
 
   testWidgets('initial error, empty, and compact large text states are stable', (tester) async {

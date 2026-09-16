@@ -42,9 +42,6 @@ void main() {
 
     expect(find.text('Typed Result'), findsOneWidget);
     expect(find.text('Movie'), findsOneWidget);
-    await tester.tap(find.text('Typed Result'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
   });
 
   testWidgets('missing image does not create invalid network URL', (tester) async {

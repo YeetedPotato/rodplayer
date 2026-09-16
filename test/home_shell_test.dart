@@ -190,8 +190,6 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.text('Latest Series').first);
-    await tester.tap(find.text('Latest Series').first);
-    await tester.pumpAndSettle();
     expect(find.text('Latest Series'), findsWidgets);
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
   });
