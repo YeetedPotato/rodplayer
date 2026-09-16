@@ -213,8 +213,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Resume Movie'), findsWidgets);
 
-    await tester.scrollUntilVisible(find.text('Next Episode'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(_card('Next Episode'));
+    await tester.scrollUntilVisible(_card('Next Episode'), 300, scrollable: find.byType(Scrollable).first);
     await tester.tap(_card('Next Episode'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
@@ -222,16 +221,16 @@ void main() {
     Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(_card('Latest Movie'));
+    await tester.scrollUntilVisible(_card('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
     await tester.tap(_card('Latest Movie'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.text('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(_card('Latest Series'));
+    await tester.scrollUntilVisible(_card('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
     await tester.tap(_card('Latest Series'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);

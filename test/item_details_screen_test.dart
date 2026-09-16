@@ -103,6 +103,8 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Retry'));
     await tester.pumpAndSettle();
     expect(find.text('Episodes unavailable'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(TextButton, 'Retry'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Episode One'), 260, scrollable: find.byType(Scrollable).first);
