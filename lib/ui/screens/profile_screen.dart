@@ -54,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final generation = ++_generation;
     setState(() {
       _loading = true;
+      _saving = false;
       _error = null;
       _saveError = null;
     });
@@ -165,7 +166,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(profile.name.isEmpty ? 'Unnamed profile' : profile.name, style: Theme.of(context).textTheme.headlineSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
-                Text(profile.serverName ?? widget.client.baseUrl, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (profile.serverName != null && profile.serverName!.trim().isNotEmpty)
+                  Text(profile.serverName!, maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(widget.client.baseUrl, maxLines: 1, overflow: TextOverflow.ellipsis),
                 if (profile.policy.isAdministrator) const Padding(padding: EdgeInsets.only(top: 6), child: Chip(label: Text('Administrator'))),
               ]),
             ),

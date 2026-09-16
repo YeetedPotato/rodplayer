@@ -28,6 +28,7 @@ void main() {
 
     expect(find.text('Erick'), findsOneWidget);
     expect(find.text('Media'), findsOneWidget);
+    expect(find.text('https://server/jellyfin'), findsOneWidget);
     expect(find.text('Administrator'), findsOneWidget);
   });
 
@@ -70,15 +71,56 @@ void main() {
     expect(switched, isTrue);
     expect(loggedOut, isTrue);
   });
+  testWidgets('client replacement clears stale in-flight save state', (tester) async {
+    final pendingSave = Completer<void>();
+    final first = _ProfileClient(pendingSave: pendingSave);
+    final second = _ProfileClient();
+
+    await tester.pumpWidget(app(ProfileScreen(
+      client: first,
+      onSwitchProfile: () async {},
+      onLogout: () async {},
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.widgetWithText(FilledButton, 'Save preferences'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Save preferences'));
+    await tester.pump();
+
+    await tester.pumpWidget(app(ProfileScreen(
+      client: second,
+      onSwitchProfile: () async {},
+      onLogout: () async {},
+    )));
+    await tester.pumpAndSettle();
+
+    final saveButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Save preferences'),
+    );
+    expect(saveButton.onPressed, isNotNull);
+
+    pendingSave.complete();
+    await tester.pumpAndSettle();
+  });
 }
 
 class _ProfileClient extends JellyfinApiClient {
-  _ProfileClient({this.failProfileOnce = false, this.failSaveOnce = false, this.pendingProfile = false})
+  _ProfileClient({
+    this.failProfileOnce = false,
+    this.failSaveOnce = false,
+    this.pendingProfile = false,
+    this.pendingSave,
+  })
       : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   bool failProfileOnce;
   bool failSaveOnce;
   final bool pendingProfile;
+  final Completer<void>? pendingSave;
   JellyfinUserConfiguration? saved;
 
   @override
@@ -109,5 +151,7 @@ class _ProfileClient extends JellyfinApiClient {
       throw StateError('save');
     }
     saved = configuration;
+    final pending = pendingSave;
+    if (pending != null) await pending.future;
   }
 }
