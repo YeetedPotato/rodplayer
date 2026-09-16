@@ -212,7 +212,7 @@ void main() {
     expect(find.text('Resume Movie'), findsWidgets);
 
     await tester.scrollUntilVisible(find.text('Next Episode'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Next Episode'));
+    await tester.tap(find.text('Next Episode').last);
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     expect(find.textContaining('Show'), findsWidgets);
@@ -220,14 +220,14 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Latest Movie'));
+    await tester.tap(find.text('Latest Movie').last);
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(find.text('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Latest Series'));
+    await tester.tap(find.text('Latest Series').last);
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);

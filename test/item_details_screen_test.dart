@@ -125,7 +125,9 @@ void main() {
     final s2 = Completer<List<JellyfinLibraryItem>>();
     final seriesClient = _DetailClient(item: _series('series', 'Series'), seasons: <JellyfinLibraryItem>[_season('s1', 'Season 1'), _season('s2', 'Season 2')], pendingEpisodes: <String, Completer<List<JellyfinLibraryItem>>>{'s1': s1, 's2': s2});
     await tester.pumpWidget(app(ItemDetailsScreen(client: seriesClient, itemId: 'series')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
     tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).onChanged?.call('s2');
     await tester.pump();
     s2.complete(<JellyfinLibraryItem>[_episode('e2', 'Fresh')]);
