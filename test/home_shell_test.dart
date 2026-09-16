@@ -12,6 +12,7 @@ import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
+import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_support.dart';
@@ -203,7 +204,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Resume').first);
     expect(played, 'resume');
-    await tester.tap(find.text('Resume Movie').last);
+    await tester.tap(_card('Resume Movie'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     expect(find.text('Resume Movie'), findsWidgets);
@@ -212,7 +213,7 @@ void main() {
     expect(find.text('Resume Movie'), findsWidgets);
 
     await tester.scrollUntilVisible(find.text('Next Episode'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Next Episode').last);
+    await tester.tap(_card('Next Episode'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     expect(find.textContaining('Show'), findsWidgets);
@@ -220,14 +221,14 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(find.text('Latest Movie'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Latest Movie').last);
+    await tester.tap(_card('Latest Movie'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(find.text('Latest Series'), 300, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('Latest Series').last);
+    await tester.tap(_card('Latest Series'));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
@@ -263,6 +264,8 @@ void main() {
     expect(find.text('Resume Movie'), findsWidgets);
   });
 }
+
+Finder _card(String title) => find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == title);
 
 class _FakeHomeClient extends JellyfinApiClient {
   _FakeHomeClient({

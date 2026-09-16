@@ -9,6 +9,7 @@ import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
+import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 import 'test_support.dart';
 
@@ -43,7 +44,7 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_movie('m1', 'Movie One', progress: 25)]), kind: JellyfinLibraryKind.movies, onPlayItem: (_, id) => played = id)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Movie One').last);
+    await tester.tap(_card('Movie One'));
     await tester.pumpAndSettle();
 
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
@@ -56,7 +57,7 @@ void main() {
     await tester.pumpWidget(app(MediaLibraryScreen(client: _LibraryClient(items: [_series('s1', 'Series One')]), kind: JellyfinLibraryKind.tvShows)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Series One').last);
+    await tester.tap(_card('Series One'));
     await tester.pumpAndSettle();
 
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
@@ -190,6 +191,8 @@ void main() {
     expect(find.text('New Library'), findsOneWidget);
   });
 }
+
+Finder _card(String title) => find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == title);
 
 JellyfinLibraryItem _movie(String id, String name, {double? progress}) => JellyfinLibraryItem.fromJson(<String, dynamic>{
       'Id': id,
