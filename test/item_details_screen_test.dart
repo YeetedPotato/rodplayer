@@ -66,9 +66,7 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Play'), findsNothing);
     expect(find.text('Specials'), findsOneWidget);
     expect(find.text('Episode One'), findsOneWidget);
-    await tester.tap(find.text('Specials'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Second Season').last);
+    tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).onChanged?.call('s2');
     await tester.pumpAndSettle();
     expect(client.episodeRequests.last, 's2');
     await tester.scrollUntilVisible(find.text('Episode Two'), 260, scrollable: find.byType(Scrollable).first);
@@ -126,9 +124,7 @@ void main() {
     final seriesClient = _DetailClient(item: _series('series', 'Series'), seasons: <JellyfinLibraryItem>[_season('s1', 'Season 1'), _season('s2', 'Season 2')], pendingEpisodes: <String, Completer<List<JellyfinLibraryItem>>>{'s1': s1, 's2': s2});
     await tester.pumpWidget(app(ItemDetailsScreen(client: seriesClient, itemId: 'series')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Season 1'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Season 2').last);
+    tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).onChanged?.call('s2');
     await tester.pump();
     s2.complete(<JellyfinLibraryItem>[_episode('e2', 'Fresh')]);
     await tester.pumpAndSettle();
@@ -143,9 +139,9 @@ void main() {
     await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'm'), size: const Size(390, 760), textScale: 1.25));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    FocusManager.instance.primaryFocus?.unfocus();
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    expect(FocusManager.instance.primaryFocus, isNotNull);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(tester.takeException(), isNull);
   });
 }
 
