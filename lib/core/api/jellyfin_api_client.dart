@@ -189,12 +189,6 @@ class JellyfinApiClient {
         ResumableItem.fromJson,
       ).items;
   Future<List<JellyfinLibraryItem>> getUserViews() async => _page(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId(), 'Views'], const <String, Object?>{}), headers: headers)), JellyfinLibraryItem.fromJson).items;
-  Future<List<JellyfinSearchHint>> search({required String query, int limit = 20}) async => _page(
-        _jsonObject(await _client.get(_uri(<String>['Search', 'Hints'], <String, Object?>{'UserId': _requireUserId(), 'SearchTerm': query, 'Limit': limit, 'IncludeItemTypes': 'Movie,Series,Episode'}), headers: headers)),
-        JellyfinSearchHint.fromJson,
-        key: 'SearchHints',
-      ).items;
-
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getSearchItemsPage({
     required String query,
     JellyfinSearchType type = JellyfinSearchType.all,

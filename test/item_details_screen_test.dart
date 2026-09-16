@@ -9,6 +9,7 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
+import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 
 import 'test_support.dart';
 
@@ -148,7 +149,7 @@ void main() {
     await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
     await tester.pumpAndSettle();
 
-    expect(client.similarRequests, <String>['movie']);
+    expect(client.similarRequests.first, 'movie');
     expect(find.text('A Movie'), findsWidgets);
     expect(find.text('Similar items unavailable'), findsOneWidget);
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
@@ -163,6 +164,64 @@ void main() {
     await tester.pumpAndSettle();
     expect(client.itemRequests.last, 'similar');
     expect(find.byType(ItemDetailsScreen), findsOneWidget);
+  });
+
+  testWidgets('nested episode mutation patches parent episode card once', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 720);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final changes = <JellyfinUserDataChange>[];
+    final client = _DetailClient(
+      item: _series('series', 'A Series'),
+      seasons: <JellyfinLibraryItem>[_season('s1', 'Season 1')],
+      episodesBySeason: <String, List<JellyfinLibraryItem>>{'s1': <JellyfinLibraryItem>[_episode('e1', 'Episode One')]},
+    );
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'series', onUserDataChanged: changes.add)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(_card('Episode One'), 260, scrollable: find.byType(Scrollable).first);
+    await tester.tap(_card('Episode One'));
+    await tester.pumpAndSettle();
+    tester.state<ScrollableState>(find.byType(Scrollable).last).position.jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add to favorites'));
+    await tester.pumpAndSettle();
+    expect(changes, hasLength(1));
+    expect(changes.single.itemId, 'e1');
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen).last)).pop();
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(_card('Episode One'), 260, scrollable: find.byType(Scrollable).first);
+    expect(tester.widget<FocusableMediaCard>(_card('Episode One')).badge, isNotNull);
+    expect(tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).value, 's1');
+  });
+
+  testWidgets('nested similar mutation patches More Like This without double emit', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 720);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final changes = <JellyfinUserDataChange>[];
+    final client = _DetailClient(item: _movie('movie', 'A Movie'), similar: <JellyfinLibraryItem>[_movie('similar', 'Similar Movie')]);
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie', onUserDataChanged: changes.add)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(_card('Similar Movie'), 260, scrollable: find.byType(Scrollable).first);
+    await tester.tap(_card('Similar Movie'));
+    await tester.pumpAndSettle();
+    tester.state<ScrollableState>(find.byType(Scrollable).last).position.jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Mark watched'));
+    await tester.pumpAndSettle();
+    expect(changes, hasLength(1));
+    expect(changes.single.itemId, 'similar');
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen).last)).pop();
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(_card('Similar Movie'), 260, scrollable: find.byType(Scrollable).first);
+    expect(tester.widget<FocusableMediaCard>(_card('Similar Movie')).badge, isNotNull);
+    expect(client.similarRequests.first, 'movie');
+    final unrelated = _movie('other', 'Other').withUserDataChange(const JellyfinUserDataChange(itemId: 'unrelated', isFavorite: true));
+    expect(unrelated.userData.isFavorite, isFalse);
   });
 
   testWidgets('series seasons and episodes stay scoped and playable only at episode level', (tester) async {
@@ -297,6 +356,7 @@ void main() {
   });
 }
 
+Finder _card(String title) => find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == title);
 JellyfinLibraryItem _movie(String id, String name, {double? progress}) => JellyfinLibraryItem.fromJson(<String, dynamic>{
       'Id': id,
       'Name': name,
@@ -363,6 +423,9 @@ class _DetailClient extends JellyfinApiClient {
       for (final episode in episodes) {
         if (episode.id == itemId) return Future<JellyfinLibraryItem>.value(episode);
       }
+    }
+    for (final item in similar) {
+      if (item.id == itemId) return Future<JellyfinLibraryItem>.value(item);
     }
     return Future<JellyfinLibraryItem>.value(item);
   }

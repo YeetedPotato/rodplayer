@@ -34,4 +34,12 @@ void main() {
     expect(find.text('Landscape title'), findsOneWidget);
     expect(find.text('Visible subtitle'), findsOneWidget);
   });
+
+  testWidgets('missing image URL uses placeholder without network image', (tester) async {
+    await tester.pumpWidget(app(const SizedBox(width: 160, height: 240, child: FocusableMediaCard(title: 'No Art'))));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No Art'), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
+  });
 }

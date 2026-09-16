@@ -74,7 +74,6 @@ void main() {
   test('content endpoints preserve configured base path', () async {
     final mock = MockClient((request) async {
       if (request.url.path.endsWith('/Items/item')) return http.Response(jsonEncode(<String, dynamic>{'Id': 'item', 'Name': 'Film'}), 200);
-      if (request.url.path.endsWith('/Search/Hints')) return http.Response(jsonEncode(<String, dynamic>{'SearchHints': <Map<String, dynamic>>[]}), 200);
       return http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200);
     });
     final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
@@ -82,12 +81,12 @@ void main() {
     await client.getItemsPage();
     await client.getNextUp();
     await client.getItem('item');
-    await client.search(query: 'star wars');
+    await client.getSearchItemsPage(query: 'star wars');
 
     expect(mock.requests[0].url.path, '/jellyfin/Items');
     expect(mock.requests[1].url.path, '/jellyfin/Shows/NextUp');
     expect(mock.requests[2].url.path, '/jellyfin/Users/user/Items/item');
-    expect(mock.requests[3].url.path, '/jellyfin/Search/Hints');
+    expect(mock.requests[3].url.path, '/jellyfin/Items');
   });
 
   test('resume and next up endpoints use authenticated user', () async {
@@ -224,22 +223,6 @@ void main() {
     expect(uri.queryParameters, containsPair('EnableUserData', 'true'));
     expect(uri.queryParameters.containsKey('Limit'), isFalse);
     expect(episodes.map((item) => item.episodeNumber), <int?>[1, 2]);
-  });
-
-  test('search encodes term and returns typed hints', () async {
-    final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{
-          'SearchHints': <Map<String, dynamic>>[
-            <String, dynamic>{'ItemId': 'movie', 'Name': 'A Movie', 'Type': 'Movie'}
-          ],
-        }), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
-
-    final results = await client.search(query: 'star wars');
-
-    expect(mock.requests.single.url.path, '/Search/Hints');
-    expect(mock.requests.single.url.queryParameters, containsPair('SearchTerm', 'star wars'));
-    expect(results.single.id, 'movie');
-    expect(results.single.title, 'A Movie');
   });
 
   test('paged search maps types genre paging and keeps relevance ordering', () async {
@@ -454,6 +437,67 @@ void main() {
 
     await expectLater(client.setPlayed(itemId: 'item id', played: true), throwsA(isA<ServerConnectionException>()));
     expect(calls, 1);
+  });
+
+  test('user-data mutations use modern methods and fallback matrix', () async {
+    for (final operation in <String>['favorite', 'played']) {
+      for (final enabled in <bool>[true, false]) {
+        final seen = <String>[];
+        final client = JellyfinApiClient(
+          baseUrl: '$base/jellyfin',
+          identity: testIdentity,
+          client: MockClient((request) async {
+            seen.add('${request.method} ${request.url.path}?${request.url.query}');
+            return http.Response('', 204);
+          }),
+        )..userId = 'user id';
+        if (operation == 'favorite') {
+          await client.setFavorite(itemId: 'item/id', isFavorite: enabled);
+        } else {
+          await client.setPlayed(itemId: 'item/id', played: enabled);
+        }
+        final route = operation == 'favorite' ? 'UserFavoriteItems' : 'UserPlayedItems';
+        expect(seen.single, '${enabled ? 'POST' : 'DELETE'} /jellyfin/$route/item%2Fid?userId=user+id');
+      }
+
+      for (final status in <int>[404, 405]) {
+        final seen = <String>[];
+        final client = JellyfinApiClient(
+          baseUrl: '$base/jellyfin',
+          identity: testIdentity,
+          client: MockClient((request) async {
+            seen.add('${request.method} ${request.url.path}?${request.url.query}');
+            return http.Response('', seen.length == 1 ? status : 204);
+          }),
+        )..userId = 'user id';
+        if (operation == 'favorite') {
+          await client.setFavorite(itemId: 'item/id', isFavorite: true);
+        } else {
+          await client.setPlayed(itemId: 'item/id', played: true);
+        }
+        final modernRoute = operation == 'favorite' ? 'UserFavoriteItems' : 'UserPlayedItems';
+        final legacyRoute = operation == 'favorite' ? 'FavoriteItems' : 'PlayedItems';
+        expect(seen, <String>[
+          'POST /jellyfin/$modernRoute/item%2Fid?userId=user+id',
+          'POST /jellyfin/Users/user%20id/$legacyRoute/item%2Fid?',
+        ]);
+      }
+
+      for (final status in <int>[400, 401, 403, 409, 500]) {
+        var calls = 0;
+        final client = JellyfinApiClient(
+          baseUrl: base,
+          identity: testIdentity,
+          client: MockClient((request) async {
+            calls++;
+            return http.Response('', status);
+          }),
+        )..userId = 'user';
+        final future = operation == 'favorite' ? client.setFavorite(itemId: 'item', isFavorite: true) : client.setPlayed(itemId: 'item', played: true);
+        await expectLater(future, throwsA(isA<ServerConnectionException>()));
+        expect(calls, 1);
+      }
+    }
   });
 
   test('buildDirectPlayUri uses Jellyfin stream endpoint with auth and session query', () {

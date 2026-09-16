@@ -192,16 +192,76 @@ void main() {
     expect(find.text('Old Library'), findsNothing);
     expect(find.text('New Library'), findsOneWidget);
   });
+
+  testWidgets('user-data changes patch filtered library state without reload', (tester) async {
+    final favorite = _movie('fav', 'Favorite Movie', favorite: true);
+    final client = _LibraryClient(items: [favorite]);
+    await tester.pumpWidget(app(MediaLibraryScreen(client: client, kind: JellyfinLibraryKind.movies)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter: All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter: Favorites').last);
+    await tester.pumpAndSettle();
+    final callsAfterFilter = client.starts.length;
+
+    await tester.pumpWidget(app(MediaLibraryScreen(
+      client: client,
+      kind: JellyfinLibraryKind.movies,
+      latestUserDataChange: const JellyfinUserDataChange(itemId: 'fav', isFavorite: false),
+      userDataRevision: 1,
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Favorite Movie'), findsNothing);
+    expect(find.text('No favorites movies'), findsOneWidget);
+    expect(client.starts.length, callsAfterFilter);
+    await tester.tap(find.text('Filter: Favorites'));
+    await tester.pumpAndSettle();
+    expect(find.text('Filter: Favorites'), findsWidgets);
+  });
+
+  testWidgets('user-data changes patch all and unplayed filters without resetting paging', (tester) async {
+    final client = _LibraryClient(items: [_movie('m1', 'Movie One'), _movie('m2', 'Movie Two')]);
+    await tester.pumpWidget(app(MediaLibraryScreen(client: client, kind: JellyfinLibraryKind.movies)));
+    await tester.pumpAndSettle();
+    final callsAfterLoad = client.starts.length;
+
+    await tester.pumpWidget(app(MediaLibraryScreen(
+      client: client,
+      kind: JellyfinLibraryKind.movies,
+      latestUserDataChange: const JellyfinUserDataChange(itemId: 'm1', isFavorite: true, played: true),
+      userDataRevision: 1,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Movie One'), findsOneWidget);
+    expect(tester.widget<FocusableMediaCard>(_card('Movie One')).badge, isNotNull);
+    expect(client.starts.length, callsAfterLoad);
+
+    await tester.tap(find.text('Filter: All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter: Unplayed').last);
+    await tester.pumpAndSettle();
+    final callsAfterFilter = client.starts.length;
+    await tester.pumpWidget(app(MediaLibraryScreen(
+      client: client,
+      kind: JellyfinLibraryKind.movies,
+      latestUserDataChange: const JellyfinUserDataChange(itemId: 'm2', played: true),
+      userDataRevision: 2,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Movie Two'), findsNothing);
+    expect(client.starts.length, callsAfterFilter);
+  });
 }
 
 Finder _card(String title) => find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == title);
 
-JellyfinLibraryItem _movie(String id, String name, {double? progress}) => JellyfinLibraryItem.fromJson(<String, dynamic>{
+JellyfinLibraryItem _movie(String id, String name, {double? progress, bool favorite = false, bool played = false}) => JellyfinLibraryItem.fromJson(<String, dynamic>{
       'Id': id,
       'Name': name,
       'Type': 'Movie',
       'ProductionYear': 2024,
-      if (progress != null) 'UserData': <String, dynamic>{'PlayedPercentage': progress},
+      if (progress != null || favorite || played) 'UserData': <String, dynamic>{'PlayedPercentage': progress, 'IsFavorite': favorite, 'Played': played},
     });
 
 JellyfinLibraryItem _series(String id, String name) => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': id, 'Name': name, 'Type': 'Series'});

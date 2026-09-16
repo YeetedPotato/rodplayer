@@ -169,11 +169,72 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailsScreen), findsNothing);
   });
+
+  testWidgets('user-data change patches search result without resetting query or paging', (tester) async {
+    final client = _SearchClient(searchPages: {0: _page([_movie('m1', 'Movie One')], total: 1)});
+    await tester.pumpWidget(app(SearchScreen(client: client)));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'movie');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    final calls = client.searchCalls.length;
+
+    await tester.pumpWidget(app(SearchScreen(
+      client: client,
+      latestUserDataChange: const JellyfinUserDataChange(itemId: 'm1', isFavorite: true, played: true),
+      userDataRevision: 1,
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TextField, 'movie'), findsOneWidget);
+    expect(tester.widget<FocusableMediaCard>(_card('Movie One')).badge, isNotNull);
+    expect(client.searchCalls.length, calls);
+  });
+
+  testWidgets('user-data change patches Discover without resetting controls', (tester) async {
+    final client = _SearchClient(genres: ['Drama'], discoveryPages: {0: _page([_movie('m1', 'Movie One')], total: 1)});
+    await tester.pumpWidget(app(SearchScreen(client: client)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort: Top Rated'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort: Release Date').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Genre: All Genres'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Genre: Drama').last);
+    await tester.pumpAndSettle();
+    final calls = client.discoveryCalls.length;
+
+    await tester.pumpWidget(app(SearchScreen(
+      client: client,
+      latestUserDataChange: const JellyfinUserDataChange(itemId: 'm1', isFavorite: true),
+      userDataRevision: 1,
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sort: Release Date'), findsOneWidget);
+    expect(find.text('Genre: Drama'), findsOneWidget);
+    expect(tester.widget<FocusableMediaCard>(_card('Movie One')).badge, isNotNull);
+    expect(client.discoveryCalls.length, calls);
+  });
+
+  testWidgets('recent searches keep newest order dedupe and max six', (tester) async {
+    final client = _SearchClient(searchPages: {0: _page([_movie('m', 'Movie')], total: 1)});
+    await tester.pumpWidget(app(SearchScreen(client: client)));
+    await tester.pumpAndSettle();
+    for (final query in <String>['one', 'two', 'three', 'four', 'five', 'six', 'TWO']) {
+      await tester.enterText(find.byType(TextField), query);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+    }
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('rodplayer_recent_searches'), <String>['TWO', 'six', 'five', 'four', 'three', 'one']);
+  });
 }
 
 Finder _card(String title) => find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == title);
 JellyfinItemsPage<JellyfinLibraryItem> _page(List<JellyfinLibraryItem> items, {int? total, int start = 0}) => JellyfinItemsPage<JellyfinLibraryItem>(items: items, totalRecordCount: total ?? items.length, startIndex: start);
-JellyfinLibraryItem _movie(String id, String name) => JellyfinLibraryItem.fromJson({'Id': id, 'Name': name, 'Type': 'Movie', 'ProductionYear': 2024});
+JellyfinLibraryItem _movie(String id, String name, {bool favorite = false, bool played = false}) => JellyfinLibraryItem.fromJson({'Id': id, 'Name': name, 'Type': 'Movie', 'ProductionYear': 2024, if (favorite || played) 'UserData': {'IsFavorite': favorite, 'Played': played}});
 JellyfinLibraryItem _series(String id, String name) => JellyfinLibraryItem.fromJson({'Id': id, 'Name': name, 'Type': 'Series'});
 
 class _SearchCall {

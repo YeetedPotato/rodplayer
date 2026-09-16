@@ -204,7 +204,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   void _openItem(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem, onUserDataChanged: widget.onUserDataChanged)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem, onUserDataChanged: _handleChildUserDataChange)));
+  }
+
+  void _handleChildUserDataChange(JellyfinUserDataChange change) {
+    if (mounted) {
+      setState(() {
+        _episodes = _episodes.map((item) => item.withUserDataChange(change)).toList(growable: false);
+        _similar = _similar.map((item) => item.withUserDataChange(change)).toList(growable: false);
+      });
+    }
+    widget.onUserDataChanged?.call(change);
   }
 
   Future<void> _setFavorite(bool value) async {

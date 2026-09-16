@@ -46,6 +46,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _nextStartIndex = 0;
   int _generation = 0;
   int _genreGeneration = 0;
+  int _recentGeneration = 0;
   bool _loadingInitial = true;
   bool _loadingMore = false;
   bool _loadingGenres = false;
@@ -83,8 +84,9 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _loadRecent() async {
+    final generation = _recentGeneration;
     final preferences = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _recent = preferences.getStringList('rodplayer_recent_searches') ?? const <String>[]);
+    if (mounted && generation == _recentGeneration) setState(() => _recent = preferences.getStringList('rodplayer_recent_searches') ?? const <String>[]);
   }
 
   void _loadGenres() {
@@ -135,10 +137,12 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _saveRecent(String query) async {
     if (query.isEmpty) return;
+    final generation = ++_recentGeneration;
     final updated = [query, ..._recent.where((item) => item.toLowerCase() != query.toLowerCase())].take(6).toList();
+    if (mounted) setState(() => _recent = updated);
     final preferences = await SharedPreferences.getInstance();
     await preferences.setStringList('rodplayer_recent_searches', updated);
-    if (mounted) setState(() => _recent = updated);
+    if (!mounted || generation != _recentGeneration) return;
   }
 
   void _selectRecent(String value) {

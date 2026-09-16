@@ -131,49 +131,31 @@ void main() {
     expect(item.people, isEmpty);
   });
 
-  test('search hint prefers Id and supports legacy ItemId', () {
-    final hint = JellyfinSearchHint.fromJson(<String, dynamic>{
-      'Id': 'current',
-      'ItemId': 'item',
-      'Name': 'Result',
-      'Type': 'Series',
-      'ProductionYear': 2020,
-      'ImageTags': <String, dynamic>{'Primary': 'p'},
-    });
-
-    expect(hint.id, 'current');
-    expect(hint.title, 'Result');
-    expect(hint.kind, JellyfinItemKind.series);
-    expect(hint.productionYear, 2020);
-    expect(hint.primaryImageTag, 'p');
-    expect(hint.raw.containsKey('Overview'), isFalse);
-    expect(JellyfinSearchHint.fromJson(<String, dynamic>{'ItemId': 'legacy'}).id, 'legacy');
-  });
-
-  test('search hint image ownership uses image item ids', () {
-    final hint = JellyfinSearchHint.fromJson(<String, dynamic>{
+  test('user-data changes patch matching item without rewriting metadata', () {
+    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{
       'Id': 'item',
-      'Name': 'Result',
-      'PrimaryImageTag': 'primary',
-      'ThumbImageItemId': 'thumb-owner',
-      'ThumbImageTag': 'thumb',
-      'BackdropImageItemId': 'backdrop-owner',
-      'BackdropImageTag': 'backdrop',
+      'Name': 'Film',
+      'Type': 'Movie',
+      'Overview': 'Story',
+      'RunTimeTicks': 1000,
+      'UserData': <String, dynamic>{'IsFavorite': false, 'Played': false, 'PlayedPercentage': 25},
     });
 
-    expect(hint.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/item/Images/Primary?tag=primary&quality=90');
-    expect(hint.imageUrl('https://server/jellyfin', type: JellyfinImageType.thumb), 'https://server/jellyfin/Items/thumb-owner/Images/Thumb?tag=thumb&quality=90');
-    expect(hint.imageUrl('https://server/jellyfin', type: JellyfinImageType.backdrop), 'https://server/jellyfin/Items/backdrop-owner/Images/Backdrop?tag=backdrop&quality=90');
-  });
+    final favorite = item.withUserDataChange(const JellyfinUserDataChange(itemId: 'item', isFavorite: true));
+    expect(favorite.userData.isFavorite, isTrue);
+    expect(favorite.userData.played, isFalse);
+    expect(favorite.playedPercentage, 25);
+    expect(favorite.overview, 'Story');
+    expect(favorite.raw['Overview'], 'Story');
 
-  test('search hint tolerates missing optional fields and image data', () {
-    final hint = JellyfinSearchHint.fromJson(<String, dynamic>{'Id': 'fallback', 'Name': 'Sparse'});
+    final played = favorite.withUserDataChange(const JellyfinUserDataChange(itemId: 'item', played: true));
+    expect(played.userData.isFavorite, isTrue);
+    expect(played.userData.played, isTrue);
+    expect(played.playedPercentage, 25);
 
-    expect(hint.id, 'fallback');
-    expect(hint.primaryImageTag, isNull);
-    expect(hint.productionYear, isNull);
-    expect(hint.imageUrl('https://server'), isNull);
-    expect(hint.imageUrl('https://server', type: JellyfinImageType.thumb), isNull);
-    expect(hint.imageUrl('https://server', type: JellyfinImageType.backdrop), isNull);
+    final unrelated = played.withUserDataChange(const JellyfinUserDataChange(itemId: 'other', isFavorite: false, played: false, playbackProgressMayHaveChanged: true));
+    expect(unrelated.userData.isFavorite, isTrue);
+    expect(unrelated.userData.played, isTrue);
+    expect(unrelated.playedPercentage, 25);
   });
 }

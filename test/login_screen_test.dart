@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -77,13 +79,67 @@ void main() {
     expect(authed, isNotNull);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('public profiles are scoped to current server URL', (tester) async {
+    final clients = <_LoginClient>[];
+    await tester.pumpWidget(app(LoginScreen(
+      identity: testIdentity,
+      initialServerUrl: 'https://server-a',
+      clientFactory: (url, __) {
+        final client = _LoginClient(publicUsers: <JellyfinUserProfile>[JellyfinUserProfile(id: url, name: url.contains('server-a') ? 'Alice' : 'Bob')]);
+        clients.add(client);
+        return client;
+      },
+      onAuthenticated: (_, __) async {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Alice'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
+    await tester.pump();
+    expect(find.text('Alice'), findsNothing);
+    expect(clients.length, 1);
+
+    await tester.tap(find.byTooltip('Find profiles'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bob'), findsOneWidget);
+  });
+
+  testWidgets('slow old public profile response is ignored after URL edit', (tester) async {
+    final slow = Completer<List<JellyfinUserProfile>>();
+    final clients = <_LoginClient>[];
+    await tester.pumpWidget(app(LoginScreen(
+      identity: testIdentity,
+      initialServerUrl: 'https://server-a',
+      clientFactory: (url, __) {
+        final client = _LoginClient(publicFuture: clients.isEmpty ? slow.future : Future<List<JellyfinUserProfile>>.value(<JellyfinUserProfile>[const JellyfinUserProfile(id: 'b', name: 'Bob')]));
+        clients.add(client);
+        return client;
+      },
+      onAuthenticated: (_, __) async {},
+    )));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
+    await tester.pump();
+    slow.complete(<JellyfinUserProfile>[const JellyfinUserProfile(id: 'a', name: 'Alice')]);
+    await tester.pumpAndSettle();
+    expect(find.text('Alice'), findsNothing);
+    expect(find.text('Bob'), findsNothing);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'manual');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pumpAndSettle();
+    expect(clients.length, 2);
+    expect(clients.last.passwords, <String>['']);
+  });
 }
 
 class _LoginClient extends JellyfinApiClient {
-  _LoginClient({this.publicUsers = const <JellyfinUserProfile>[], this.failPublic = false})
+  _LoginClient({this.publicUsers = const <JellyfinUserProfile>[], this.publicFuture, this.failPublic = false})
       : super(baseUrl: 'https://server', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final List<JellyfinUserProfile> publicUsers;
+  final Future<List<JellyfinUserProfile>>? publicFuture;
   final bool failPublic;
   bool closed = false;
   final passwords = <String>[];
@@ -91,6 +147,8 @@ class _LoginClient extends JellyfinApiClient {
   @override
   Future<List<JellyfinUserProfile>> getPublicUsers() async {
     if (failPublic) throw StateError('public');
+    final future = publicFuture;
+    if (future != null) return future;
     return publicUsers;
   }
 

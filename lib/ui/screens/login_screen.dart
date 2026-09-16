@@ -35,12 +35,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _profilesLoading = false;
   String? _error;
   String? _profilesError;
+  String? _profilesUrl;
   List<JellyfinUserProfile> _profiles = const <JellyfinUserProfile>[];
   int _profileGeneration = 0;
 
   @override
   void initState() {
     super.initState();
+    _url.addListener(_onUrlChanged);
     final initial = widget.initialServerUrl;
     if (initial != null && initial.isNotEmpty) {
       _url.text = initial;
@@ -50,6 +52,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _url.removeListener(_onUrlChanged);
     _url.dispose();
     _username.dispose();
     _password.dispose();
@@ -66,6 +69,18 @@ class _LoginScreenState extends State<LoginScreen> {
     return value.replaceFirst(RegExp(r'/+$'), '');
   }
 
+  void _onUrlChanged() {
+    final profilesUrl = _profilesUrl;
+    if (profilesUrl == null || _normalize() == profilesUrl) return;
+    _profileGeneration++;
+    setState(() {
+      _profiles = const <JellyfinUserProfile>[];
+      _profilesUrl = null;
+      _profilesError = null;
+      _profilesLoading = false;
+    });
+  }
+
   Future<void> _loadProfiles() async {
     final url = _normalize();
     if (url == null) {
@@ -76,17 +91,18 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _profilesLoading = true;
       _profilesError = null;
+      _profilesUrl = url;
     });
     final client = widget.clientFactory(url, widget.identity);
     try {
       final profiles = await client.getPublicUsers();
-      if (!mounted || generation != _profileGeneration) return;
+      if (!mounted || generation != _profileGeneration || _normalize() != url) return;
       setState(() => _profiles = profiles);
     } catch (_) {
-      if (mounted && generation == _profileGeneration) setState(() => _profilesError = 'Could not load public profiles.');
+      if (mounted && generation == _profileGeneration && _normalize() == url) setState(() => _profilesError = 'Could not load public profiles.');
     } finally {
       client.close();
-      if (mounted && generation == _profileGeneration) setState(() => _profilesLoading = false);
+      if (mounted && generation == _profileGeneration && _normalize() == url) setState(() => _profilesLoading = false);
     }
   }
 

@@ -29,6 +29,10 @@ class _HomeScreenState extends State<HomeScreen> {
   _Load<JellyfinLibraryItem> _movies = const _Load.loading();
   _Load<JellyfinLibraryItem> _shows = const _Load.loading();
   int _clientRevision = 0;
+  int _resumeRevision = 0;
+  int _nextUpRevision = 0;
+  int _moviesRevision = 0;
+  int _showsRevision = 0;
 
   @override
   void initState() {
@@ -54,19 +58,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _reloadShows();
   }
 
-  void _reloadResume() => _load((items) => _resume = items, () => widget.client.getResumeItems());
-  void _reloadNextUp() => _load((items) => _nextUp = items, () => widget.client.getNextUp());
-  void _reloadMovies() => _load((items) => _movies = items, () => widget.client.getLatestMovies(limit: 12));
-  void _reloadShows() => _load((items) => _shows = items, () => widget.client.getLatestTvShows(limit: 12));
+  void _reloadResume() {
+    final requestRevision = ++_resumeRevision;
+    _load((items) => _resume = items, () => widget.client.getResumeItems(), () => requestRevision == _resumeRevision);
+  }
 
-  Future<void> _load<T extends JellyfinLibraryItem>(void Function(_Load<T>) assign, Future<List<T>> Function() request) async {
+  void _reloadNextUp() {
+    final requestRevision = ++_nextUpRevision;
+    _load((items) => _nextUp = items, () => widget.client.getNextUp(), () => requestRevision == _nextUpRevision);
+  }
+
+  void _reloadMovies() {
+    final requestRevision = ++_moviesRevision;
+    _load((items) => _movies = items, () => widget.client.getLatestMovies(limit: 12), () => requestRevision == _moviesRevision);
+  }
+
+  void _reloadShows() {
+    final requestRevision = ++_showsRevision;
+    _load((items) => _shows = items, () => widget.client.getLatestTvShows(limit: 12), () => requestRevision == _showsRevision);
+  }
+
+  Future<void> _load<T extends JellyfinLibraryItem>(void Function(_Load<T>) assign, Future<List<T>> Function() request, bool Function() isCurrentRequest) async {
     final revision = _clientRevision;
     setState(() => assign(const _Load.loading()));
     try {
       final items = await request();
-      if (mounted && revision == _clientRevision) setState(() => assign(_Load.data(items)));
+      if (mounted && revision == _clientRevision && isCurrentRequest()) setState(() => assign(_Load.data(items)));
     } catch (error) {
-      if (mounted && revision == _clientRevision) setState(() => assign(_Load.error(error)));
+      if (mounted && revision == _clientRevision && isCurrentRequest()) setState(() => assign(_Load.error(error)));
     }
   }
 
