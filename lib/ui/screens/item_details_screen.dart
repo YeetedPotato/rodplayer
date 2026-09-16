@@ -7,6 +7,7 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
+import 'package:rodplayer/ui/widgets/user_data_badge.dart';
 
 typedef DetailPlayItemCallback = void Function(BuildContext context, String itemId);
 
@@ -15,12 +16,14 @@ class ItemDetailsScreen extends StatefulWidget {
     required this.client,
     required this.itemId,
     this.onPlayItem,
+    this.onUserDataChanged,
     super.key,
   });
 
   final JellyfinApiClient client;
   final String itemId;
   final DetailPlayItemCallback? onPlayItem;
+  final JellyfinUserDataChangedCallback? onUserDataChanged;
 
   @override
   State<ItemDetailsScreen> createState() => _ItemDetailsScreenState();
@@ -40,6 +43,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   bool _loadingSeasons = false;
   bool _loadingEpisodes = false;
   bool _loadingSimilar = false;
+  bool _favoriteBusy = false;
+  bool _playedBusy = false;
   int _generation = 0;
   int _episodeGeneration = 0;
 
@@ -175,10 +180,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
   }
 
-  void _play(String itemId) {
+  Future<void> _play(String itemId) async {
     final callback = widget.onPlayItem;
     if (callback != null) return callback(context, itemId);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
+    final generation = _generation;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
+    if (!mounted || generation != _generation) return;
+    try {
+      final refreshed = await widget.client.getItem(itemId);
+      if (!mounted || generation != _generation) return;
+      setState(() => _item = refreshed);
+      widget.onUserDataChanged?.call(JellyfinUserDataChange(itemId: itemId, played: refreshed.userData.played, playbackProgressMayHaveChanged: true));
+    } catch (_) {
+      if (mounted && generation == _generation) widget.onUserDataChanged?.call(JellyfinUserDataChange(itemId: itemId, playbackProgressMayHaveChanged: true));
+    }
   }
 
   void _openEpisode(JellyfinLibraryItem item) {
@@ -187,7 +202,46 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   void _openItem(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem, onUserDataChanged: widget.onUserDataChanged)));
+  }
+
+  Future<void> _setFavorite(bool value) async {
+    final item = _item;
+    if (item == null || item.id.isEmpty || _favoriteBusy) return;
+    final generation = _generation;
+    setState(() => _favoriteBusy = true);
+    try {
+      await widget.client.setFavorite(itemId: item.id, isFavorite: value);
+      if (!mounted || generation != _generation) return;
+      final change = JellyfinUserDataChange(itemId: item.id, isFavorite: value);
+      setState(() => _item = _item!.withUserDataChange(change));
+      widget.onUserDataChanged?.call(change);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value ? 'Added to favorites' : 'Removed from favorites')));
+    } catch (_) {
+      if (mounted && generation == _generation) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not update favorite')));
+    } finally {
+      if (mounted && generation == _generation) setState(() => _favoriteBusy = false);
+    }
+  }
+
+  Future<void> _setPlayed(bool value) async {
+    final item = _item;
+    if (item == null || item.id.isEmpty || _playedBusy) return;
+    final generation = _generation;
+    setState(() => _playedBusy = true);
+    try {
+      await widget.client.setPlayed(itemId: item.id, played: value);
+      if (!mounted || generation != _generation) return;
+      final change = JellyfinUserDataChange(itemId: item.id, played: value, playbackProgressMayHaveChanged: true);
+      setState(() => _item = _item!.withUserDataChange(change));
+      widget.onUserDataChanged?.call(change);
+      if (item.kind == JellyfinItemKind.series && _selectedSeasonId != null) unawaited(_loadEpisodes(seriesId: item.id, seasonId: _selectedSeasonId!));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value ? 'Marked watched' : 'Marked unwatched')));
+    } catch (_) {
+      if (mounted && generation == _generation) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not update watched state')));
+    } finally {
+      if (mounted && generation == _generation) setState(() => _playedBusy = false);
+    }
   }
 
   @override
@@ -223,6 +277,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     },
                     onRetrySimilar: () => unawaited(_loadSimilar(_item!.id, _generation)),
                     onPlay: isDirectlyPlayable(_item!) ? () => _play(_item!.id) : null,
+                    favoriteBusy: _favoriteBusy,
+                    playedBusy: _playedBusy,
+                    onFavorite: _supportsPersonalActions(_item!) ? () => unawaited(_setFavorite(!_item!.userData.isFavorite)) : null,
+                    onPlayed: _supportsPlayedAction(_item!) ? () => unawaited(_setPlayed(!_item!.userData.played)) : null,
                     onEpisodeTap: _openEpisode,
                     onSimilarTap: _openItem,
                   ),
@@ -250,6 +308,10 @@ class _DetailsBody extends StatelessWidget {
     required this.onRetryEpisodes,
     required this.onRetrySimilar,
     required this.onPlay,
+    required this.favoriteBusy,
+    required this.playedBusy,
+    required this.onFavorite,
+    required this.onPlayed,
     required this.onEpisodeTap,
     required this.onSimilarTap,
   });
@@ -271,6 +333,10 @@ class _DetailsBody extends StatelessWidget {
   final VoidCallback onRetryEpisodes;
   final VoidCallback onRetrySimilar;
   final VoidCallback? onPlay;
+  final bool favoriteBusy;
+  final bool playedBusy;
+  final VoidCallback? onFavorite;
+  final VoidCallback? onPlayed;
   final ValueChanged<JellyfinLibraryItem> onEpisodeTap;
   final ValueChanged<JellyfinLibraryItem> onSimilarTap;
 
@@ -280,7 +346,7 @@ class _DetailsBody extends StatelessWidget {
         return CustomScrollView(slivers: [
           SliverPadding(
             padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 24, compact ? 20 : 36, 24),
-            sliver: SliverToBoxAdapter(child: _Header(item: item, client: client, compact: compact, onPlay: onPlay)),
+            sliver: SliverToBoxAdapter(child: _Header(item: item, client: client, compact: compact, onPlay: onPlay, favoriteBusy: favoriteBusy, playedBusy: playedBusy, onFavorite: onFavorite, onPlayed: onPlayed)),
           ),
           if (item.kind == JellyfinItemKind.series) ...[
             SliverPadding(
@@ -331,11 +397,15 @@ class _DetailsBody extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.item, required this.client, required this.compact, required this.onPlay});
+  const _Header({required this.item, required this.client, required this.compact, required this.onPlay, required this.favoriteBusy, required this.playedBusy, required this.onFavorite, required this.onPlayed});
   final JellyfinLibraryItem item;
   final JellyfinApiClient client;
   final bool compact;
   final VoidCallback? onPlay;
+  final bool favoriteBusy;
+  final bool playedBusy;
+  final VoidCallback? onFavorite;
+  final VoidCallback? onPlayed;
 
   @override
   Widget build(BuildContext context) {
@@ -356,7 +426,21 @@ class _Header extends StatelessWidget {
       if (item.studios.isNotEmpty) ...[const SizedBox(height: 8), Text('Studios: ${item.studios.take(3).join(', ')}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
       if (item.people.isNotEmpty) ...[const SizedBox(height: 8), Text('Cast: ${item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
       const SizedBox(height: 18),
-      if (onPlay != null) FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
+      Wrap(spacing: 10, runSpacing: 10, children: [
+        if (onPlay != null) FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
+        if (onFavorite != null)
+          OutlinedButton.icon(
+            onPressed: favoriteBusy ? null : onFavorite,
+            icon: Icon(item.userData.isFavorite ? Icons.favorite : Icons.favorite_border),
+            label: Text(item.userData.isFavorite ? 'Remove from favorites' : 'Add to favorites'),
+          ),
+        if (onPlayed != null)
+          OutlinedButton.icon(
+            onPressed: playedBusy ? null : onPlayed,
+            icon: Icon(item.userData.played ? Icons.check_circle : Icons.check_circle_outline),
+            label: Text(item.kind == JellyfinItemKind.audio ? (item.userData.played ? 'Mark unplayed' : 'Mark played') : (item.userData.played ? 'Mark unwatched' : 'Mark watched')),
+          ),
+      ]),
     ]);
     if (compact) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Center(child: SizedBox(width: 190, child: poster)), const SizedBox(height: 20), details]);
@@ -461,6 +545,7 @@ class _EpisodeGrid extends StatelessWidget {
               imageUrl: episode.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
               aspectRatio: 16 / 9,
               progress: visualProgress(episode),
+              badge: userDataBadgeFor(episode),
               onTap: () => onEpisodeTap(episode),
             );
           }, childCount: episodes.length),
@@ -486,6 +571,7 @@ class _SimilarGrid extends StatelessWidget {
               title: mediaItemTitle(item),
               subtitle: item.subtitle(),
               imageUrl: item.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
+              badge: userDataBadgeFor(item),
               onTap: () => onTap(item),
             );
           }, childCount: items.length),
@@ -515,3 +601,5 @@ List<JellyfinLibraryItem> _selectableSeasons(List<JellyfinLibraryItem> seasons) 
   return List<JellyfinLibraryItem>.unmodifiable(seasons.where((season) => season.id.isNotEmpty && seen.add(season.id)));
 }
 bool _supportsSimilar(JellyfinLibraryItem item) => item.id.isNotEmpty && (item.kind == JellyfinItemKind.movie || item.kind == JellyfinItemKind.series || item.kind == JellyfinItemKind.episode);
+bool _supportsPersonalActions(JellyfinLibraryItem item) => item.id.isNotEmpty && (item.kind == JellyfinItemKind.movie || item.kind == JellyfinItemKind.series || item.kind == JellyfinItemKind.episode || item.kind == JellyfinItemKind.audio);
+bool _supportsPlayedAction(JellyfinLibraryItem item) => item.id.isNotEmpty && (item.kind == JellyfinItemKind.movie || item.kind == JellyfinItemKind.series || item.kind == JellyfinItemKind.episode || item.kind == JellyfinItemKind.audio);

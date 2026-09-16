@@ -5,6 +5,7 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
+import 'package:rodplayer/ui/widgets/user_data_badge.dart';
 
 typedef LibraryPlayItemCallback = void Function(BuildContext context, String itemId);
 
@@ -13,12 +14,18 @@ class MediaLibraryScreen extends StatefulWidget {
     required this.client,
     required this.kind,
     this.onPlayItem,
+    this.onUserDataChanged,
+    this.latestUserDataChange,
+    this.userDataRevision = 0,
     super.key,
   });
 
   final JellyfinApiClient client;
   final JellyfinLibraryKind kind;
   final LibraryPlayItemCallback? onPlayItem;
+  final JellyfinUserDataChangedCallback? onUserDataChanged;
+  final JellyfinUserDataChange? latestUserDataChange;
+  final int userDataRevision;
 
   @override
   State<MediaLibraryScreen> createState() => _MediaLibraryScreenState();
@@ -50,7 +57,11 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
   @override
   void didUpdateWidget(covariant MediaLibraryScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.client != widget.client || oldWidget.kind != widget.kind) _reload();
+    if (oldWidget.client != widget.client || oldWidget.kind != widget.kind) {
+      _reload();
+    } else if (oldWidget.userDataRevision != widget.userDataRevision) {
+      _applyUserDataChange(widget.latestUserDataChange);
+    }
   }
 
   @override
@@ -153,7 +164,7 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 16, mainAxisSpacing: 18),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final item = _items[index];
-                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: 2 / 3, onTap: () => _openDetails(item));
+                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
                   }, childCount: _items.length),
                 );
               }),
@@ -175,7 +186,19 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
 
   void _openDetails(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem, onUserDataChanged: widget.onUserDataChanged)));
+  }
+
+  void _applyUserDataChange(JellyfinUserDataChange? change) {
+    if (change == null) return;
+    final next = <JellyfinLibraryItem>[];
+    for (final item in _items) {
+      final patched = item.withUserDataChange(change);
+      final removeFavorite = _filter == JellyfinLibraryFilter.favorites && change.itemId == item.id && change.isFavorite == false;
+      final removePlayed = _filter == JellyfinLibraryFilter.unplayed && change.itemId == item.id && change.played == true;
+      if (!removeFavorite && !removePlayed) next.add(patched);
+    }
+    setState(() => _items = next);
   }
 
   String get _title => widget.kind == JellyfinLibraryKind.movies ? 'Movies' : 'TV Shows';

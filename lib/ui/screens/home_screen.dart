@@ -7,13 +7,17 @@ import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
+import 'package:rodplayer/ui/widgets/user_data_badge.dart';
 
 typedef PlayItemCallback = void Function(BuildContext context, String itemId);
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({required this.client, this.onPlayItem, super.key});
+  const HomeScreen({required this.client, this.onPlayItem, this.onUserDataChanged, this.latestUserDataChange, this.userDataRevision = 0, super.key});
   final JellyfinApiClient client;
   final PlayItemCallback? onPlayItem;
+  final JellyfinUserDataChangedCallback? onUserDataChanged;
+  final JellyfinUserDataChange? latestUserDataChange;
+  final int userDataRevision;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -38,6 +42,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (oldWidget.client != widget.client) {
       _clientRevision++;
       _reloadAll();
+    } else if (oldWidget.userDataRevision != widget.userDataRevision) {
+      _applyUserDataChange(widget.latestUserDataChange);
     }
   }
 
@@ -64,10 +70,31 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _play(String itemId) {
+  Future<void> _play(String itemId) async {
     final callback = widget.onPlayItem;
     if (callback != null) return callback(context, itemId);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlayerRoute(client: widget.client, itemId: itemId)));
+    if (!mounted) return;
+    widget.onUserDataChanged?.call(JellyfinUserDataChange(itemId: itemId, playbackProgressMayHaveChanged: true));
+    _reloadResume();
+    _reloadNextUp();
+  }
+
+  void _applyUserDataChange(JellyfinUserDataChange? change) {
+    if (change == null) return;
+    if (change.played != null || change.playbackProgressMayHaveChanged) {
+      _reloadResume();
+      _reloadNextUp();
+      return;
+    }
+    if (change.isFavorite != null) {
+      setState(() {
+        _resume = _resume.map((item) => ResumableItem.fromItem(item.withUserDataChange(change)));
+        _nextUp = _nextUp.map((item) => NextUpItem.fromItem(item.withUserDataChange(change)));
+        _movies = _movies.map((item) => item.withUserDataChange(change));
+        _shows = _shows.map((item) => item.withUserDataChange(change));
+      });
+    }
   }
 
   @override
@@ -120,6 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
             imageUrl: item.imageUrl(widget.client.baseUrl),
             progress: progress?.call(item),
             aspectRatio: aspectRatio,
+            badge: userDataBadgeFor(item),
             onTap: () => _openDetails(item),
           );
         },
@@ -129,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openDetails(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onPlayItem: widget.onPlayItem, onUserDataChanged: widget.onUserDataChanged)));
   }
 }
 
@@ -202,6 +230,12 @@ class _Load<T extends JellyfinLibraryItem> {
   final List<T> items;
   final Object? error;
   final bool loading;
+
+  _Load<T> map(JellyfinLibraryItem Function(T) update) {
+    if (loading) return const _Load.loading();
+    if (error != null) return _Load.error(error);
+    return _Load.data(items.map((item) => update(item) as T).toList(growable: false));
+  }
 }
 
 String _title(JellyfinLibraryItem item) => mediaItemTitle(item);

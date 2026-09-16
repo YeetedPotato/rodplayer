@@ -8,13 +8,17 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
+import 'package:rodplayer/ui/widgets/user_data_badge.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({required this.client, this.embedded = false, this.focusNode, this.autofocus = true, super.key});
+  const SearchScreen({required this.client, this.embedded = false, this.focusNode, this.autofocus = true, this.onUserDataChanged, this.latestUserDataChange, this.userDataRevision = 0, super.key});
   final JellyfinApiClient client;
   final bool embedded;
   final FocusNode? focusNode;
   final bool autofocus;
+  final JellyfinUserDataChangedCallback? onUserDataChanged;
+  final JellyfinUserDataChange? latestUserDataChange;
+  final int userDataRevision;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -64,6 +68,8 @@ class _SearchScreenState extends State<SearchScreen> {
       _genre = null;
       _loadGenres();
       _reload();
+    } else if (oldWidget.userDataRevision != widget.userDataRevision) {
+      _applyUserDataChange(widget.latestUserDataChange);
     }
   }
 
@@ -228,7 +234,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 16, mainAxisSpacing: 18),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final item = _items[index];
-                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: item.kind == JellyfinItemKind.episode ? 16 / 9 : 2 / 3, onTap: () => _openDetails(item));
+                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: item.kind == JellyfinItemKind.episode ? 16 / 9 : 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
                   }, childCount: _items.length),
                 );
               }),
@@ -252,7 +258,12 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _openDetails(JellyfinLibraryItem item) {
     if (item.id.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailsScreen(client: widget.client, itemId: item.id, onUserDataChanged: widget.onUserDataChanged)));
+  }
+
+  void _applyUserDataChange(JellyfinUserDataChange? change) {
+    if (change == null) return;
+    setState(() => _items = _items.map((item) => item.withUserDataChange(change)).toList(growable: false));
   }
 }
 

@@ -415,6 +415,47 @@ void main() {
     expect(calls, 2);
   });
 
+  test('setFavorite uses modern route and only falls back on missing method', () async {
+    final paths = <String>[];
+    final methods = <String>[];
+    final client = JellyfinApiClient(
+      baseUrl: '$base/jellyfin',
+      identity: testIdentity,
+      client: MockClient((request) async {
+        paths.add('${request.method} ${request.url.path}?${request.url.query}');
+        methods.add(request.method);
+        if (paths.length == 1) return http.Response('', 204);
+        if (paths.length == 2) return http.Response('', 404);
+        return http.Response('', 204);
+      }),
+    )..userId = 'user id';
+
+    await client.setFavorite(itemId: 'item/id', isFavorite: true);
+    await client.setFavorite(itemId: 'item/id', isFavorite: false);
+
+    expect(paths[0], 'POST /jellyfin/UserFavoriteItems/item%2Fid?userId=user+id');
+    expect(paths[1], 'DELETE /jellyfin/UserFavoriteItems/item%2Fid?userId=user+id');
+    expect(paths[2], 'DELETE /jellyfin/Users/user%20id/FavoriteItems/item%2Fid?');
+    expect(methods, <String>['POST', 'DELETE', 'DELETE']);
+  });
+
+  test('setPlayed maps watched routes and does not fallback on validation errors', () async {
+    var calls = 0;
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      client: MockClient((request) async {
+        calls++;
+        expect(request.url.path, '/UserPlayedItems/item%20id');
+        expect(request.url.queryParameters['userId'], 'user');
+        return http.Response('', 400);
+      }),
+    )..userId = 'user';
+
+    await expectLater(client.setPlayed(itemId: 'item id', played: true), throwsA(isA<ServerConnectionException>()));
+    expect(calls, 1);
+  });
+
   test('buildDirectPlayUri uses Jellyfin stream endpoint with auth and session query', () {
     final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((_) async => http.Response('', 200)))..accessToken = 'Bearer token';
     final uri = client.buildDirectPlayUri(itemId: 'item', mediaSourceId: 'source', playSessionId: 'play', audioStreamIndex: 4, subtitleStreamIndex: 6);

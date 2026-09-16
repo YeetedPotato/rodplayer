@@ -341,9 +341,32 @@ class JellyfinApiClient {
         JellyfinLibraryItem.fromJson,
       );
 
-  Future<void> toggleFavorite({required String itemId, required bool isFavorite}) async {
-    final endpoint = Uri.parse('$baseUrl/Users/$userId/FavoriteItems/$itemId');
-    final response = isFavorite ? await _client.post(endpoint, headers: headers) : await _client.delete(endpoint, headers: headers);
+  Future<void> setFavorite({required String itemId, required bool isFavorite}) => _setUserDataFlag(
+        itemId: itemId,
+        enabled: isFavorite,
+        modernRoute: 'UserFavoriteItems',
+        legacyRoute: 'FavoriteItems',
+      );
+
+  Future<void> setPlayed({required String itemId, required bool played}) => _setUserDataFlag(
+        itemId: itemId,
+        enabled: played,
+        modernRoute: 'UserPlayedItems',
+        legacyRoute: 'PlayedItems',
+      );
+
+  Future<void> toggleFavorite({required String itemId, required bool isFavorite}) => setFavorite(itemId: itemId, isFavorite: isFavorite);
+
+  Future<void> _setUserDataFlag({required String itemId, required bool enabled, required String modernRoute, required String legacyRoute}) async {
+    final id = _requireUserId();
+    final modern = _uri(<String>[modernRoute, itemId], <String, Object?>{'userId': id});
+    final response = enabled ? await _client.post(modern, headers: headers) : await _client.delete(modern, headers: headers);
+    if (response.statusCode == 404 || response.statusCode == 405) {
+      final legacy = _uri(<String>['Users', id, legacyRoute, itemId], const <String, Object?>{});
+      final fallback = enabled ? await _client.post(legacy, headers: headers) : await _client.delete(legacy, headers: headers);
+      _check(fallback);
+      return;
+    }
     _check(response);
   }
 

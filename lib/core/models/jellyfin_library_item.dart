@@ -51,7 +51,25 @@ class JellyfinUserData {
       unplayedItemCount: _integer(json['UnplayedItemCount'] ?? fallback['UnplayedItemCount']),
     );
   }
+
+  JellyfinUserData copyWith({bool? isFavorite, bool? played, int? playbackPositionTicks, double? playedPercentage}) => JellyfinUserData(
+        isFavorite: isFavorite ?? this.isFavorite,
+        played: played ?? this.played,
+        playbackPositionTicks: playbackPositionTicks ?? this.playbackPositionTicks,
+        playedPercentage: playedPercentage ?? this.playedPercentage,
+        unplayedItemCount: unplayedItemCount,
+      );
 }
+
+class JellyfinUserDataChange {
+  const JellyfinUserDataChange({required this.itemId, this.isFavorite, this.played, this.playbackProgressMayHaveChanged = false});
+  final String itemId;
+  final bool? isFavorite;
+  final bool? played;
+  final bool playbackProgressMayHaveChanged;
+}
+
+typedef JellyfinUserDataChangedCallback = void Function(JellyfinUserDataChange change);
 
 class JellyfinPerson {
   const JellyfinPerson({
@@ -228,6 +246,45 @@ class JellyfinLibraryItem {
         type: type,
         quality: quality,
       );
+
+  JellyfinLibraryItem withUserDataChange(JellyfinUserDataChange change) {
+    if (id.isEmpty || change.itemId != id) return this;
+    return JellyfinLibraryItem(
+      id: id,
+      title: title,
+      rawType: rawType,
+      mediaType: mediaType,
+      seriesName: seriesName,
+      seriesId: seriesId,
+      seasonId: seasonId,
+      seasonName: seasonName,
+      parentId: parentId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      productionYear: productionYear,
+      premiereDate: premiereDate,
+      endDate: endDate,
+      overview: overview,
+      officialRating: officialRating,
+      communityRating: communityRating,
+      tagline: tagline,
+      genres: genres,
+      studios: studios,
+      people: people,
+      status: status,
+      childCount: childCount,
+      recursiveItemCount: recursiveItemCount,
+      playbackPositionTicks: playbackPositionTicks,
+      playedPercentage: playedPercentage,
+      runTimeTicks: runTimeTicks,
+      primaryImageTag: primaryImageTag,
+      backdropImageTags: backdropImageTags,
+      thumbImageTag: thumbImageTag,
+      primaryImageAspectRatio: primaryImageAspectRatio,
+      userData: userData.copyWith(isFavorite: change.isFavorite, played: change.played),
+      raw: raw,
+    );
+  }
 }
 
 class NextUpItem extends JellyfinLibraryItem {

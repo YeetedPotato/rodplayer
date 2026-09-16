@@ -48,6 +48,40 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
   });
 
+  testWidgets('favorite and watched actions update state and emit changes', (tester) async {
+    final changes = <JellyfinUserDataChange>[];
+    final client = _DetailClient(item: JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'movie', 'Name': 'A Movie', 'Type': 'Movie'}));
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie', onUserDataChanged: changes.add)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add to favorites'));
+    await tester.pumpAndSettle();
+    expect(client.favoriteCalls, <String>['movie:true']);
+    expect(find.widgetWithText(OutlinedButton, 'Remove from favorites'), findsOneWidget);
+    expect(changes.last.isFavorite, isTrue);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Mark watched'));
+    await tester.pumpAndSettle();
+    expect(client.playedCalls, <String>['movie:true']);
+    expect(find.widgetWithText(OutlinedButton, 'Mark unwatched'), findsOneWidget);
+    expect(changes.last.played, isTrue);
+  });
+
+  testWidgets('mutation failure preserves old state and unsupported items expose no actions', (tester) async {
+    final client = _DetailClient(item: _movie('movie', 'A Movie'), failFavoriteOnce: true);
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add to favorites'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not update favorite'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Add to favorites'), findsOneWidget);
+
+    await tester.pumpWidget(app(ItemDetailsScreen(client: _DetailClient(item: JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': '', 'Name': 'Folder', 'Type': 'Folder'})), itemId: 'folder')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(OutlinedButton, 'Add to favorites'), findsNothing);
+    expect(find.widgetWithText(OutlinedButton, 'Mark watched'), findsNothing);
+  });
+
   testWidgets('movie similar items load independently retry and open details', (tester) async {
     final client = _DetailClient(item: _movie('movie', 'A Movie'), similar: <JellyfinLibraryItem>[_movie('similar', 'Similar Movie')], failSimilarOnce: true);
     await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
@@ -233,6 +267,7 @@ class _DetailClient extends JellyfinApiClient {
     this.failSeasonsOnce = false,
     this.failEpisodesOnce = false,
     this.failSimilarOnce = false,
+    this.failFavoriteOnce = false,
   })
       : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
   final JellyfinLibraryItem item;
@@ -242,11 +277,13 @@ class _DetailClient extends JellyfinApiClient {
   final Map<String, Completer<JellyfinLibraryItem>> pendingItems;
   final Map<String, Completer<List<JellyfinLibraryItem>>> pendingEpisodes;
   final Map<String, Completer<List<JellyfinLibraryItem>>> pendingSimilar;
-  bool failItemOnce, failSeasonsOnce, failEpisodesOnce, failSimilarOnce;
+  bool failItemOnce, failSeasonsOnce, failEpisodesOnce, failSimilarOnce, failFavoriteOnce;
   final seasonRequests = <String>[];
   final episodeRequests = <String>[];
   final similarRequests = <String>[];
   final itemRequests = <String>[];
+  final favoriteCalls = <String>[];
+  final playedCalls = <String>[];
 
   @override
   Future<JellyfinLibraryItem> getItem(String itemId) {
@@ -297,5 +334,19 @@ class _DetailClient extends JellyfinApiClient {
     final pending = pendingSimilar[itemId];
     if (pending != null) return pending.future;
     return Future<List<JellyfinLibraryItem>>.value(similar);
+  }
+
+  @override
+  Future<void> setFavorite({required String itemId, required bool isFavorite}) async {
+    favoriteCalls.add('$itemId:$isFavorite');
+    if (failFavoriteOnce) {
+      failFavoriteOnce = false;
+      throw StateError('favorite');
+    }
+  }
+
+  @override
+  Future<void> setPlayed({required String itemId, required bool played}) async {
+    playedCalls.add('$itemId:$played');
   }
 }

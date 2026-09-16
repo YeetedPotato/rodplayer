@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
@@ -33,6 +34,8 @@ class RodPlayerAppShell extends StatefulWidget {
 class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   RodPlayerDestination _destination = RodPlayerDestination.home;
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'RodPlayer search');
+  JellyfinUserDataChange? _latestUserDataChange;
+  int _userDataRevision = 0;
 
   @override
   void dispose() {
@@ -55,6 +58,13 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     ));
   }
 
+  void _onUserDataChanged(JellyfinUserDataChange change) {
+    setState(() {
+      _latestUserDataChange = change;
+      _userDataRevision++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
@@ -70,10 +80,10 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
         child: LayoutBuilder(builder: (context, constraints) {
           final compact = constraints.maxWidth < 720 && !directional;
           final body = IndexedStack(index: RodPlayerDestination.values.indexOf(_destination), children: [
-            HomeScreen(client: widget.client),
-            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies),
-            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.tvShows),
-            SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false),
+            HomeScreen(client: widget.client, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
+            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
+            MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.tvShows, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
+            SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
           ]);
           if (compact) {
             return Scaffold(
