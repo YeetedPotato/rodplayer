@@ -131,14 +131,16 @@ void main() {
   });
 
   group('Backend registry', () {
-    test('platform descriptors are deterministic and media_kit remains available', () {
-      final registry = const PlaybackBackendRegistry();
-      final android = registry.backendsFor(PlatformFamily.android);
-      final windows = registry.backendsFor(PlatformFamily.windows);
+    test('platform descriptors are deterministic and media_kit availability is explicit', () {
+      final android = const PlaybackBackendRegistry(
+        mediaKitAvailable: false,
+      ).backendsFor(PlatformFamily.android);
+      final windows = const PlaybackBackendRegistry().backendsFor(PlatformFamily.windows);
 
       expect(android.map((backend) => backend.id), <String>['android_native', 'android_compatibility', 'media_kit']);
       expect(windows.map((backend) => backend.id), <String>['windows_mpv', 'media_kit']);
-      expect(android.last.availability, BackendAvailability.available);
+      expect(android.last.availability, BackendAvailability.unavailable);
+      expect(windows.last.availability, BackendAvailability.available);
     });
 
     test('android native availability is explicit', () {

@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
+import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
@@ -14,7 +16,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  if (mediaKitPlaybackSupportedOn(platformFamilyForCurrentTarget())) {
+    MediaKit.ensureInitialized();
+  }
   final preferences = await SharedPreferences.getInstance();
   runApp(RodPlayerApp(preferences: preferences, credentialStore: const SecureCredentialStore()));
 }

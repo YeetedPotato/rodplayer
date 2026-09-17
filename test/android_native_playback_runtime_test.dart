@@ -9,7 +9,6 @@ import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
-import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/platform/playback/android_native_playback_runtime.dart';
 
 void main() {
@@ -130,14 +129,15 @@ void main() {
     expect(android.capabilities.passthrough, CapabilitySupport.unknown);
   });
 
-  test('media kit remains usable when Android native is unavailable', () {
-    final registry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[
-      MediaKitPlaybackRuntime(),
-      AndroidNativePlaybackRuntime(bridge: _FakeAndroidBridge(available: false), confirmedHostAvailable: false),
-    ]);
+  test('Android packaging can explicitly disable media kit fallback', () {
+    final backends = const PlaybackBackendRegistry(
+      mediaKitAvailable: false,
+    ).backendsFor(PlatformFamily.android);
 
-    expect(registry.canExecute('android_native'), isFalse);
-    expect(registry.canExecute('media_kit'), isTrue);
+    expect(
+      backends.singleWhere((backend) => backend.id == PlaybackBackendIds.mediaKit).availability,
+      BackendAvailability.unavailable,
+    );
   });
 
   test('android host template registers Media3 playback integration', () {
