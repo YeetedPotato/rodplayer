@@ -402,6 +402,9 @@ class _FakeSurface implements PlaybackVideoSurface {
 }
 
 class _FakeTracks implements TrackSelectionController {
+  @override
+  TrackSelectionCapabilities get capabilities => const TrackSelectionCapabilities.unavailable();
+
   const _FakeTracks();
 
   @override

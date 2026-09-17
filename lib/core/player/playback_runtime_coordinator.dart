@@ -144,6 +144,8 @@ class PlaybackRuntimeCoordinator {
     final previous = _active;
     try {
       session.activatePlan(plan);
+      next.bindLogicalSession(session);
+      next.synchronizeMetadata(session.metadata);
     } on Object catch (error) {
       try {
         await next.dispose();
@@ -204,6 +206,8 @@ class PlaybackRuntimeCoordinator {
     _active = null;
     if (active != null) await active.dispose();
   }
+
+  void synchronizeActiveMetadata() => _active?.synchronizeMetadata(session.metadata);
 
   void _failQueued(Object error) {
     final queued = List<_ActivationRequest>.of(_queue);

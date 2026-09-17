@@ -178,6 +178,7 @@ void main() {
 
     expect(mock.requests[0].url.path, '/Users/user/Views');
     expect(mock.requests[1].url.path, '/Users/user/Items/item');
+    expect(mock.requests[1].url.queryParameters['Fields'], contains('Chapters'));
     expect(item.id, 'item');
   });
 

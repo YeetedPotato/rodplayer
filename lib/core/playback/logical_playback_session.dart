@@ -1,5 +1,6 @@
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 
 class ServerPlaybackSession {
   const ServerPlaybackSession({required this.playSessionId, required this.mediaSourceId, required this.playMethod});
@@ -21,10 +22,12 @@ class LogicalPlaybackSession {
     required this.itemId,
     required PlaybackPlan activePlan,
     this.position = Duration.zero,
+    PlaybackMetadata? metadata,
   })  : activePlan = activePlan,
         activeServerSession = ServerPlaybackSession.fromPlan(activePlan),
         selectedAudio = activePlan.selectedAudioStreamIndex,
-        selectedSubtitle = activePlan.selectedSubtitleStreamIndex;
+        selectedSubtitle = activePlan.selectedSubtitleStreamIndex,
+        metadata = metadata ?? PlaybackMetadata.fromPlan(activePlan);
 
   final String id;
   final String itemId;
@@ -33,11 +36,15 @@ class LogicalPlaybackSession {
   Duration position;
   int? selectedAudio;
   int? selectedSubtitle;
+  PlaybackMetadata metadata;
 
   void activatePlan(PlaybackPlan plan) {
     activePlan = plan;
     activeServerSession = ServerPlaybackSession.fromPlan(plan);
     selectedAudio = plan.selectedAudioStreamIndex;
     selectedSubtitle = plan.selectedSubtitleStreamIndex;
+    metadata = metadata.withPlanSource(plan);
   }
+
+  void updateMetadata(PlaybackMetadata value) => metadata = value;
 }

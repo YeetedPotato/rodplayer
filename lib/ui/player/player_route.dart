@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
@@ -25,6 +26,7 @@ class PlayerRoute extends StatefulWidget {
 class _PlayerRouteState extends State<PlayerRoute> {
   late final Future<_PreparedPlayback> _prepared = _prepare();
   PlaybackRuntimeCoordinator? _coordinator;
+  var _disposed = false;
 
   Future<_PreparedPlayback> _prepare() async {
     final runtimes = await createPlatformPlaybackRuntimes();
@@ -41,11 +43,24 @@ class _PlayerRouteState extends State<PlayerRoute> {
     final coordinator = PlaybackRuntimeCoordinator(registry: runtimes.registry, session: logicalSession);
     _coordinator = coordinator;
     final runtimeSession = await coordinator.activateCandidates(decision.orderedUsableCandidates);
+    unawaited(_loadOptionalMetadata(logicalSession, coordinator));
     return _PreparedPlayback(plan: runtimeSession.plan, session: logicalSession, runtimeSession: runtimeSession);
+  }
+
+  Future<void> _loadOptionalMetadata(LogicalPlaybackSession session, PlaybackRuntimeCoordinator coordinator) async {
+    try {
+      final item = await widget.client.getItem(widget.itemId);
+      if (_disposed || !mounted || !identical(_coordinator, coordinator)) return;
+      session.updateMetadata(session.metadata.mergeLibraryItem(item));
+      coordinator.synchronizeActiveMetadata();
+    } on Object {
+      // Item metadata is optional and must never interrupt playback.
+    }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     unawaited(_coordinator?.dispose() ?? Future<void>.value());
     super.dispose();
   }

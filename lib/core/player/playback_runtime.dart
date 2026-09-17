@@ -1,4 +1,6 @@
 import 'package:rodplayer/core/playback/advanced_playback.dart';
+import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
@@ -44,19 +46,40 @@ class PlaybackRuntimeSession {
     required this.plan,
     required this.engine,
     this.surface,
-    this.tracks,
+    TrackSelectionController? tracks,
     this.advanced,
-  });
+  }) : _tracks = tracks;
 
   final String runtimeId;
   final PlaybackPlan plan;
   final PlaybackEngine engine;
   final PlaybackVideoSurface? surface;
-  final TrackSelectionController? tracks;
+  TrackSelectionController? _tracks;
+  TrackSelectionController? get tracks => _tracks;
   final AdvancedPlaybackControls? advanced;
 
-  /// Explicit all-unsupported fallback for runtimes without advanced controls.
-  AdvancedPlaybackCapabilities get advancedCapabilities => advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
+  /// Runtime controls and track selection have separate owners. Track support
+  /// is always derived from [tracks], never declared independently by controls.
+  AdvancedPlaybackCapabilities get advancedCapabilities {
+    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    return base.withTrackSelection(
+      audioTrackSwitching: trackCapabilities.audioSelection,
+      subtitleTrackSwitching: trackCapabilities.subtitleSelection,
+    );
+  }
+
+  void synchronizeMetadata(PlaybackMetadata metadata) {
+    advanced?.setChapters(metadata.chapters);
+    advanced?.setMarkers(metadata.markers);
+  }
+
+  void bindLogicalSession(LogicalPlaybackSession session) {
+    final tracks = _tracks;
+    if (tracks != null && tracks is! LogicalSessionTrackSelectionController) {
+      _tracks = LogicalSessionTrackSelectionController(delegate: tracks, session: session);
+    }
+  }
   var _disposed = false;
 
   Future<void> dispose() async {

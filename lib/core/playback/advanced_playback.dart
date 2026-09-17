@@ -95,6 +95,24 @@ class AdvancedPlaybackCapabilities {
   final CapabilitySupport subtitleTrackSwitching;
   final CapabilitySupport markerAwareness;
   final CapabilitySupport diagnostics;
+
+  AdvancedPlaybackCapabilities withTrackSelection({
+    required CapabilitySupport audioTrackSwitching,
+    required CapabilitySupport subtitleTrackSwitching,
+  }) =>
+      AdvancedPlaybackCapabilities(
+        playbackRate: playbackRate,
+        audioDelay: audioDelay,
+        subtitleDelay: subtitleDelay,
+        subtitleStyling: subtitleStyling,
+        chapterNavigation: chapterNavigation,
+        accurateSeek: accurateSeek,
+        fastSeek: fastSeek,
+        audioTrackSwitching: audioTrackSwitching,
+        subtitleTrackSwitching: subtitleTrackSwitching,
+        markerAwareness: markerAwareness,
+        diagnostics: diagnostics,
+      );
 }
 
 /// Optional runtime-level controls beyond the small [PlaybackEngine] transport

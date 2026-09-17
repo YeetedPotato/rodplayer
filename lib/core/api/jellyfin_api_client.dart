@@ -413,4 +413,4 @@ class JellyfinApiClient {
 }
 
 int? _int(Object? value) => value is num ? value.toInt() : int.tryParse('$value');
-const _detailFields = 'PrimaryImageAspectRatio,Overview,ParentId,Taglines,Genres,Studios,People,Status,EndDate,ChildCount,RecursiveItemCount';
+const _detailFields = 'PrimaryImageAspectRatio,Overview,ParentId,Taglines,Genres,Studios,People,Status,EndDate,ChildCount,RecursiveItemCount,Chapters';

@@ -6,8 +6,10 @@ import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
+import 'package:rodplayer/core/player/track_controller.dart';
 
 import 'fakes/test_playback_engine.dart';
 
@@ -41,6 +43,17 @@ void main() {
     expect(engine.disposed, isTrue);
   });
 
+  test('session synchronizes logical metadata without transferring ownership', () {
+    final advanced = _FakeAdvancedControls();
+    final session = PlaybackRuntimeSession(runtimeId: 'test', plan: _plan(), engine: TestPlaybackEngine(), advanced: advanced);
+    final metadata = PlaybackMetadata(chapters: <PlaybackChapter>[const PlaybackChapter(title: 'Opening', start: Duration.zero)], markers: <PlaybackMarker>[const PlaybackMarker(kind: 'Intro', start: Duration.zero, end: Duration(seconds: 10))]);
+
+    session.synchronizeMetadata(metadata);
+
+    expect(advanced.chapters.value.single.title, 'Opening');
+    expect(advanced.markers.value.single.kind, 'Intro');
+  });
+
   test('runtimes without controls are explicitly advanced-unsupported', () {
     final session = PlaybackRuntimeSession(runtimeId: 'native', plan: _plan(), engine: TestPlaybackEngine());
 
@@ -48,6 +61,22 @@ void main() {
     expect(session.advancedCapabilities.playbackRate, CapabilitySupport.unsupported);
     expect(session.advancedCapabilities.audioTrackSwitching, CapabilitySupport.unsupported);
     expect(session.advancedCapabilities.diagnostics, CapabilitySupport.unsupported);
+  });
+
+  test('effective track capabilities come only from the active track controller', () {
+    final session = PlaybackRuntimeSession(
+      runtimeId: 'test',
+      plan: _plan(),
+      engine: TestPlaybackEngine(),
+      advanced: _FakeAdvancedControls(),
+      tracks: _FakeTracks(const TrackSelectionCapabilities(
+        audioSelection: CapabilitySupport.unknown,
+        subtitleSelection: CapabilitySupport.supported,
+      )),
+    );
+
+    expect(session.advancedCapabilities.audioTrackSwitching, CapabilitySupport.unknown);
+    expect(session.advancedCapabilities.subtitleTrackSwitching, CapabilitySupport.supported);
   });
 
   test('generic contract and player UI boundary do not import media_kit', () {
@@ -119,4 +148,23 @@ class _FakeAdvancedControls implements AdvancedPlaybackControls {
   void setMarkers(Iterable<PlaybackMarker> values) => markers.value = List<PlaybackMarker>.unmodifiable(values);
   @override
   Future<void> setSubtitleStyle(SubtitleStyle style) async {}
+}
+
+class _FakeTracks extends TrackSelectionController {
+  _FakeTracks(this.capabilities);
+
+  @override
+  final TrackSelectionCapabilities capabilities;
+  @override
+  List<RodPlayerTrack> get audioTracks => const <RodPlayerTrack>[];
+  @override
+  List<RodPlayerTrack> get subtitleTracks => const <RodPlayerTrack>[];
+  @override
+  RodPlayerTrack? get selectedAudio => null;
+  @override
+  RodPlayerTrack? get selectedSubtitle => null;
+  @override
+  Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async => const TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation);
+  @override
+  Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async => const TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation);
 }

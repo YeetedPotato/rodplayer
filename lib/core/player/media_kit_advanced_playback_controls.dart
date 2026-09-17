@@ -21,8 +21,6 @@ class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
     chapterNavigation: CapabilitySupport.supported,
     accurateSeek: CapabilitySupport.supported,
     fastSeek: CapabilitySupport.unknown,
-    audioTrackSwitching: CapabilitySupport.supported,
-    subtitleTrackSwitching: CapabilitySupport.supported,
     markerAwareness: CapabilitySupport.unknown,
     diagnostics: CapabilitySupport.unsupported,
   );

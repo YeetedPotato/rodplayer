@@ -10,7 +10,7 @@ import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/media_kit_advanced_playback_controls.dart';
-import 'package:rodplayer/core/player/track_controller.dart';
+import 'package:rodplayer/core/player/media_kit_track_selection_controller.dart';
 
 /// The media_kit/mpv playback backend. mpv options are deliberately centralized
 /// so platform views and the HUD remain independent of transport details.
