@@ -3,27 +3,75 @@ import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 
-/// media_kit/mpv implementation of [AdvancedPlaybackControls].
+/// Backend-private operations used by media_kit advanced controls.
 ///
-/// mpv property writes can be unavailable on a particular host, so those
-/// features intentionally remain [CapabilitySupport.unknown].
-class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
-  MediaKitAdvancedPlaybackControls(this.player);
+/// This seam keeps libmpv access out of the generic advanced-playback
+/// contract and permits deterministic control tests without a native player.
+abstract interface class MediaKitAdvancedPlaybackBackend {
+  Duration get position;
 
-  final Player player;
+  Future<void> setRate(double value);
+  Future<void> setProperty(String name, String value);
+  Future<void> command(List<String> arguments);
+}
+
+class _PlayerBackend implements MediaKitAdvancedPlaybackBackend {
+  _PlayerBackend(this._player);
+
+  final Player _player;
 
   @override
-  final AdvancedPlaybackCapabilities capabilities = const AdvancedPlaybackCapabilities(
-    playbackRate: CapabilitySupport.supported,
+  Duration get position => _player.state.position;
+
+  @override
+  Future<void> setRate(double value) => _player.setRate(value);
+
+  @override
+  Future<void> setProperty(String name, String value) async {
+    final dynamic platform = _player.platform;
+    if (platform == null) {
+      throw StateError('media_kit does not expose an mpv property host');
+    }
+    await platform.setProperty(name, value);
+  }
+
+  @override
+  Future<void> command(List<String> arguments) async {
+    final dynamic platform = _player.platform;
+    if (platform == null) {
+      throw StateError('media_kit does not expose an mpv command host');
+    }
+    await platform.command(arguments);
+  }
+}
+
+/// media_kit/mpv implementation of [AdvancedPlaybackControls].
+///
+/// Direct mpv operations start as unknown. A successful operation confirms
+/// only that control for the active runtime; failures are propagated and do
+/// not turn an unknown capability into a claim.
+class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
+  MediaKitAdvancedPlaybackControls(Player player) : _backend = _PlayerBackend(player);
+
+  @visibleForTesting
+  MediaKitAdvancedPlaybackControls.forTesting(this._backend);
+
+  final MediaKitAdvancedPlaybackBackend _backend;
+
+  AdvancedPlaybackCapabilities _capabilities = const AdvancedPlaybackCapabilities(
+    playbackRate: CapabilitySupport.unknown,
     audioDelay: CapabilitySupport.unknown,
     subtitleDelay: CapabilitySupport.unknown,
     subtitleStyling: CapabilitySupport.unknown,
-    chapterNavigation: CapabilitySupport.supported,
-    accurateSeek: CapabilitySupport.supported,
+    chapterNavigation: CapabilitySupport.unknown,
+    accurateSeek: CapabilitySupport.unknown,
     fastSeek: CapabilitySupport.unknown,
     markerAwareness: CapabilitySupport.unknown,
     diagnostics: CapabilitySupport.unsupported,
   );
+
+  @override
+  AdvancedPlaybackCapabilities get capabilities => _capabilities;
 
   @override
   final ValueNotifier<double> rate = ValueNotifier<double>(1.0);
@@ -36,31 +84,48 @@ class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
   @override
   final ValueNotifier<List<PlaybackMarker>> markers = ValueNotifier<List<PlaybackMarker>>(<PlaybackMarker>[]);
 
-  Future<void> _setProperty(String name, String value) async {
-    try {
-      final dynamic platform = player.platform;
-      await platform.setProperty(name, value);
-    } catch (_) {
-      // The active media_kit host may not expose direct mpv properties.
-    }
+  void _confirm({
+    CapabilitySupport? playbackRate,
+    CapabilitySupport? audioDelay,
+    CapabilitySupport? subtitleDelay,
+    CapabilitySupport? subtitleStyling,
+    CapabilitySupport? chapterNavigation,
+    CapabilitySupport? accurateSeek,
+    CapabilitySupport? fastSeek,
+  }) {
+    _capabilities = _capabilities.copyWith(
+      playbackRate: playbackRate,
+      audioDelay: audioDelay,
+      subtitleDelay: subtitleDelay,
+      subtitleStyling: subtitleStyling,
+      chapterNavigation: chapterNavigation,
+      accurateSeek: accurateSeek,
+      fastSeek: fastSeek,
+    );
   }
+
+  String _seconds(Duration value) => (value.inMicroseconds / Duration.microsecondsPerSecond).toString();
 
   @override
   Future<void> setRate(double value) async {
-    rate.value = value.clamp(0.5, 2.0).toDouble();
-    await player.setRate(rate.value);
+    final clamped = value.clamp(0.5, 2.0).toDouble();
+    await _backend.setRate(clamped);
+    rate.value = clamped;
+    _confirm(playbackRate: CapabilitySupport.supported);
   }
 
   @override
   Future<void> adjustAudioDelay(Duration value) async {
+    await _backend.setProperty('audio-delay', _seconds(value));
     audioDelay.value = value;
-    await _setProperty('audio-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+    _confirm(audioDelay: CapabilitySupport.supported);
   }
 
   @override
   Future<void> adjustSubtitleDelay(Duration value) async {
+    await _backend.setProperty('sub-delay', _seconds(value));
     subtitleDelay.value = value;
-    await _setProperty('sub-delay', '${value.inMicroseconds / Duration.microsecondsPerSecond}');
+    _confirm(subtitleDelay: CapabilitySupport.supported);
   }
 
   @override
@@ -74,7 +139,10 @@ class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
       if (style.position != null) 'sub-pos': '${style.position}',
     };
     for (final entry in properties.entries) {
-      await _setProperty(entry.key, entry.value);
+      await _backend.setProperty(entry.key, entry.value);
+    }
+    if (properties.isNotEmpty) {
+      _confirm(subtitleStyling: CapabilitySupport.supported);
     }
   }
 
@@ -86,33 +154,43 @@ class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
 
   @override
   Future<void> seekToChapter(int index) async {
-    if (index >= 0 && index < chapters.value.length) await player.seek(chapters.value[index].start);
+    if (index >= 0 && index < chapters.value.length) {
+      await seekAccurate(chapters.value[index].start);
+      _confirm(chapterNavigation: CapabilitySupport.supported);
+    }
   }
 
   @override
   Future<void> nextChapter() async {
-    final current = player.state.position;
     final next = chapters.value.firstWhere(
-      (chapter) => chapter.start > current,
+      (chapter) => chapter.start > _backend.position,
       orElse: () => chapters.value.isEmpty ? const PlaybackChapter(title: '', start: Duration.zero) : chapters.value.last,
     );
-    if (next.title.isNotEmpty) await player.seek(next.start);
+    if (next.title.isNotEmpty) {
+      await seekAccurate(next.start);
+      _confirm(chapterNavigation: CapabilitySupport.supported);
+    }
   }
 
   @override
   Future<void> previousChapter() async {
-    final current = player.state.position;
-    final prior = chapters.value.where((chapter) => chapter.start < current - const Duration(seconds: 2)).toList();
-    if (prior.isNotEmpty) await player.seek(prior.last.start);
+    final prior = chapters.value.where((chapter) => chapter.start < _backend.position - const Duration(seconds: 2)).toList();
+    if (prior.isNotEmpty) {
+      await seekAccurate(prior.last.start);
+      _confirm(chapterNavigation: CapabilitySupport.supported);
+    }
   }
 
   @override
-  Future<void> seekAccurate(Duration position) => player.seek(position);
+  Future<void> seekAccurate(Duration position) async {
+    await _backend.command(<String>['seek', _seconds(position), 'absolute+exact']);
+    _confirm(accurateSeek: CapabilitySupport.supported);
+  }
 
   @override
   Future<void> seekFast(Duration position) async {
-    await _setProperty('hr-seek', 'no');
-    await player.seek(position);
+    await _backend.command(<String>['seek', _seconds(position), 'absolute+keyframes']);
+    _confirm(fastSeek: CapabilitySupport.supported);
   }
 
   @override

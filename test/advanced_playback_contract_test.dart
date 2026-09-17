@@ -9,6 +9,7 @@ import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
+import 'package:rodplayer/core/player/media_kit_advanced_playback_controls.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 
 import 'fakes/test_playback_engine.dart';
@@ -119,6 +120,72 @@ void main() {
     expect(runtime, contains('advanced: engine.advanced'));
     expect(controls, contains('implements AdvancedPlaybackControls'));
     expect(controls, contains('CapabilitySupport.unknown'));
+    expect(controls, isNot(contains('hr-seek')));
+  });
+
+  test('media kit controls confirm only successful runtime operations', () async {
+    final backend = _FakeMediaKitAdvancedBackend();
+    final controls = MediaKitAdvancedPlaybackControls.forTesting(backend);
+
+    expect(controls.capabilities.playbackRate, CapabilitySupport.unknown);
+    expect(controls.capabilities.audioDelay, CapabilitySupport.unknown);
+    expect(controls.capabilities.subtitleDelay, CapabilitySupport.unknown);
+
+    await controls.setRate(3);
+    await controls.adjustAudioDelay(const Duration(milliseconds: -250));
+    await controls.adjustSubtitleDelay(const Duration(milliseconds: 1250));
+
+    expect(backend.rates, <double>[2]);
+    expect(backend.properties, <String, String>{'audio-delay': '-0.25', 'sub-delay': '1.25'});
+    expect(controls.rate.value, 2);
+    expect(controls.audioDelay.value, const Duration(milliseconds: -250));
+    expect(controls.subtitleDelay.value, const Duration(milliseconds: 1250));
+    expect(controls.capabilities.playbackRate, CapabilitySupport.supported);
+    expect(controls.capabilities.audioDelay, CapabilitySupport.supported);
+    expect(controls.capabilities.subtitleDelay, CapabilitySupport.supported);
+  });
+
+  test('media kit control failures retain state and unknown capability truth', () async {
+    final backend = _FakeMediaKitAdvancedBackend(failProperties: true, failRates: true);
+    final controls = MediaKitAdvancedPlaybackControls.forTesting(backend);
+
+    await expectLater(controls.setRate(1.5), throwsStateError);
+    await expectLater(controls.adjustAudioDelay(const Duration(milliseconds: 500)), throwsStateError);
+    await expectLater(controls.adjustSubtitleDelay(const Duration(milliseconds: 500)), throwsStateError);
+
+    expect(controls.rate.value, 1);
+    expect(controls.audioDelay.value, Duration.zero);
+    expect(controls.subtitleDelay.value, Duration.zero);
+    expect(controls.capabilities.playbackRate, CapabilitySupport.unknown);
+    expect(controls.capabilities.audioDelay, CapabilitySupport.unknown);
+    expect(controls.capabilities.subtitleDelay, CapabilitySupport.unknown);
+  });
+
+  test('media kit uses one-shot exact and keyframe seek commands', () async {
+    final backend = _FakeMediaKitAdvancedBackend();
+    final controls = MediaKitAdvancedPlaybackControls.forTesting(backend);
+    controls.setChapters(<PlaybackChapter>[const PlaybackChapter(title: 'Part', start: Duration(seconds: 8))]);
+
+    await controls.seekToChapter(0);
+    await controls.seekFast(const Duration(milliseconds: 1500));
+
+    expect(backend.commands, <List<String>>[
+      <String>['seek', '8.0', 'absolute+exact'],
+      <String>['seek', '1.5', 'absolute+keyframes'],
+    ]);
+    expect(controls.capabilities.accurateSeek, CapabilitySupport.supported);
+    expect(controls.capabilities.fastSeek, CapabilitySupport.supported);
+    expect(controls.capabilities.chapterNavigation, CapabilitySupport.supported);
+  });
+
+  test('failed fast seek remains unknown and never mutates persistent seek settings', () async {
+    final backend = _FakeMediaKitAdvancedBackend(failCommands: true);
+    final controls = MediaKitAdvancedPlaybackControls.forTesting(backend);
+
+    await expectLater(controls.seekFast(const Duration(seconds: 3)), throwsStateError);
+
+    expect(controls.capabilities.fastSeek, CapabilitySupport.unknown);
+    expect(backend.properties, isEmpty);
   });
 }
 
@@ -208,4 +275,36 @@ class _FakeTracks extends TrackSelectionController {
   Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async => const TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation);
   @override
   Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async => const TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation);
+}
+
+class _FakeMediaKitAdvancedBackend implements MediaKitAdvancedPlaybackBackend {
+  _FakeMediaKitAdvancedBackend({this.failRates = false, this.failProperties = false, this.failCommands = false});
+
+  final bool failRates;
+  final bool failProperties;
+  final bool failCommands;
+  final List<double> rates = <double>[];
+  final Map<String, String> properties = <String, String>{};
+  final List<List<String>> commands = <List<String>>[];
+
+  @override
+  Duration get position => Duration.zero;
+
+  @override
+  Future<void> command(List<String> arguments) async {
+    if (failCommands) throw StateError('command failed');
+    commands.add(arguments);
+  }
+
+  @override
+  Future<void> setProperty(String name, String value) async {
+    if (failProperties) throw StateError('property failed');
+    properties[name] = value;
+  }
+
+  @override
+  Future<void> setRate(double value) async {
+    if (failRates) throw StateError('rate failed');
+    rates.add(value);
+  }
 }

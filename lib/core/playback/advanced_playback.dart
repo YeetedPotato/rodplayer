@@ -113,6 +113,33 @@ class AdvancedPlaybackCapabilities {
         markerAwareness: markerAwareness,
         diagnostics: diagnostics,
       );
+
+  AdvancedPlaybackCapabilities copyWith({
+    CapabilitySupport? playbackRate,
+    CapabilitySupport? audioDelay,
+    CapabilitySupport? subtitleDelay,
+    CapabilitySupport? subtitleStyling,
+    CapabilitySupport? chapterNavigation,
+    CapabilitySupport? accurateSeek,
+    CapabilitySupport? fastSeek,
+    CapabilitySupport? audioTrackSwitching,
+    CapabilitySupport? subtitleTrackSwitching,
+    CapabilitySupport? markerAwareness,
+    CapabilitySupport? diagnostics,
+  }) =>
+      AdvancedPlaybackCapabilities(
+        playbackRate: playbackRate ?? this.playbackRate,
+        audioDelay: audioDelay ?? this.audioDelay,
+        subtitleDelay: subtitleDelay ?? this.subtitleDelay,
+        subtitleStyling: subtitleStyling ?? this.subtitleStyling,
+        chapterNavigation: chapterNavigation ?? this.chapterNavigation,
+        accurateSeek: accurateSeek ?? this.accurateSeek,
+        fastSeek: fastSeek ?? this.fastSeek,
+        audioTrackSwitching: audioTrackSwitching ?? this.audioTrackSwitching,
+        subtitleTrackSwitching: subtitleTrackSwitching ?? this.subtitleTrackSwitching,
+        markerAwareness: markerAwareness ?? this.markerAwareness,
+        diagnostics: diagnostics ?? this.diagnostics,
+      );
 }
 
 /// Optional runtime-level controls beyond the small [PlaybackEngine] transport
