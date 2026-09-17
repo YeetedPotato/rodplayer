@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:rodplayer/core/playback/multi_backend_playback_negotiator.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
@@ -40,6 +42,7 @@ class PlaybackRuntimeCoordinator {
   final PlaybackRuntimeRegistry registry;
   final LogicalPlaybackSession session;
   PlaybackRuntimeSession? _active;
+  final ValueNotifier<PlaybackRuntimeControlsSnapshot> activeControls = ValueNotifier<PlaybackRuntimeControlsSnapshot>(const PlaybackRuntimeControlsSnapshot.unavailable());
   PlaybackRuntimeDiagnostics? diagnostics;
   final _queue = <_ActivationRequest>[];
   var _generation = 0;
@@ -156,6 +159,7 @@ class PlaybackRuntimeCoordinator {
       return true;
     }
     _active = next;
+    activeControls.value = PlaybackRuntimeControlsSnapshot.fromSession(next);
     diagnostics = PlaybackRuntimeDiagnostics(
       selectedBackendId: plan.engineId,
       runtimeId: next.runtimeId,
@@ -204,6 +208,7 @@ class PlaybackRuntimeCoordinator {
     _failQueued(StateError('Playback runtime coordinator is disposed'));
     final active = _active;
     _active = null;
+    activeControls.value = const PlaybackRuntimeControlsSnapshot.unavailable();
     if (active != null) await active.dispose();
   }
 

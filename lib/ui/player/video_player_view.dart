@@ -4,18 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
+import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/ui/player/track_selector_sheet.dart';
 
 class VideoPlayerView extends StatefulWidget {
-  const VideoPlayerView({super.key, required this.engine, required this.surface, required this.client, this.itemId, this.logicalSession});
+  const VideoPlayerView({super.key, required this.engine, required this.surface, required this.client, this.itemId, this.logicalSession, this.activeControls, this.onRenegotiateSubtitle});
   final PlaybackEngine engine;
   final PlaybackVideoSurface surface;
   final JellyfinApiClient client;
   final String? itemId;
   final LogicalPlaybackSession? logicalSession;
+  final ValueListenable<PlaybackRuntimeControlsSnapshot>? activeControls;
+  final SubtitleRenegotiator? onRenegotiateSubtitle;
   @override
   State<VideoPlayerView> createState() => _VideoPlayerViewState();
 }
@@ -117,7 +122,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               backgroundColor: Colors.black,
               body: Stack(children: [
                 Center(child: widget.surface.build(context)),
-                Positioned(top: 20, left: 20, child: _Hud(engine: widget.engine, logicalSession: widget.logicalSession)),
+                Positioned(top: 20, left: 20, child: _Hud(engine: widget.engine, logicalSession: widget.logicalSession, activeControls: widget.activeControls, onRenegotiateSubtitle: widget.onRenegotiateSubtitle)),
                 Positioned(left: 20, right: 20, bottom: 24, child: _StatusBar(engine: widget.engine)),
               ]),
             ),
@@ -127,9 +132,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 }
 
 class _Hud extends StatelessWidget {
-  const _Hud({required this.engine, this.logicalSession});
+  const _Hud({required this.engine, this.logicalSession, this.activeControls, this.onRenegotiateSubtitle});
   final PlaybackEngine engine;
   final LogicalPlaybackSession? logicalSession;
+  final ValueListenable<PlaybackRuntimeControlsSnapshot>? activeControls;
+  final SubtitleRenegotiator? onRenegotiateSubtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -145,6 +152,28 @@ class _Hud extends StatelessWidget {
           ),
         ),
       ),
+      if (activeControls != null)
+        ValueListenableBuilder<PlaybackRuntimeControlsSnapshot>(
+          valueListenable: activeControls!,
+          builder: (_, controls, __) {
+            final capabilities = controls.capabilities;
+            final available = capabilities.subtitleTrackSwitching != CapabilitySupport.unsupported || capabilities.subtitleDelay != CapabilitySupport.unsupported || capabilities.subtitleStyling != CapabilitySupport.unsupported;
+            if (!available) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(left: 10),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow),
+                child: IconButton(
+                  tooltip: 'Subtitle settings',
+                  semanticLabel: 'Subtitle settings',
+                  color: theme.goldBright,
+                  icon: const Icon(Icons.closed_caption_outlined),
+                  onPressed: () => TrackSelectorSheet.show(context, controls: activeControls!, onRenegotiateSubtitle: onRenegotiateSubtitle),
+                ),
+              ),
+            );
+          },
+        ),
       if (plan != null)
         Padding(
           padding: const EdgeInsets.only(left: 10),

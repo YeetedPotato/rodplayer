@@ -58,6 +58,22 @@ void main() {
     expect(coordinator.session.selectedSubtitle, 4);
   });
 
+  test('active controls follow runtime replacement and clear on disposal', () async {
+    final firstTracks = _SelectableTracks();
+    final secondTracks = _SelectableTracks();
+    final first = _FakeRuntime('first', tracks: firstTracks);
+    final second = _FakeRuntime('second', tracks: secondTracks);
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+
+    await coordinator.activate(_plan('one', engineId: 'first'));
+    expect(coordinator.activeControls.value.tracks, same(firstTracks));
+    await coordinator.activate(_plan('two', engineId: 'second'));
+    expect(coordinator.activeControls.value.tracks, same(secondTracks));
+    await coordinator.dispose();
+    expect(coordinator.activeControls.value.tracks, isNull);
+    expect(coordinator.activeControls.value.advanced, isNull);
+  });
+
   test('activation is serialized and newest plan wins', () async {
     final runtime = _ControlledRuntime('media_kit');
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
@@ -424,4 +440,8 @@ class _FakeTracks implements TrackSelectionController {
 
   @override
   Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async => TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: track?.serverStreamIndex);
+}
+
+class _SelectableTracks extends _FakeTracks {
+  _SelectableTracks() : super();
 }

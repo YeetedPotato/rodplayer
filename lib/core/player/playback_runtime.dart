@@ -6,6 +6,33 @@ import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 
+/// Read-only, backend-neutral controls for the currently active runtime.
+/// The coordinator replaces this snapshot whenever it replaces a runtime.
+class PlaybackRuntimeControlsSnapshot {
+  const PlaybackRuntimeControlsSnapshot({this.tracks, this.advanced});
+
+  const PlaybackRuntimeControlsSnapshot.unavailable()
+      : tracks = null,
+        advanced = null;
+
+  final TrackSelectionController? tracks;
+  final AdvancedPlaybackControls? advanced;
+
+  AdvancedPlaybackCapabilities get capabilities {
+    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    return base.withTrackSelection(
+      audioTrackSwitching: trackCapabilities.audioSelection,
+      subtitleTrackSwitching: trackCapabilities.subtitleSelection,
+    );
+  }
+
+  factory PlaybackRuntimeControlsSnapshot.fromSession(PlaybackRuntimeSession session) => PlaybackRuntimeControlsSnapshot(
+        tracks: session.tracks,
+        advanced: session.advanced,
+      );
+}
+
 class PlaybackRuntimeUnavailableException implements Exception {
   const PlaybackRuntimeUnavailableException(this.backendId);
 

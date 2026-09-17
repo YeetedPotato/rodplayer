@@ -7,6 +7,7 @@ import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
+import 'package:rodplayer/core/player/track_controller.dart';
 import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/platform/playback/runtime_playback_probes.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
@@ -43,7 +44,47 @@ class _PlayerRouteState extends State<PlayerRoute> {
     _coordinator = coordinator;
     final runtimeSession = await coordinator.activateCandidates(decision.orderedUsableCandidates);
     unawaited(_loadOptionalMetadata(logicalSession, coordinator));
-    return _PreparedPlayback(plan: runtimeSession.plan, session: logicalSession, runtimeSession: runtimeSession);
+    return _PreparedPlayback(
+      plan: runtimeSession.plan,
+      session: logicalSession,
+      runtimeSession: runtimeSession,
+      coordinator: coordinator,
+      renegotiateSubtitle: (track) => _renegotiateSubtitle(
+        track: track,
+        coordinator: coordinator,
+        session: logicalSession,
+        negotiator: PlaybackNegotiator(
+          client: widget.client,
+          environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
+            identity: widget.client.identity,
+            playbackBackendRegistry: runtimes.backendRegistry,
+          ),
+          runtimeRegistry: runtimes.registry,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renegotiateSubtitle({
+    required RodPlayerTrack track,
+    required PlaybackRuntimeCoordinator coordinator,
+    required LogicalPlaybackSession session,
+    required PlaybackNegotiator negotiator,
+  }) async {
+    final subtitleIndex = track.serverStreamIndex;
+    if (subtitleIndex == null) throw StateError('The selected subtitle has no server stream index.');
+    final current = coordinator.active;
+    final position = current?.engine.position ?? session.position;
+    final wasPlaying = current?.engine.playing.value ?? false;
+    final decision = await negotiator.negotiateDecision(
+      itemId: session.itemId,
+      audioStreamIndex: session.selectedAudio,
+      subtitleStreamIndex: subtitleIndex,
+    );
+    final next = await coordinator.activateCandidates(decision.orderedUsableCandidates);
+    await next.engine.seek(position);
+    session.position = position;
+    if (!wasPlaying) await next.engine.pause();
   }
 
   Future<void> _loadOptionalMetadata(LogicalPlaybackSession session, PlaybackRuntimeCoordinator coordinator) async {
@@ -81,14 +122,18 @@ class _PlayerRouteState extends State<PlayerRoute> {
             client: widget.client,
             itemId: widget.itemId,
             logicalSession: prepared.session,
+            activeControls: prepared.coordinator.activeControls,
+            onRenegotiateSubtitle: prepared.renegotiateSubtitle,
           );
         },
       );
 }
 
 class _PreparedPlayback {
-  const _PreparedPlayback({required this.plan, required this.session, required this.runtimeSession});
+  const _PreparedPlayback({required this.plan, required this.session, required this.runtimeSession, required this.coordinator, required this.renegotiateSubtitle});
   final PlaybackPlan plan;
   final LogicalPlaybackSession session;
   final PlaybackRuntimeSession runtimeSession;
+  final PlaybackRuntimeCoordinator coordinator;
+  final Future<void> Function(RodPlayerTrack track) renegotiateSubtitle;
 }
