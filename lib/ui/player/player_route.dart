@@ -81,10 +81,18 @@ class _PlayerRouteState extends State<PlayerRoute> {
       audioStreamIndex: session.selectedAudio,
       subtitleStreamIndex: subtitleIndex,
     );
-    final next = await coordinator.activateCandidates(decision.orderedUsableCandidates);
-    await next.engine.seek(position);
+    await coordinator.activateCandidates(
+      decision.orderedUsableCandidates,
+      prepare: (candidate) async {
+        await candidate.engine.seek(position);
+        if (wasPlaying) {
+          await candidate.engine.play();
+        } else {
+          await candidate.engine.pause();
+        }
+      },
+    );
     session.position = position;
-    if (!wasPlaying) await next.engine.pause();
   }
 
   Future<void> _loadOptionalMetadata(LogicalPlaybackSession session, PlaybackRuntimeCoordinator coordinator) async {
@@ -122,7 +130,7 @@ class _PlayerRouteState extends State<PlayerRoute> {
             client: widget.client,
             itemId: widget.itemId,
             logicalSession: prepared.session,
-            activeControls: prepared.coordinator.activeControls,
+            activeBinding: prepared.coordinator.activeBinding,
             onRenegotiateSubtitle: prepared.renegotiateSubtitle,
           );
         },

@@ -6,15 +6,19 @@ import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 
-/// Read-only, backend-neutral controls for the currently active runtime.
-/// The coordinator replaces this snapshot whenever it replaces a runtime.
-class PlaybackRuntimeControlsSnapshot {
-  const PlaybackRuntimeControlsSnapshot({this.tracks, this.advanced});
+/// Read-only, backend-neutral view binding for the currently active runtime.
+/// The coordinator replaces this atomically whenever it replaces a runtime.
+class PlaybackRuntimeViewBinding {
+  const PlaybackRuntimeViewBinding({this.engine, this.surface, this.tracks, this.advanced});
 
-  const PlaybackRuntimeControlsSnapshot.unavailable()
-      : tracks = null,
+  const PlaybackRuntimeViewBinding.unavailable()
+      : engine = null,
+        surface = null,
+        tracks = null,
         advanced = null;
 
+  final PlaybackEngine? engine;
+  final PlaybackVideoSurface? surface;
   final TrackSelectionController? tracks;
   final AdvancedPlaybackControls? advanced;
 
@@ -27,11 +31,15 @@ class PlaybackRuntimeControlsSnapshot {
     );
   }
 
-  factory PlaybackRuntimeControlsSnapshot.fromSession(PlaybackRuntimeSession session) => PlaybackRuntimeControlsSnapshot(
+  factory PlaybackRuntimeViewBinding.fromSession(PlaybackRuntimeSession session) => PlaybackRuntimeViewBinding(
+        engine: session.engine,
+        surface: session.surface,
         tracks: session.tracks,
         advanced: session.advanced,
       );
 }
+
+typedef PlaybackRuntimePreparation = Future<void> Function(PlaybackRuntimeSession session);
 
 class PlaybackRuntimeUnavailableException implements Exception {
   const PlaybackRuntimeUnavailableException(this.backendId);

@@ -58,7 +58,7 @@ void main() {
     expect(coordinator.session.selectedSubtitle, 4);
   });
 
-  test('active controls follow runtime replacement and clear on disposal', () async {
+  test('active runtime binding follows replacement and clears on disposal', () async {
     final firstTracks = _SelectableTracks();
     final secondTracks = _SelectableTracks();
     final first = _FakeRuntime('first', tracks: firstTracks);
@@ -66,12 +66,53 @@ void main() {
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
 
     await coordinator.activate(_plan('one', engineId: 'first'));
-    expect(coordinator.activeControls.value.tracks, same(firstTracks));
+    expect(coordinator.activeBinding.value.tracks, same(firstTracks));
+    expect(coordinator.activeBinding.value.engine, same(first.created.single));
     await coordinator.activate(_plan('two', engineId: 'second'));
-    expect(coordinator.activeControls.value.tracks, same(secondTracks));
+    expect(coordinator.activeBinding.value.tracks, same(secondTracks));
+    expect(coordinator.activeBinding.value.engine, same(second.created.single));
     await coordinator.dispose();
-    expect(coordinator.activeControls.value.tracks, isNull);
-    expect(coordinator.activeControls.value.advanced, isNull);
+    expect(coordinator.activeBinding.value.engine, isNull);
+    expect(coordinator.activeBinding.value.surface, isNull);
+    expect(coordinator.activeBinding.value.tracks, isNull);
+    expect(coordinator.activeBinding.value.advanced, isNull);
+  });
+
+  test('preparation failure leaves the old runtime and logical plan active', () async {
+    final first = _FakeRuntime('first');
+    final second = _FakeRuntime('second');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+    await coordinator.activate(_plan('one', engineId: 'first', subtitle: 2));
+
+    await expectLater(
+      coordinator.activate(_plan('two', engineId: 'second', subtitle: 8), prepare: (_) async => throw StateError('seek failed')),
+      throwsA(isA<PlaybackActivationException>()),
+    );
+
+    expect(coordinator.active?.engine, same(first.created.single));
+    expect(first.created.single.disposeCount, 0);
+    expect(second.created.single.disposeCount, 1);
+    expect(coordinator.session.activePlan.mediaSourceId, 'one');
+    expect(coordinator.session.selectedSubtitle, 2);
+  });
+
+  test('preparation completes before publishing a replacement runtime', () async {
+    final first = _FakeRuntime('first');
+    final second = _FakeRuntime('second');
+    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+    await coordinator.activate(_plan('one', engineId: 'first'));
+    var preparedWhileFirstWasActive = false;
+
+    await coordinator.activate(
+      _plan('two', engineId: 'second'),
+      prepare: (candidate) async {
+        preparedWhileFirstWasActive = identical(coordinator.active?.engine, first.created.single) && identical(coordinator.activeBinding.value.engine, first.created.single) && identical(candidate.engine, second.created.single);
+      },
+    );
+
+    expect(preparedWhileFirstWasActive, isTrue);
+    expect(coordinator.active?.engine, same(second.created.single));
+    expect(first.created.single.disposeCount, 1);
   });
 
   test('activation is serialized and newest plan wins', () async {

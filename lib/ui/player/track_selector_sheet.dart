@@ -14,12 +14,12 @@ typedef SubtitleRenegotiator = Future<void> Function(RodPlayerTrack track);
 class TrackSelectorSheet extends StatefulWidget {
   const TrackSelectorSheet({super.key, required this.controls, this.onRenegotiateSubtitle});
 
-  final ValueListenable<PlaybackRuntimeControlsSnapshot> controls;
+  final ValueListenable<PlaybackRuntimeViewBinding> controls;
   final SubtitleRenegotiator? onRenegotiateSubtitle;
 
   static Future<void> show(
     BuildContext context, {
-    required ValueListenable<PlaybackRuntimeControlsSnapshot> controls,
+    required ValueListenable<PlaybackRuntimeViewBinding> controls,
     SubtitleRenegotiator? onRenegotiateSubtitle,
   }) =>
       showModalBottomSheet<void>(
@@ -85,7 +85,7 @@ class _TrackSelectorSheetState extends State<TrackSelectorSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
-    return ValueListenableBuilder<PlaybackRuntimeControlsSnapshot>(
+    return ValueListenableBuilder<PlaybackRuntimeViewBinding>(
       valueListenable: widget.controls,
       builder: (_, controls, __) {
         final tracks = controls.tracks;

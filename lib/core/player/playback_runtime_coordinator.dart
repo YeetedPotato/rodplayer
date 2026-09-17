@@ -42,7 +42,7 @@ class PlaybackRuntimeCoordinator {
   final PlaybackRuntimeRegistry registry;
   final LogicalPlaybackSession session;
   PlaybackRuntimeSession? _active;
-  final ValueNotifier<PlaybackRuntimeControlsSnapshot> activeControls = ValueNotifier<PlaybackRuntimeControlsSnapshot>(const PlaybackRuntimeControlsSnapshot.unavailable());
+  final ValueNotifier<PlaybackRuntimeViewBinding> activeBinding = ValueNotifier<PlaybackRuntimeViewBinding>(const PlaybackRuntimeViewBinding.unavailable());
   PlaybackRuntimeDiagnostics? diagnostics;
   final _queue = <_ActivationRequest>[];
   var _generation = 0;
@@ -51,21 +51,21 @@ class PlaybackRuntimeCoordinator {
 
   PlaybackRuntimeSession? get active => _active;
 
-  Future<PlaybackRuntimeSession> activate(PlaybackPlan plan) {
-    return activateFirst(<PlaybackPlan>[plan]);
+  Future<PlaybackRuntimeSession> activate(PlaybackPlan plan, {PlaybackRuntimePreparation? prepare}) {
+    return activateFirst(<PlaybackPlan>[plan], prepare: prepare);
   }
 
-  Future<PlaybackRuntimeSession> activateCandidates(List<PlaybackBackendCandidate> candidates) {
+  Future<PlaybackRuntimeSession> activateCandidates(List<PlaybackBackendCandidate> candidates, {PlaybackRuntimePreparation? prepare}) {
     return activateFirst(<PlaybackPlan>[
       for (final candidate in candidates)
         if (candidate.isUsable) candidate.plan!,
-    ]);
+    ], prepare: prepare);
   }
 
-  Future<PlaybackRuntimeSession> activateFirst(List<PlaybackPlan> plans) {
+  Future<PlaybackRuntimeSession> activateFirst(List<PlaybackPlan> plans, {PlaybackRuntimePreparation? prepare}) {
     if (_disposed) return Future<PlaybackRuntimeSession>.error(StateError('Playback runtime coordinator is disposed'));
     if (plans.isEmpty) return Future<PlaybackRuntimeSession>.error(StateError('No playback runtime candidates to activate'));
-    final request = _ActivationRequest(plans: List<PlaybackPlan>.unmodifiable(plans), generation: ++_generation);
+    final request = _ActivationRequest(plans: List<PlaybackPlan>.unmodifiable(plans), generation: ++_generation, prepare: prepare);
     _queue.add(request);
     _startNext();
     return request.future;
@@ -144,10 +144,29 @@ class PlaybackRuntimeCoordinator {
       }
       return true;
     }
+    try {
+      next.bindLogicalSession(session);
+      await request.prepare?.call(next);
+    } on Object catch (error) {
+      try {
+        await next.dispose();
+      } on Object {
+        // Best-effort cleanup; preparation failure remains authoritative.
+      }
+      _recordFailure(failures, plan.engineId, error);
+      return false;
+    }
+    if (_disposed || generation != _generation) {
+      try {
+        await next.dispose();
+      } finally {
+        request.completeError(StateError(_disposed ? 'Playback runtime coordinator is disposed' : 'Playback activation was superseded'));
+      }
+      return true;
+    }
     final previous = _active;
     try {
       session.activatePlan(plan);
-      next.bindLogicalSession(session);
       next.synchronizeMetadata(session.metadata);
     } on Object catch (error) {
       try {
@@ -159,7 +178,7 @@ class PlaybackRuntimeCoordinator {
       return true;
     }
     _active = next;
-    activeControls.value = PlaybackRuntimeControlsSnapshot.fromSession(next);
+    activeBinding.value = PlaybackRuntimeViewBinding.fromSession(next);
     diagnostics = PlaybackRuntimeDiagnostics(
       selectedBackendId: plan.engineId,
       runtimeId: next.runtimeId,
@@ -208,7 +227,7 @@ class PlaybackRuntimeCoordinator {
     _failQueued(StateError('Playback runtime coordinator is disposed'));
     final active = _active;
     _active = null;
-    activeControls.value = const PlaybackRuntimeControlsSnapshot.unavailable();
+    activeBinding.value = const PlaybackRuntimeViewBinding.unavailable();
     if (active != null) await active.dispose();
   }
 
@@ -224,12 +243,13 @@ class PlaybackRuntimeCoordinator {
 }
 
 class _ActivationRequest {
-  _ActivationRequest({required this.plans, required this.generation}) {
+  _ActivationRequest({required this.plans, required this.generation, this.prepare}) {
     _observed = completer.future..ignore();
   }
 
   final List<PlaybackPlan> plans;
   final int generation;
+  final PlaybackRuntimePreparation? prepare;
   final completer = Completer<PlaybackRuntimeSession>();
   late final Future<PlaybackRuntimeSession> _observed;
 
