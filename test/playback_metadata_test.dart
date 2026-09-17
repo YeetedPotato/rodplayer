@@ -44,6 +44,26 @@ void main() {
     expect(metadata.markers, isEmpty);
   });
 
+  test('only explicit server intro and outro markers are actionable', () {
+    final metadata = PlaybackMetadata.fromLibraryItem(_item(<String, dynamic>{
+      'Chapters': <Map<String, dynamic>>[<String, dynamic>{'Name': 'Opening', 'StartTicks': 0}],
+      'MediaSegments': <Map<String, dynamic>>[
+        <String, dynamic>{'Type': 'Intro', 'StartTicks': 10000000, 'EndTicks': 20000000},
+        <String, dynamic>{'Type': 'Outro', 'StartTicks': 30000000, 'EndTicks': 40000000},
+        <String, dynamic>{'Type': 'Recap', 'StartTicks': 50000000, 'EndTicks': 60000000},
+      ],
+    }));
+
+    expect(metadata.chapters.single.title, 'Opening');
+    expect(metadata.markers.map((marker) => marker.skipAction?.label), <String?>['Skip Intro', 'Skip Outro', null]);
+  });
+
+  test('media source hasSegments preserves unknown separately from false', () {
+    expect(MediaSourceInfo.fromJson(<String, dynamic>{'Id': 'a', 'HasSegments': true}).hasSegments, isTrue);
+    expect(MediaSourceInfo.fromJson(<String, dynamic>{'Id': 'b', 'HasSegments': false}).hasSegments, isFalse);
+    expect(MediaSourceInfo.fromJson(<String, dynamic>{'Id': 'c'}).hasSegments, isNull);
+  });
+
   test('logical metadata survives a backend plan replacement', () {
     final first = _plan('one');
     final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: first);

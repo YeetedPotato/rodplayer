@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
+import 'package:rodplayer/core/api/models/media_segment.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
@@ -283,6 +284,16 @@ class JellyfinApiClient {
         }), headers: headers)),
         JellyfinLibraryItem.fromJson,
       ).items;
+
+  /// Jellyfin 10.10+ media segments are keyed by the logical video item ID.
+  /// Older servers that do not expose this optional endpoint simply have none.
+  Future<List<JellyfinMediaSegment>> getMediaSegments({required String itemId}) async {
+    final response = await _client.get(_uri(<String>['MediaSegments', itemId], <String, Object?>{'UserId': _requireUserId()}), headers: headers);
+    if (response.statusCode == 404 || response.statusCode == 405) return const <JellyfinMediaSegment>[];
+    return List<JellyfinMediaSegment>.unmodifiable(
+      _jsonList(response).map(JellyfinMediaSegment.fromJson).whereType<JellyfinMediaSegment>(),
+    );
+  }
 
   Future<JellyfinUserProfile> getCurrentUser() async => JellyfinUserProfile.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId()], const <String, Object?>{}), headers: headers)));
 

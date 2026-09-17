@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
@@ -161,6 +163,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               body: Stack(children: <Widget>[
                 Center(child: _surface.build(context)),
                 Positioned(top: 20, left: 20, child: _Hud(engine: _engine, logicalSession: widget.logicalSession, activeBinding: widget.activeBinding, onRenegotiateSubtitle: widget.onRenegotiateSubtitle)),
+                if (widget.activeBinding != null && widget.logicalSession != null) Positioned(right: 20, bottom: 80, child: _SkipMarkerButton(binding: widget.activeBinding!, session: widget.logicalSession!)),
                 Positioned(left: 20, right: 20, bottom: 24, child: _StatusBar(engine: _engine)),
               ]),
             ),
@@ -168,6 +171,68 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         ),
       );
 }
+
+class _SkipMarkerButton extends StatefulWidget {
+  const _SkipMarkerButton({required this.binding, required this.session});
+  final ValueListenable<PlaybackRuntimeViewBinding> binding;
+  final LogicalPlaybackSession session;
+
+  @override
+  State<_SkipMarkerButton> createState() => _SkipMarkerButtonState();
+}
+
+class _SkipMarkerButtonState extends State<_SkipMarkerButton> {
+  var _busy = false;
+
+  Future<void> _skip(PlaybackMarker marker) async {
+    if (_busy) return;
+    final engine = widget.binding.value.engine;
+    if (engine == null) return;
+    setState(() => _busy = true);
+    try {
+      await engine.seek(marker.end);
+      widget.session.position = marker.end;
+    } on Object {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to skip this segment')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<PlaybackMetadata>(
+        valueListenable: widget.session.metadataListenable,
+        builder: (_, metadata, __) => ValueListenableBuilder<PlaybackRuntimeViewBinding>(
+          valueListenable: widget.binding,
+          builder: (_, binding, __) {
+            final engine = binding.engine;
+            if (engine == null) return const SizedBox.shrink();
+            return ValueListenableBuilder<Duration>(
+              valueListenable: engine.positionListenable,
+              builder: (_, position, __) {
+                PlaybackMarker? marker;
+                for (final value in metadata.markers) {
+                  if (value.skipAction != null && position >= value.start && position < value.end) {
+                    marker = value;
+                    break;
+                  }
+                }
+                final action = marker?.skipAction;
+                if (marker == null || action == null) return const SizedBox.shrink();
+                return Semantics(
+                  button: true,
+                  label: action.label,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : () => unawaited(_skip(marker)),
+                    icon: const Icon(Icons.skip_next),
+                    label: Text(action.label),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      );
 
 class _Hud extends StatelessWidget {
   const _Hud({required this.engine, this.logicalSession, this.activeBinding, this.onRenegotiateSubtitle});

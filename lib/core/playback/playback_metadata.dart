@@ -13,6 +13,7 @@ class PlaybackMetadata {
     Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
     Iterable<MediaStream> serverStreams = const <MediaStream>[],
     this.duration,
+    this.mediaSourceId,
   })  : chapters = List<PlaybackChapter>.unmodifiable(chapters),
         markers = List<PlaybackMarker>.unmodifiable(markers),
         serverStreams = List<MediaStream>.unmodifiable(serverStreams);
@@ -21,6 +22,7 @@ class PlaybackMetadata {
   final List<PlaybackMarker> markers;
   final List<MediaStream> serverStreams;
   final Duration? duration;
+  final String? mediaSourceId;
 
   factory PlaybackMetadata.fromPlan(PlaybackPlan plan) => _fromSource(plan.source);
 
@@ -28,7 +30,7 @@ class PlaybackMetadata {
         chapters: _chapters(item.raw['Chapters']),
         markers: _markers(item.raw),
         serverStreams: _streams(item.raw['MediaStreams']),
-        duration: item.runTime,
+      duration: item.runTime,
       );
 
   PlaybackMetadata mergeLibraryItem(JellyfinLibraryItem item) {
@@ -41,16 +43,26 @@ class PlaybackMetadata {
       markers: itemMarkers,
       serverStreams: itemStreams.isEmpty ? serverStreams : itemStreams,
       duration: item.runTime ?? duration,
+      mediaSourceId: mediaSourceId,
     );
   }
+
+  PlaybackMetadata withMediaSegments(Iterable<PlaybackMarker> values) => PlaybackMetadata(
+        chapters: chapters,
+        markers: _deduplicateMarkers(values),
+        serverStreams: serverStreams,
+        duration: duration,
+        mediaSourceId: mediaSourceId,
+      );
 
   PlaybackMetadata withPlanSource(PlaybackPlan plan) {
     final source = _fromSource(plan.source);
     return PlaybackMetadata(
       chapters: chapters.isEmpty ? source.chapters : chapters,
-      markers: markers.isEmpty ? source.markers : markers,
+      markers: mediaSourceId != null && mediaSourceId != plan.source.id ? source.markers : (markers.isEmpty ? source.markers : markers),
       serverStreams: source.serverStreams.isEmpty ? serverStreams : source.serverStreams,
       duration: source.duration ?? duration,
+      mediaSourceId: plan.source.id,
     );
   }
 
@@ -59,6 +71,7 @@ class PlaybackMetadata {
         markers: _markers(source.raw),
         serverStreams: source.mediaStreams,
         duration: _ticksToDuration(source.runTimeTicks),
+        mediaSourceId: source.id,
       );
 }
 
@@ -95,6 +108,11 @@ List<PlaybackMarker> _markers(Map<String, dynamic> raw) {
     parsed.add(PlaybackMarker(kind: kind, start: start, end: end));
   }
   return List<PlaybackMarker>.unmodifiable(parsed);
+}
+
+List<PlaybackMarker> _deduplicateMarkers(Iterable<PlaybackMarker> values) {
+  final seen = <String>{};
+  return List<PlaybackMarker>.unmodifiable(values.where((marker) => seen.add('${marker.kind}|${marker.start.inMicroseconds}|${marker.end.inMicroseconds}')));
 }
 
 List<MediaStream> _streams(Object? value) => List<MediaStream>.unmodifiable(

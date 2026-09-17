@@ -23,6 +23,7 @@ class MediaSourceInfo {
     this.videoCopied,
     this.audioCopied,
     this.containerChanged,
+    this.hasSegments,
   });
 
   final String id;
@@ -44,6 +45,7 @@ class MediaSourceInfo {
   final bool? videoCopied;
   final bool? audioCopied;
   final bool? containerChanged;
+  final bool? hasSegments;
   final Map<String, dynamic> raw;
 
   List<MediaStream> get videoStreams => mediaStreams.where((s) => s.type == 'Video').toList(growable: false);
@@ -75,6 +77,7 @@ class MediaSourceInfo {
       videoCopied: _bool(json['VideoStreamCopy']),
       audioCopied: _bool(json['AudioStreamCopy']),
       containerChanged: _bool(json['ContainerChanged']),
+      hasSegments: _bool(json['HasSegments']),
       raw: Map<String, dynamic>.unmodifiable(json),
     );
   }

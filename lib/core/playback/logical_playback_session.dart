@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/playback/playback_metadata.dart';
@@ -27,7 +28,9 @@ class LogicalPlaybackSession {
         activeServerSession = ServerPlaybackSession.fromPlan(activePlan),
         selectedAudio = activePlan.selectedAudioStreamIndex,
         selectedSubtitle = activePlan.selectedSubtitleStreamIndex,
-        metadata = metadata ?? PlaybackMetadata.fromPlan(activePlan);
+        metadata = metadata ?? PlaybackMetadata.fromPlan(activePlan) {
+    metadataListenable = ValueNotifier<PlaybackMetadata>(this.metadata);
+  }
 
   final String id;
   final String itemId;
@@ -37,14 +40,20 @@ class LogicalPlaybackSession {
   int? selectedAudio;
   int? selectedSubtitle;
   PlaybackMetadata metadata;
+  late final ValueNotifier<PlaybackMetadata> metadataListenable;
 
   void activatePlan(PlaybackPlan plan) {
     activePlan = plan;
     activeServerSession = ServerPlaybackSession.fromPlan(plan);
     selectedAudio = plan.selectedAudioStreamIndex;
     selectedSubtitle = plan.selectedSubtitleStreamIndex;
-    metadata = metadata.withPlanSource(plan);
+    updateMetadata(metadata.withPlanSource(plan));
   }
 
-  void updateMetadata(PlaybackMetadata value) => metadata = value;
+  void updateMetadata(PlaybackMetadata value) {
+    metadata = value;
+    metadataListenable.value = value;
+  }
 }
+import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';

@@ -32,6 +32,20 @@ class PlaybackMarker {
   final String kind;
   final Duration start;
   final Duration end;
+
+  PlaybackSkipAction? get skipAction => switch (kind.trim().toLowerCase()) {
+        'intro' => PlaybackSkipAction.intro,
+        'outro' => PlaybackSkipAction.outro,
+        _ => null,
+      };
+}
+
+enum PlaybackSkipAction {
+  intro('Skip Intro'),
+  outro('Skip Outro');
+
+  const PlaybackSkipAction(this.label);
+  final String label;
 }
 
 class SubtitleStyle {
