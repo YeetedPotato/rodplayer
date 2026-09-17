@@ -70,8 +70,18 @@ class PlaybackRuntimeSession {
   }
 
   void synchronizeMetadata(PlaybackMetadata metadata) {
-    advanced?.setChapters(metadata.chapters);
-    advanced?.setMarkers(metadata.markers);
+    final controls = advanced;
+    if (controls == null) return;
+    try {
+      controls.setChapters(metadata.chapters);
+    } on Object {
+      // Optional server metadata must never prevent playback activation.
+    }
+    try {
+      controls.setMarkers(metadata.markers);
+    } on Object {
+      // Keep marker synchronization isolated from chapter synchronization.
+    }
   }
 
   void bindLogicalSession(LogicalPlaybackSession session) {

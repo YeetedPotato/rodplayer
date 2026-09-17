@@ -131,5 +131,8 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
     return values.isEmpty ? 'Unknown track' : values.join(' • ');
   }
 
-  String? _asNullable(String? value) => value;
+  String? _asNullable(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
 }

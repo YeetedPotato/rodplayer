@@ -54,6 +54,31 @@ void main() {
     expect(advanced.markers.value.single.kind, 'Intro');
   });
 
+  test('optional metadata synchronization failures do not escape', () {
+    final advanced = _ThrowingMetadataControls();
+    final session = PlaybackRuntimeSession(
+      runtimeId: 'test',
+      plan: _plan(),
+      engine: TestPlaybackEngine(),
+      advanced: advanced,
+    );
+    final metadata = PlaybackMetadata(
+      chapters: <PlaybackChapter>[
+        const PlaybackChapter(title: 'Opening', start: Duration.zero),
+      ],
+      markers: <PlaybackMarker>[
+        const PlaybackMarker(
+          kind: 'Intro',
+          start: Duration.zero,
+          end: Duration(seconds: 10),
+        ),
+      ],
+    );
+
+    expect(() => session.synchronizeMetadata(metadata), returnsNormally);
+    expect(advanced.chaptersCalled, isTrue);
+    expect(advanced.markersCalled, isTrue);
+  });
   test('runtimes without controls are explicitly advanced-unsupported', () {
     final session = PlaybackRuntimeSession(runtimeId: 'native', plan: _plan(), engine: TestPlaybackEngine());
 
@@ -150,6 +175,22 @@ class _FakeAdvancedControls implements AdvancedPlaybackControls {
   Future<void> setSubtitleStyle(SubtitleStyle style) async {}
 }
 
+class _ThrowingMetadataControls extends _FakeAdvancedControls {
+  bool chaptersCalled = false;
+  bool markersCalled = false;
+
+  @override
+  void setChapters(Iterable<PlaybackChapter> values) {
+    chaptersCalled = true;
+    throw StateError('chapter metadata unavailable');
+  }
+
+  @override
+  void setMarkers(Iterable<PlaybackMarker> values) {
+    markersCalled = true;
+    throw StateError('marker metadata unavailable');
+  }
+}
 class _FakeTracks extends TrackSelectionController {
   _FakeTracks(this.capabilities);
 
