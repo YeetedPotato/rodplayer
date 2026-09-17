@@ -35,19 +35,29 @@ def patch_android_gradle() -> None:
     ]
     if groovy.exists():
         text = groovy.read_text()
+        text = text.replace(
+            "minSdkVersion flutter.minSdkVersion",
+            "minSdkVersion 26",
+        )
         if "io.github.thankimanish:mpv-android-lib" in text:
             groovy.write_text(text.replace("io.github.thankimanish:mpv-android-lib:0.1.12", "dev.jdtech.mpv:libmpv:1.0.0"))
             return
         if "dev.jdtech.mpv:libmpv" in text:
+            groovy.write_text(text)
             return
         block = "\ndependencies {\n" + "\n".join(f"    {line}" for line in dependencies) + "\n}\n"
         groovy.write_text(text + block)
     elif kotlin.exists():
         text = kotlin.read_text()
+        text = text.replace(
+            "minSdk = flutter.minSdkVersion",
+            "minSdk = 26",
+        )
         if "io.github.thankimanish:mpv-android-lib" in text:
             kotlin.write_text(text.replace("io.github.thankimanish:mpv-android-lib:0.1.12", "dev.jdtech.mpv:libmpv:1.0.0"))
             return
         if "dev.jdtech.mpv:libmpv" in text:
+            kotlin.write_text(text)
             return
         block = '\ndependencies {\n    implementation("androidx.media3:media3-exoplayer:1.4.1")\n    implementation("androidx.media3:media3-ui:1.4.1")\n    implementation("dev.jdtech.mpv:libmpv:1.0.0")\n}\n'
         kotlin.write_text(text + block)

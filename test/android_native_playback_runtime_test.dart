@@ -157,6 +157,8 @@ void main() {
     expect(source, contains('player.release()'));
     expect(patcher, contains('androidx.media3:media3-exoplayer'));
     expect(patcher, contains('androidx.media3:media3-ui'));
+    expect(patcher, contains('"minSdk = flutter.minSdkVersion"'));
+    expect(patcher, contains('"minSdk = 26"'));
   });
 }
 
