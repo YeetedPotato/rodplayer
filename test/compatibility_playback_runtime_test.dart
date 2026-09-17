@@ -57,6 +57,8 @@ void main() {
     expect(engine.duration, const Duration(seconds: 9));
     expect(engine.error.value, 'native failed');
     expect(session.surface, isA<PlaybackVideoSurface>());
+    expect(session.advanced, isNull);
+    expect(session.advancedCapabilities.chapterNavigation, CapabilitySupport.unsupported);
   });
 
   test('dispose is idempotent and late events are ignored', () async {

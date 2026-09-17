@@ -526,6 +526,9 @@ class _FakeTrackSelectionController implements TrackSelectionController {
   final TrackSwitchMode mode;
 
   @override
+  TrackSelectionCapabilities get capabilities => const TrackSelectionCapabilities.unavailable();
+
+  @override
   List<RodPlayerTrack> get audioTracks => const <RodPlayerTrack>[];
 
   @override

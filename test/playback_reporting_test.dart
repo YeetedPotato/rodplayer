@@ -66,6 +66,95 @@ void main() {
     expect(payload, containsPair('AudioStreamIndex', 4));
     expect(payload, containsPair('SubtitleStreamIndex', 8));
   });
+
+  test('reporter transitions immutable server targets in lifecycle order', () async {
+    final payloads = <Map<String, dynamic>>[];
+    final client = JellyfinApiClient(
+      baseUrl: 'https://media.example.com',
+      identity: testIdentity,
+      client: _CaptureClient((_, body) {
+        payloads.add(jsonDecode(body) as Map<String, dynamic>);
+        return http.Response('', 204);
+      }),
+    );
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay));
+    final reporter = PlaybackReporter(client: client, session: session);
+    await reporter.started();
+    session.activatePlan(plan('B', PlayMethod.transcode));
+    await reporter.progress(const Duration(seconds: 3), const Duration(minutes: 1));
+    await reporter.stopped(const Duration(seconds: 4));
+    expect(payloads.map((value) => value['MediaSourceId']), <String>['A', 'A', 'B', 'B', 'B']);
+    expect(payloads.map((value) => value['PlaySessionId']), <String>['play-A', 'play-A', 'play-B', 'play-B', 'play-B']);
+  });
+
+  test('queued progress keeps its captured target and stream indexes through a transition', () async {
+    final gate = Completer<http.Response>();
+    final payloads = <Map<String, dynamic>>[];
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) {
+      final payload = jsonDecode(body) as Map<String, dynamic>;
+      payloads.add(payload);
+      if (payload['MediaSourceId'] == 'A' && payload['EventName'] == 'timeupdate') return gate.future;
+      return http.Response('', 204);
+    }));
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay))
+      ..selectedAudio = 1
+      ..selectedSubtitle = 2;
+    final reporter = PlaybackReporter(client: client, session: session);
+    await reporter.started();
+    final progressA = reporter.progress(const Duration(seconds: 1), const Duration(minutes: 1));
+    session.activatePlan(plan('B', PlayMethod.transcode));
+    session.selectedAudio = 4;
+    session.selectedSubtitle = 8;
+    final progressB = reporter.progress(const Duration(seconds: 2), const Duration(minutes: 1));
+    gate.complete(http.Response('', 204));
+    await Future.wait(<Future<void>>[progressA, progressB]);
+    expect(payloads.map((value) => value['MediaSourceId']), <String>['A', 'A', 'A', 'B', 'B']);
+    expect(payloads[1], containsPair('AudioStreamIndex', 1));
+    expect(payloads[1], containsPair('SubtitleStreamIndex', 2));
+  });
+
+  test('synchronize transitions lifecycle without progress and preserves old indexes', () async {
+    final payloads = <Map<String, dynamic>>[];
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay))..selectedAudio = 1..selectedSubtitle = 2;
+    final reporter = PlaybackReporter(client: client, session: session);
+    await reporter.started();
+    await reporter.synchronize(Duration.zero);
+    expect(payloads, hasLength(1));
+    session.activatePlan(plan('B', PlayMethod.transcode));
+    session.selectedAudio = 4; session.selectedSubtitle = 8;
+    await reporter.synchronize(const Duration(seconds: 3));
+    expect(payloads, hasLength(3));
+    expect(payloads[1], containsPair('MediaSourceId', 'A'));
+    expect(payloads[1], containsPair('AudioStreamIndex', 1));
+    expect(payloads[1], containsPair('SubtitleStreamIndex', 2));
+    expect(payloads[2], containsPair('MediaSourceId', 'B'));
+    expect(payloads.where((value) => value['EventName'] == 'timeupdate'), isEmpty);
+  });
+
+  test('same-target synchronize refreshes stream indexes without a lifecycle event', () async {
+    final payloads = <Map<String, dynamic>>[];
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
+    final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay))..selectedAudio = 1..selectedSubtitle = 2;
+    final reporter = PlaybackReporter(client: client, session: session);
+    await reporter.started();
+    session.selectedAudio = 4;
+    session.selectedSubtitle = 8;
+    await reporter.synchronize(const Duration(seconds: 1));
+    expect(payloads, hasLength(1));
+    session.activatePlan(plan('B', PlayMethod.transcode));
+    session.selectedAudio = 4;
+    session.selectedSubtitle = 8;
+    await reporter.synchronize(const Duration(seconds: 2));
+    expect(payloads, hasLength(3));
+    expect(payloads[1], containsPair('MediaSourceId', 'A'));
+    expect(payloads[1], containsPair('AudioStreamIndex', 4));
+    expect(payloads[1], containsPair('SubtitleStreamIndex', 8));
+    expect(payloads[2], containsPair('MediaSourceId', 'B'));
+    expect(payloads[2], containsPair('AudioStreamIndex', 4));
+    expect(payloads[2], containsPair('SubtitleStreamIndex', 8));
+    expect(payloads.where((value) => value['EventName'] == 'timeupdate'), isEmpty);
+  });
 }
 
 class _CaptureClient extends http.BaseClient {

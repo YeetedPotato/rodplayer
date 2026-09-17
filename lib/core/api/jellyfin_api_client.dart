@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
+import 'package:rodplayer/core/api/models/media_segment.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
@@ -284,6 +285,19 @@ class JellyfinApiClient {
         JellyfinLibraryItem.fromJson,
       ).items;
 
+  /// Jellyfin 10.10+ media segments are keyed by the logical video item ID.
+  /// Returns null only when an older server does not expose this endpoint.
+  Future<List<JellyfinMediaSegment>?> getMediaSegments({required String itemId}) async {
+    final response = await _client.get(_uri(<String>['MediaSegments', itemId], const <String, Object?>{}), headers: headers);
+    if (response.statusCode == 404 || response.statusCode == 405) return null;
+    final body = _jsonObject(response);
+    final items = body['Items'];
+    if (items is! List) throw ServerConnectionException('Server returned malformed media segment response');
+    return List<JellyfinMediaSegment>.unmodifiable(
+      items.whereType<Map>().map((item) => JellyfinMediaSegment.fromJson(Map<String, dynamic>.from(item))).whereType<JellyfinMediaSegment>(),
+    );
+  }
+
   Future<JellyfinUserProfile> getCurrentUser() async => JellyfinUserProfile.fromJson(_jsonObject(await _client.get(_uri(<String>['Users', _requireUserId()], const <String, Object?>{}), headers: headers)));
 
   Future<List<JellyfinUserProfile>> getPublicUsers() async => List<JellyfinUserProfile>.unmodifiable(_jsonList(await _client.get(_uri(<String>['Users', 'Public'], const <String, Object?>{}), headers: headers)).map(JellyfinUserProfile.fromJson));
@@ -413,4 +427,4 @@ class JellyfinApiClient {
 }
 
 int? _int(Object? value) => value is num ? value.toInt() : int.tryParse('$value');
-const _detailFields = 'PrimaryImageAspectRatio,Overview,ParentId,Taglines,Genres,Studios,People,Status,EndDate,ChildCount,RecursiveItemCount';
+const _detailFields = 'PrimaryImageAspectRatio,Overview,ParentId,Taglines,Genres,Studios,People,Status,EndDate,ChildCount,RecursiveItemCount,Chapters';

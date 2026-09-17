@@ -1,7 +1,51 @@
+import 'package:rodplayer/core/playback/advanced_playback.dart';
+import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
+
+/// Read-only, backend-neutral view binding for the currently active runtime.
+/// The coordinator replaces this atomically whenever it replaces a runtime.
+class PlaybackRuntimeViewBinding {
+  const PlaybackRuntimeViewBinding({this.engine, this.surface, this.tracks, this.advanced, this.plan, this.runtimeId});
+
+  const PlaybackRuntimeViewBinding.unavailable()
+      : engine = null,
+        surface = null,
+        tracks = null,
+        advanced = null,
+        plan = null,
+        runtimeId = null;
+
+  final PlaybackEngine? engine;
+  final PlaybackVideoSurface? surface;
+  final TrackSelectionController? tracks;
+  final AdvancedPlaybackControls? advanced;
+  final PlaybackPlan? plan;
+  final String? runtimeId;
+
+  AdvancedPlaybackCapabilities get capabilities {
+    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    return base.withTrackSelection(
+      audioTrackSwitching: trackCapabilities.audioSelection,
+      subtitleTrackSwitching: trackCapabilities.subtitleSelection,
+    );
+  }
+
+  factory PlaybackRuntimeViewBinding.fromSession(PlaybackRuntimeSession session) => PlaybackRuntimeViewBinding(
+        engine: session.engine,
+        surface: session.surface,
+        tracks: session.tracks,
+        advanced: session.advanced,
+        plan: session.plan,
+        runtimeId: session.runtimeId,
+      );
+}
+
+typedef PlaybackRuntimePreparation = Future<void> Function(PlaybackRuntimeSession session);
 
 class PlaybackRuntimeUnavailableException implements Exception {
   const PlaybackRuntimeUnavailableException(this.backendId);
@@ -43,14 +87,50 @@ class PlaybackRuntimeSession {
     required this.plan,
     required this.engine,
     this.surface,
-    this.tracks,
-  });
+    TrackSelectionController? tracks,
+    this.advanced,
+  }) : _tracks = tracks;
 
   final String runtimeId;
   final PlaybackPlan plan;
   final PlaybackEngine engine;
   final PlaybackVideoSurface? surface;
-  final TrackSelectionController? tracks;
+  TrackSelectionController? _tracks;
+  TrackSelectionController? get tracks => _tracks;
+  final AdvancedPlaybackControls? advanced;
+
+  /// Runtime controls and track selection have separate owners. Track support
+  /// is always derived from [tracks], never declared independently by controls.
+  AdvancedPlaybackCapabilities get advancedCapabilities {
+    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    return base.withTrackSelection(
+      audioTrackSwitching: trackCapabilities.audioSelection,
+      subtitleTrackSwitching: trackCapabilities.subtitleSelection,
+    );
+  }
+
+  void synchronizeMetadata(PlaybackMetadata metadata) {
+    final controls = advanced;
+    if (controls == null) return;
+    try {
+      controls.setChapters(metadata.chapters);
+    } on Object {
+      // Optional server metadata must never prevent playback activation.
+    }
+    try {
+      controls.setMarkers(metadata.markers);
+    } on Object {
+      // Keep marker synchronization isolated from chapter synchronization.
+    }
+  }
+
+  void bindLogicalSession(LogicalPlaybackSession session) {
+    final tracks = _tracks;
+    if (tracks != null && tracks is! LogicalSessionTrackSelectionController) {
+      _tracks = LogicalSessionTrackSelectionController(delegate: tracks, session: session);
+    }
+  }
   var _disposed = false;
 
   Future<void> dispose() async {
