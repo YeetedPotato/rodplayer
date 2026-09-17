@@ -68,6 +68,69 @@ void main() {
     expect(second.playing.value, isTrue);
   });
 
+  testWidgets('Stats for Nerds follows the active runtime binding', (tester) async {
+    final first = TestPlaybackEngine();
+    final second = TestPlaybackEngine();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    final firstPlan = _plan(backend: 'backend-a', source: 'source-a', container: 'mkv', codec: 'hevc');
+    final secondPlan = _plan(backend: 'backend-b', source: 'source-b', container: 'mp4', codec: 'h264');
+    final session = _session(plan: firstPlan);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(
+        engine: first,
+        surface: const _NamedSurface('first'),
+        plan: firstPlan,
+        runtimeId: 'runtime-a',
+      ),
+    );
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(
+      baseUrl: 'https://media.example.com',
+      identity: testIdentity,
+      client: _NoopClient(),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: VideoPlayerView(
+        activeBinding: binding,
+        client: client,
+        itemId: 'item',
+        logicalSession: session,
+      ),
+    ));
+    expect(find.byTooltip('Stats for Nerds'), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Semantics && widget.properties.label == 'Stats for Nerds'), findsOneWidget);
+    await tester.tap(find.byTooltip('Stats for Nerds'));
+    await tester.pumpAndSettle();
+    expect(find.text('backend-a'), findsOneWidget);
+    expect(find.text('runtime-a'), findsOneWidget);
+    expect(find.text('mkv'), findsOneWidget);
+    expect(find.text('hevc'), findsOneWidget);
+
+    binding.value = PlaybackRuntimeViewBinding(
+      engine: second,
+      surface: const _NamedSurface('second'),
+      plan: secondPlan,
+      runtimeId: 'runtime-b',
+    );
+    await tester.pump();
+    expect(find.text('backend-b'), findsOneWidget);
+    expect(find.text('runtime-b'), findsOneWidget);
+    expect(find.text('mp4'), findsOneWidget);
+    expect(find.text('h264'), findsOneWidget);
+    expect(find.text('backend-a'), findsNothing);
+    expect(find.text('runtime-a'), findsNothing);
+    expect(find.text('mkv'), findsNothing);
+    expect(find.text('hevc'), findsNothing);
+    expect(find.text('second'), findsOneWidget);
+
+    binding.value = const PlaybackRuntimeViewBinding.unavailable();
+    await tester.pump();
+    expect(find.text('Playback diagnostics unavailable'), findsOneWidget);
+    expect(find.text('backend-b'), findsNothing);
+  });
+
   testWidgets('skip marker visibility uses exact start inclusive end exclusive boundaries', (tester) async {
     final engine = _RecordingEngine();
     addTearDown(engine.dispose);
@@ -242,26 +305,37 @@ const _introMarker = PlaybackMarker(
 
 LogicalPlaybackSession _session({
   Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
+  PlaybackPlan? plan,
 }) {
-  final plan = PlaybackPlan(
-    itemId: 'item',
-    mediaSourceId: 'source',
-    playSessionId: 'play-session',
-    playMethod: PlayMethod.directPlay,
-    playbackUri: Uri.parse('https://media.example.com/Videos/item/stream'),
-    engineId: 'test',
-    source: MediaSourceInfo.fromJson(<String, dynamic>{
-      'Id': 'source',
-      'MediaStreams': <dynamic>[],
-    }),
-  );
+  final activePlan = plan ?? _plan();
   return LogicalPlaybackSession(
     id: 'logical',
     itemId: 'item',
-    activePlan: plan,
+    activePlan: activePlan,
     metadata: PlaybackMetadata(markers: markers),
   );
 }
+
+PlaybackPlan _plan({
+  String backend = 'test',
+  String source = 'source',
+  String? container,
+  String? codec,
+}) => PlaybackPlan(
+    itemId: 'item',
+    mediaSourceId: source,
+    playSessionId: 'play-session',
+    playMethod: PlayMethod.directPlay,
+    playbackUri: Uri.parse('https://media.example.com/Videos/item/stream'),
+    engineId: backend,
+    source: MediaSourceInfo.fromJson(<String, dynamic>{
+      'Id': source,
+      if (container != null) 'Container': container,
+      'MediaStreams': <dynamic>[
+        if (codec != null) <String, dynamic>{'Index': 0, 'Type': 'Video', 'Codec': codec},
+      ],
+    }),
+  );
 
 Future<void> _pumpSkipPlayer(
   WidgetTester tester,

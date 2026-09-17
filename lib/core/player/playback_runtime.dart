@@ -9,18 +9,22 @@ import 'package:rodplayer/core/player/track_controller.dart';
 /// Read-only, backend-neutral view binding for the currently active runtime.
 /// The coordinator replaces this atomically whenever it replaces a runtime.
 class PlaybackRuntimeViewBinding {
-  const PlaybackRuntimeViewBinding({this.engine, this.surface, this.tracks, this.advanced});
+  const PlaybackRuntimeViewBinding({this.engine, this.surface, this.tracks, this.advanced, this.plan, this.runtimeId});
 
   const PlaybackRuntimeViewBinding.unavailable()
       : engine = null,
         surface = null,
         tracks = null,
-        advanced = null;
+        advanced = null,
+        plan = null,
+        runtimeId = null;
 
   final PlaybackEngine? engine;
   final PlaybackVideoSurface? surface;
   final TrackSelectionController? tracks;
   final AdvancedPlaybackControls? advanced;
+  final PlaybackPlan? plan;
+  final String? runtimeId;
 
   AdvancedPlaybackCapabilities get capabilities {
     final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
@@ -36,6 +40,8 @@ class PlaybackRuntimeViewBinding {
         surface: session.surface,
         tracks: session.tracks,
         advanced: session.advanced,
+        plan: session.plan,
+        runtimeId: session.runtimeId,
       );
 }
 

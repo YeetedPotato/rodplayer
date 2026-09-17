@@ -61,8 +61,10 @@ void main() {
   test('active runtime binding follows replacement and clears on disposal', () async {
     final firstTracks = _SelectableTracks();
     final secondTracks = _SelectableTracks();
-    final first = _FakeRuntime('first', tracks: firstTracks);
-    final second = _FakeRuntime('second', tracks: secondTracks);
+    final firstSurface = _FakeSurface();
+    final secondSurface = _FakeSurface();
+    final first = _FakeRuntime('first', surface: firstSurface, tracks: firstTracks);
+    final second = _FakeRuntime('second', surface: secondSurface, tracks: secondTracks);
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
 
     await coordinator.activate(_plan('one', engineId: 'first'));
@@ -77,6 +79,9 @@ void main() {
       same(firstTracks),
     );
     expect(coordinator.activeBinding.value.engine, same(first.created.single));
+    expect(coordinator.activeBinding.value.surface, same(firstSurface));
+    expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'one');
+    expect(coordinator.activeBinding.value.runtimeId, 'first');
     await coordinator.activate(_plan('two', engineId: 'second'));
     expect(
       coordinator.activeBinding.value.tracks,
@@ -89,11 +94,16 @@ void main() {
       same(secondTracks),
     );
     expect(coordinator.activeBinding.value.engine, same(second.created.single));
+    expect(coordinator.activeBinding.value.surface, same(secondSurface));
+    expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'two');
+    expect(coordinator.activeBinding.value.runtimeId, 'second');
     await coordinator.dispose();
     expect(coordinator.activeBinding.value.engine, isNull);
     expect(coordinator.activeBinding.value.surface, isNull);
     expect(coordinator.activeBinding.value.tracks, isNull);
     expect(coordinator.activeBinding.value.advanced, isNull);
+    expect(coordinator.activeBinding.value.plan, isNull);
+    expect(coordinator.activeBinding.value.runtimeId, isNull);
   });
 
   test('preparation failure leaves the old runtime and logical plan active', () async {

@@ -8,12 +8,14 @@ import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_metadata.dart';
+import 'package:rodplayer/core/playback/playback_diagnostics.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/player/track_selector_sheet.dart';
+import 'package:rodplayer/ui/widgets/compatibility_panel.dart';
 
 class VideoPlayerView extends StatefulWidget {
   const VideoPlayerView({
@@ -262,6 +264,46 @@ class _Hud extends StatelessWidget {
                 button: true,
                 label: 'Subtitle settings',
                 child: DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow), child: IconButton(tooltip: 'Subtitle settings', color: theme.goldBright, icon: const Icon(Icons.closed_caption_outlined), onPressed: () => TrackSelectorSheet.show(context, controls: activeBinding!, onRenegotiateSubtitle: onRenegotiateSubtitle))),
+              ),
+            );
+          },
+        ),
+      if (activeBinding != null && logicalSession != null)
+        ValueListenableBuilder<PlaybackRuntimeViewBinding>(
+          valueListenable: activeBinding!,
+          builder: (_, binding, __) {
+            if (binding.plan == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(left: 10),
+              child: Semantics(
+                button: true,
+                label: 'Stats for Nerds',
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow),
+                  child: IconButton(
+                    tooltip: 'Stats for Nerds',
+                    color: theme.goldBright,
+                    icon: const Icon(Icons.info_outline),
+                    onPressed: () => showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (_) => ValueListenableBuilder<PlaybackRuntimeViewBinding>(
+                        valueListenable: activeBinding!,
+                        builder: (_, current, __) => CompatibilityPanel(
+                          snapshot: current.plan == null
+                              ? null
+                              : PlaybackDiagnosticsSnapshot.fromPlan(
+                                  plan: current.plan!,
+                                  runtimeId: current.runtimeId,
+                                  selectedAudioStreamIndex: logicalSession!.selectedAudio,
+                                  selectedSubtitleStreamIndex: logicalSession!.selectedSubtitle,
+                                ),
+                          runtimeDiagnostics: current.capabilities.diagnostics,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             );
           },
