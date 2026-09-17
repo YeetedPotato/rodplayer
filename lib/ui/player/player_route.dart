@@ -5,6 +5,7 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
+import 'package:rodplayer/core/playback/runtime_playback_recovery.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
@@ -26,10 +27,12 @@ class PlayerRoute extends StatefulWidget {
 class _PlayerRouteState extends State<PlayerRoute> {
   late final Future<_PreparedPlayback> _prepared = _prepare();
   PlaybackRuntimeCoordinator? _coordinator;
+  RuntimePlaybackRecovery? _recovery;
   var _disposed = false;
 
   Future<_PreparedPlayback> _prepare() async {
     final runtimes = await createPlatformPlaybackRuntimes();
+    if (_disposed) throw StateError('Player route was disposed during preparation');
     final decision = await PlaybackNegotiator(
       client: widget.client,
       environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(
@@ -38,17 +41,34 @@ class _PlayerRouteState extends State<PlayerRoute> {
       ),
       runtimeRegistry: runtimes.registry,
     ).negotiateDecision(itemId: widget.itemId);
+    if (_disposed) throw StateError('Player route was disposed during preparation');
     final plan = decision.plan;
     final logicalSession = LogicalPlaybackSession(id: const Uuid().v4(), itemId: widget.itemId, activePlan: plan);
     final coordinator = PlaybackRuntimeCoordinator(registry: runtimes.registry, session: logicalSession);
     _coordinator = coordinator;
+    if (_disposed) {
+      await coordinator.dispose();
+      throw StateError('Player route was disposed during preparation');
+    }
     final runtimeSession = await coordinator.activateCandidates(decision.orderedUsableCandidates);
+    if (_disposed) {
+      await coordinator.dispose();
+      throw StateError('Player route was disposed during preparation');
+    }
     unawaited(_loadOptionalMetadata(logicalSession, coordinator));
+    final negotiator = PlaybackNegotiator(
+      client: widget.client,
+      environmentProvider: createDefaultRuntimePlaybackEnvironmentProvider(identity: widget.client.identity, playbackBackendRegistry: runtimes.backendRegistry),
+      runtimeRegistry: runtimes.registry,
+    );
+    final recovery = RuntimePlaybackRecovery(coordinator: coordinator, session: logicalSession, negotiator: negotiator);
+    _recovery = recovery;
     return _PreparedPlayback(
       plan: runtimeSession.plan,
       session: logicalSession,
       runtimeSession: runtimeSession,
       coordinator: coordinator,
+      recover: recovery.recover,
       renegotiateSubtitle: (track) => _renegotiateSubtitle(
         track: track,
         coordinator: coordinator,
@@ -71,6 +91,7 @@ class _PlayerRouteState extends State<PlayerRoute> {
     required LogicalPlaybackSession session,
     required PlaybackNegotiator negotiator,
   }) async {
+    _recovery?.invalidate();
     final subtitleIndex = track.serverStreamIndex;
     if (subtitleIndex == null) {
       throw StateError('The selected subtitle has no server stream index.');
@@ -126,6 +147,7 @@ class _PlayerRouteState extends State<PlayerRoute> {
   @override
   void dispose() {
     _disposed = true;
+    _recovery?.dispose();
     unawaited(_coordinator?.dispose() ?? Future<void>.value());
     super.dispose();
   }
@@ -149,16 +171,18 @@ class _PlayerRouteState extends State<PlayerRoute> {
             logicalSession: prepared.session,
             activeBinding: prepared.coordinator.activeBinding,
             onRenegotiateSubtitle: prepared.renegotiateSubtitle,
+            onPlaybackError: prepared.recover,
           );
         },
       );
 }
 
 class _PreparedPlayback {
-  const _PreparedPlayback({required this.plan, required this.session, required this.runtimeSession, required this.coordinator, required this.renegotiateSubtitle});
+  const _PreparedPlayback({required this.plan, required this.session, required this.runtimeSession, required this.coordinator, required this.renegotiateSubtitle, required this.recover});
   final PlaybackPlan plan;
   final LogicalPlaybackSession session;
   final PlaybackRuntimeSession runtimeSession;
   final PlaybackRuntimeCoordinator coordinator;
   final Future<void> Function(RodPlayerTrack track) renegotiateSubtitle;
+  final Future<void> Function() recover;
 }

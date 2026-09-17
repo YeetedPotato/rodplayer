@@ -228,6 +228,7 @@ class AppleNativePlaybackEngine implements PlaybackEngine {
     if (handle != null) await bridge.dispose(handle);
     _handle = null;
     await load(plan);
+    if (!_disposed) error.value = null;
   }
 
   @override

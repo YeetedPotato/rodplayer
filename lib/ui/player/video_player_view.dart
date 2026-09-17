@@ -27,6 +27,7 @@ class VideoPlayerView extends StatefulWidget {
     this.itemId,
     this.logicalSession,
     this.onRenegotiateSubtitle,
+    this.onPlaybackError,
   }) : assert(activeBinding != null || (engine != null && surface != null));
 
   final PlaybackEngine? engine;
@@ -36,6 +37,7 @@ class VideoPlayerView extends StatefulWidget {
   final String? itemId;
   final LogicalPlaybackSession? logicalSession;
   final SubtitleRenegotiator? onRenegotiateSubtitle;
+  final Future<void> Function()? onPlaybackError;
 
   @override
   State<VideoPlayerView> createState() => _VideoPlayerViewState();
@@ -78,10 +80,17 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final binding = widget.activeBinding?.value;
     if (_disposed || binding?.engine == null || binding?.surface == null) return;
     _bind(binding!.engine!, binding.surface!);
+    final reporter = _reporter;
+    if (reporter != null) unawaited(reporter.synchronize(binding.engine!.position));
   }
 
   void _bind(PlaybackEngine engine, PlaybackVideoSurface surface) {
-    if (_bound && identical(_engine, engine)) return;
+    if (_bound && identical(_engine, engine)) {
+      if (identical(_surface, surface)) return;
+      _surface = surface;
+      if (mounted) setState(() {});
+      return;
+    }
     if (_bound) {
       _engine.error.removeListener(_showPlaybackError);
       _engine.playing.removeListener(_reportingStateChanged);
@@ -157,14 +166,22 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _showPlaybackError() {
-    final message = _engine.error.value;
+    final source = _engine;
+    final message = source.error.value;
+    final capturedBinding = widget.activeBinding?.value;
+    bool isCurrent() =>
+        mounted &&
+        identical(_engine, source) &&
+        source.error.value == message &&
+        (capturedBinding == null || identical(widget.activeBinding?.value, capturedBinding));
     if (!mounted || message == null || message.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
+      unawaited(widget.onPlaybackError?.call() ?? Future<void>.value());
       final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('Playback error: $message', style: TextStyle(color: theme.textPrimary)), backgroundColor: theme.obsidianRaised, behavior: SnackBarBehavior.floating, action: SnackBarAction(label: 'RETRY', textColor: theme.goldBright, onPressed: () => unawaited(_engine.retry()))));
+        ..showSnackBar(SnackBar(content: Text('Playback error: $message', style: TextStyle(color: theme.textPrimary)), backgroundColor: theme.obsidianRaised, behavior: SnackBarBehavior.floating, action: SnackBarAction(label: 'RETRY', textColor: theme.goldBright, onPressed: () { if (isCurrent()) unawaited(widget.onPlaybackError?.call() ?? Future<void>.value()); })));
     });
   }
 
@@ -275,14 +292,17 @@ class _SkipMarkerButtonState extends State<_SkipMarkerButton> {
 
   Future<void> _skip(PlaybackMarker marker) async {
     if (_busy) return;
-    final engine = widget.binding.value.engine;
+    final capturedBinding = widget.binding.value;
+    final engine = capturedBinding.engine;
     if (engine == null) return;
     setState(() => _busy = true);
     try {
       await engine.seek(marker.end);
-      widget.session.position = marker.end;
+      if (mounted && identical(widget.binding.value, capturedBinding)) {
+        widget.session.position = marker.end;
+      }
     } on Object {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to skip this segment')));
+      if (mounted && identical(widget.binding.value, capturedBinding)) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to skip this segment')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

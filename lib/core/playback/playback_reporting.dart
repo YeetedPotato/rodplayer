@@ -51,24 +51,107 @@ class PlaybackReporter {
 
   final JellyfinApiClient client;
   final LogicalPlaybackSession session;
+  PlaybackReportSnapshot? _reportedSnapshot;
+  Future<void> _tail = Future<void>.value();
 
-  Future<void> started() => client.reportPlaybackStarted(_state(Duration.zero).toJson());
-  Future<void> progress(Duration position, Duration duration, {bool paused = false}) => client.reportPlaybackProgress(_state(position, paused: paused).toJson(eventName: 'timeupdate', runtimeTicks: _ticks(duration)));
-  Future<void> stopped(Duration position) => client.reportPlaybackStopped(_state(position).toJson());
+  Future<void> started([Duration position = Duration.zero]) {
+    final snapshot = _snapshot(position);
+    return _enqueue(() async {
+      if (_reportedSnapshot == null) {
+        await client.reportPlaybackStarted(snapshot.state.toJson());
+        _reportedSnapshot = snapshot;
+      }
+    });
+  }
 
-  PlaybackReportState _state(Duration position, {bool paused = false}) {
-    final plan = session.activePlan;
+  Future<void> progress(Duration position, Duration duration, {bool paused = false}) {
+    final snapshot = _snapshot(position, duration: duration, paused: paused);
+    return _enqueue(() async {
+      await _transition(snapshot);
+      await client.reportPlaybackProgress(snapshot.state.toJson(eventName: 'timeupdate', runtimeTicks: snapshot.runtimeTicks));
+      _reportedSnapshot = snapshot;
+    });
+  }
+
+  Future<void> stopped(Duration position) {
+    final snapshot = _snapshot(position);
+    return _enqueue(() async {
+      final previous = _reportedSnapshot;
+      if (previous != null) await client.reportPlaybackStopped(snapshot.stateFor(previous).toJson());
+      _reportedSnapshot = null;
+    });
+  }
+
+  Future<void> synchronize(Duration position) {
+    final snapshot = _snapshot(position);
+    return _enqueue(() => _transition(snapshot));
+  }
+
+  Future<void> _transition(PlaybackReportSnapshot snapshot) async {
+    final previous = _reportedSnapshot;
+    if (previous?.target == snapshot.target) {
+      _reportedSnapshot = snapshot;
+      return;
+    }
+    if (previous != null) await client.reportPlaybackStopped(snapshot.stateFor(previous).toJson());
+    await client.reportPlaybackStarted(snapshot.state.toJson());
+    _reportedSnapshot = snapshot;
+  }
+
+  Future<void> _enqueue(Future<void> Function() operation) {
+    _tail = _tail.then((_) => operation()).catchError((_) {});
+    return _tail;
+  }
+
+  PlaybackReportSnapshot _snapshot(Duration position, {Duration duration = Duration.zero, bool paused = false}) {
+    final target = PlaybackReportTarget.fromSession(session);
+    return PlaybackReportSnapshot(
+      target: target,
+      state: _state(target, position, paused: paused, audioStreamIndex: session.selectedAudio, subtitleStreamIndex: session.selectedSubtitle),
+      runtimeTicks: _ticks(duration),
+    );
+  }
+
+  PlaybackReportState _state(PlaybackReportTarget target, Duration position, {bool paused = false, int? audioStreamIndex, int? subtitleStreamIndex}) {
     return PlaybackReportState(
       itemId: session.itemId,
-      playSessionId: plan.playSessionId,
-      mediaSourceId: plan.mediaSourceId,
+      playSessionId: target.playSessionId,
+      mediaSourceId: target.mediaSourceId,
       positionTicks: _ticks(position),
-      playMethod: plan.playMethod,
-      audioStreamIndex: session.selectedAudio,
-      subtitleStreamIndex: session.selectedSubtitle,
+      playMethod: target.playMethod,
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
       isPaused: paused,
     );
   }
 
   static int _ticks(Duration duration) => duration.inMicroseconds * 10;
+}
+
+class PlaybackReportSnapshot {
+  const PlaybackReportSnapshot({required this.target, required this.state, required this.runtimeTicks});
+  final PlaybackReportTarget target;
+  final PlaybackReportState state;
+  final int runtimeTicks;
+  PlaybackReportState stateFor(PlaybackReportSnapshot previous) => PlaybackReportState(itemId: state.itemId, playSessionId: previous.target.playSessionId, mediaSourceId: previous.target.mediaSourceId, positionTicks: state.positionTicks, playMethod: previous.target.playMethod, audioStreamIndex: previous.state.audioStreamIndex, subtitleStreamIndex: previous.state.subtitleStreamIndex, isPaused: state.isPaused, isMuted: state.isMuted, volumeLevel: state.volumeLevel, canSeek: state.canSeek);
+}
+
+class PlaybackReportTarget {
+  const PlaybackReportTarget({required this.playSessionId, required this.mediaSourceId, required this.playMethod});
+
+  factory PlaybackReportTarget.fromSession(LogicalPlaybackSession session) => PlaybackReportTarget(
+    playSessionId: session.activePlan.playSessionId,
+    mediaSourceId: session.activePlan.mediaSourceId,
+    playMethod: session.activePlan.playMethod,
+  );
+
+  final String? playSessionId;
+  final String mediaSourceId;
+  final PlayMethod playMethod;
+
+  @override
+  bool operator ==(Object other) => other is PlaybackReportTarget && other.playSessionId == playSessionId && other.mediaSourceId == mediaSourceId && other.playMethod == playMethod;
+
+  @override
+  int get hashCode => Object.hash(playSessionId, mediaSourceId, playMethod);
 }

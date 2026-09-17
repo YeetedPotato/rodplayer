@@ -194,6 +194,20 @@ void main() {
     expect(second.playing.value, isTrue);
   });
 
+  testWidgets('VideoPlayerView replaces a surface without rebinding the same engine', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
+    expect(find.text('first'), findsOneWidget);
+    binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
+    await tester.pump();
+    expect(find.text('second'), findsOneWidget);
+    expect(find.text('first'), findsNothing);
+  });
+
   testWidgets('Stats for Nerds follows the active runtime binding', (tester) async {
     final first = TestPlaybackEngine();
     final second = TestPlaybackEngine();
@@ -419,6 +433,100 @@ void main() {
     expect(first.seekCalls, isEmpty);
     expect(second.seekCalls, <Duration>[const Duration(seconds: 3)]);
     expect(session.position, const Duration(seconds: 3));
+  });
+
+  testWidgets('stale skip completion cannot update the logical position', (tester) async {
+    final gate = Completer<void>();
+    final first = _RecordingEngine(id: 'first')..position = const Duration(seconds: 2);
+    final second = _RecordingEngine(id: 'second')..position = const Duration(seconds: 2);
+    first.seekHandler = (_) => gate.future;
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    final session = _session(markers: const <PlaybackMarker>[_introMarker])..position = const Duration(seconds: 1);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: first, surface: const _FakeSurface()));
+    addTearDown(binding.dispose);
+    await _pumpSkipPlayer(tester, binding, session);
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+    binding.value = PlaybackRuntimeViewBinding(engine: second, surface: const _FakeSurface());
+    gate.complete();
+    await tester.pump();
+    expect(session.position, const Duration(seconds: 1));
+  });
+
+  testWidgets('same-engine binding replacement invalidates a pending skip', (tester) async {
+    final gate = Completer<void>();
+    final engine = _RecordingEngine()..position = const Duration(seconds: 2);
+    engine.seekHandler = (_) => gate.future;
+    addTearDown(engine.dispose);
+    final session = _session(markers: const <PlaybackMarker>[_introMarker])..position = const Duration(seconds: 1);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
+    addTearDown(binding.dispose);
+    await _pumpSkipPlayer(tester, binding, session);
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+    binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
+    gate.complete();
+    await tester.pump();
+    expect(session.position, const Duration(seconds: 1));
+  });
+
+  testWidgets('same-engine binding replacement suppresses a stale skip failure', (tester) async {
+    final gate = Completer<void>();
+    final engine = _RecordingEngine()..position = const Duration(seconds: 2);
+    engine.seekHandler = (_) async { await gate.future; throw StateError('stale'); };
+    addTearDown(engine.dispose);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
+    addTearDown(binding.dispose);
+    await _pumpSkipPlayer(tester, binding, _session(markers: const <PlaybackMarker>[_introMarker]));
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+    binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
+    gate.complete();
+    await tester.pump();
+    expect(find.text('Unable to skip this segment'), findsNothing);
+  });
+
+  testWidgets('same-engine binding replacement suppresses a pending playback error', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    var recoveries = 0;
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client, onPlaybackError: () async { recoveries++; })));
+    engine.error.value = 'old failure';
+    binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
+    await tester.pump();
+    expect(find.text('Playback error: old failure'), findsNothing);
+    expect(recoveries, 0);
+  });
+
+  testWidgets('error retry only recovers while its binding and error remain current', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    var recoveries = 0;
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client, onPlaybackError: () async { recoveries++; })));
+    engine.error.value = 'failure';
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('RETRY'), findsOneWidget);
+    expect(recoveries, 1);
+    final staleRetry = tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed;
+    engine.error.value = null;
+    staleRetry();
+    await tester.pump();
+    expect(recoveries, 1);
+    engine.error.value = 'current failure';
+    await tester.pump();
+    await tester.pump();
+    final currentRetry = tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed;
+    currentRetry();
+    await tester.pump();
+    expect(recoveries, 3);
   });
 }
 
