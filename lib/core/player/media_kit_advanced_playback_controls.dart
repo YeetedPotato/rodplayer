@@ -59,7 +59,7 @@ class MediaKitAdvancedPlaybackControls implements AdvancedPlaybackControls {
   final MediaKitAdvancedPlaybackBackend _backend;
 
   AdvancedPlaybackCapabilities _capabilities = const AdvancedPlaybackCapabilities(
-    playbackRate: CapabilitySupport.unknown,
+    playbackRate: CapabilitySupport.supported,
     audioDelay: CapabilitySupport.unknown,
     subtitleDelay: CapabilitySupport.unknown,
     subtitleStyling: CapabilitySupport.unknown,

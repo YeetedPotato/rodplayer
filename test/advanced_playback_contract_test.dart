@@ -127,7 +127,7 @@ void main() {
     final backend = _FakeMediaKitAdvancedBackend();
     final controls = MediaKitAdvancedPlaybackControls.forTesting(backend);
 
-    expect(controls.capabilities.playbackRate, CapabilitySupport.unknown);
+    expect(controls.capabilities.playbackRate, CapabilitySupport.supported);
     expect(controls.capabilities.audioDelay, CapabilitySupport.unknown);
     expect(controls.capabilities.subtitleDelay, CapabilitySupport.unknown);
 
@@ -156,7 +156,7 @@ void main() {
     expect(controls.rate.value, 1);
     expect(controls.audioDelay.value, Duration.zero);
     expect(controls.subtitleDelay.value, Duration.zero);
-    expect(controls.capabilities.playbackRate, CapabilitySupport.unknown);
+    expect(controls.capabilities.playbackRate, CapabilitySupport.supported);
     expect(controls.capabilities.audioDelay, CapabilitySupport.unknown);
     expect(controls.capabilities.subtitleDelay, CapabilitySupport.unknown);
   });
