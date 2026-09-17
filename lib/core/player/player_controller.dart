@@ -4,12 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_coordinator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
+import 'package:rodplayer/core/player/media_kit_advanced_playback_controls.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 
 /// The media_kit/mpv playback backend. mpv options are deliberately centralized
@@ -18,7 +18,7 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   MediaKitPlaybackEngine({this.onError, this.coordinator}) {
     player = Player(configuration: const PlayerConfiguration());
     controller = VideoController(player);
-    advanced = AdvancedPlaybackController(player);
+    advanced = MediaKitAdvancedPlaybackControls(player);
     _subscriptions = <StreamSubscription<Object?>>[
       player.stream.error.listen(_handleError),
       player.stream.position.listen(_handlePositionChanged),
@@ -31,7 +31,7 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
 
   late final Player player;
   late final VideoController controller;
-  late final AdvancedPlaybackController advanced;
+  late final MediaKitAdvancedPlaybackControls advanced;
   final void Function(String error)? onError;
   final PlaybackCoordinator? coordinator;
 
@@ -242,6 +242,7 @@ class MediaKitPlaybackRuntime implements PlaybackBackendRuntime {
       engine: engine,
       surface: MediaKitPlaybackVideoSurface(engine),
       tracks: MediaKitTrackSelectionController.forPlan(engine.player, plan),
+      advanced: engine.advanced,
     );
   }
 }

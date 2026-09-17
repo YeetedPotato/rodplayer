@@ -108,6 +108,8 @@ void main() {
 
     final session = await AndroidNativePlaybackRuntime(bridge: _FakeAndroidBridge(available: true)).open(_plan());
     expect(session.surface, isA<AndroidNativePlaybackVideoSurface>());
+    expect(session.advanced, isNull);
+    expect(session.advancedCapabilities.playbackRate, CapabilitySupport.unsupported);
   });
 
   test('android native can compete with media kit through existing scorer', () {

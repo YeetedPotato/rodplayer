@@ -1,3 +1,4 @@
+import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_engine.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
@@ -44,6 +45,7 @@ class PlaybackRuntimeSession {
     required this.engine,
     this.surface,
     this.tracks,
+    this.advanced,
   });
 
   final String runtimeId;
@@ -51,6 +53,10 @@ class PlaybackRuntimeSession {
   final PlaybackEngine engine;
   final PlaybackVideoSurface? surface;
   final TrackSelectionController? tracks;
+  final AdvancedPlaybackControls? advanced;
+
+  /// Explicit all-unsupported fallback for runtimes without advanced controls.
+  AdvancedPlaybackCapabilities get advancedCapabilities => advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
   var _disposed = false;
 
   Future<void> dispose() async {
