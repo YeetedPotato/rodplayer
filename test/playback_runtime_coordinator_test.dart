@@ -66,10 +66,28 @@ void main() {
     final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
 
     await coordinator.activate(_plan('one', engineId: 'first'));
-    expect(coordinator.activeBinding.value.tracks, same(firstTracks));
+    expect(
+      coordinator.activeBinding.value.tracks,
+      isA<LogicalSessionTrackSelectionController>(),
+    );
+    expect(
+      (coordinator.activeBinding.value.tracks!
+              as LogicalSessionTrackSelectionController)
+          .delegate,
+      same(firstTracks),
+    );
     expect(coordinator.activeBinding.value.engine, same(first.created.single));
     await coordinator.activate(_plan('two', engineId: 'second'));
-    expect(coordinator.activeBinding.value.tracks, same(secondTracks));
+    expect(
+      coordinator.activeBinding.value.tracks,
+      isA<LogicalSessionTrackSelectionController>(),
+    );
+    expect(
+      (coordinator.activeBinding.value.tracks!
+              as LogicalSessionTrackSelectionController)
+          .delegate,
+      same(secondTracks),
+    );
     expect(coordinator.activeBinding.value.engine, same(second.created.single));
     await coordinator.dispose();
     expect(coordinator.activeBinding.value.engine, isNull);
