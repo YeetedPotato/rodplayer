@@ -7,7 +7,7 @@ void main() {
     final allowed = <String>{'lib/core/security/credential_migration.dart', 'lib/core/device/installation_identity.dart'};
     final files = Directory('lib').listSync(recursive: true).whereType<File>().where((file) => file.path.endsWith('.dart'));
     for (final file in files) {
-      final relative = file.path.replaceFirst('./', '');
+      final relative = file.path.replaceAll(Platform.pathSeparator, '/').replaceFirst('./', '');
       if (allowed.contains(relative)) continue;
       expect(file.readAsStringSync().toLowerCase(), isNot(contains('remux')), reason: relative);
     }

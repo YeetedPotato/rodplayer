@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rodplayer/core/api/models/media_segment.dart';
+import 'package:rodplayer/core/playback/advanced_playback.dart';
 import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
@@ -75,6 +77,120 @@ void main() {
 
     expect(session.metadata.chapters.single.title, 'Opening');
     expect(session.activePlan.engineId, 'two');
+  });
+
+
+  test('media segment DTO rejects invalid ranges and preserves unknown type', () {
+    expect(JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Type': 'Intro',
+      'EndTicks': 20000000,
+    }), isNull);
+    expect(JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Type': 'Intro',
+      'StartTicks': 10000000,
+    }), isNull);
+    expect(JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Type': 'Intro',
+      'StartTicks': -1,
+      'EndTicks': 10000000,
+    }), isNull);
+    expect(JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Type': 'Intro',
+      'StartTicks': 10000000,
+      'EndTicks': 10000000,
+    }), isNull);
+    expect(JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Type': 'Intro',
+      'StartTicks': 20000000,
+      'EndTicks': 10000000,
+    }), isNull);
+
+    final unknown = JellyfinMediaSegment.fromJson(<String, dynamic>{
+      'Id': 'unknown-id',
+      'ItemId': 'item',
+      'Type': 'CustomServerMarker',
+      'StartTicks': 10000000,
+      'EndTicks': 20000000,
+    });
+
+    expect(unknown, isNotNull);
+    expect(unknown!.type, 'CustomServerMarker');
+    expect(unknown.id, 'unknown-id');
+    expect(unknown.itemId, 'item');
+    expect(unknown.start, const Duration(seconds: 1));
+    expect(unknown.end, const Duration(seconds: 2));
+  });
+
+  test('only Intro and Outro marker kinds are actionable', () {
+    PlaybackMarker marker(String kind) => PlaybackMarker(
+          kind: kind,
+          start: const Duration(seconds: 1),
+          end: const Duration(seconds: 2),
+        );
+
+    expect(marker('Intro').skipAction?.label, 'Skip Intro');
+    expect(marker('Outro').skipAction?.label, 'Skip Outro');
+
+    for (final kind in <String>[
+      'Recap',
+      'Preview',
+      'Commercial',
+      'Unknown',
+      'custom',
+      'Credits',
+    ]) {
+      expect(marker(kind).skipAction, isNull, reason: kind);
+    }
+  });
+
+  test('chapter names never create skip markers', () {
+    final metadata = PlaybackMetadata.fromLibraryItem(_item(<String, dynamic>{
+      'Chapters': <Map<String, dynamic>>[
+        <String, dynamic>{'Name': 'Intro', 'StartTicks': 0},
+        <String, dynamic>{'Name': 'Opening', 'StartTicks': 10000000},
+        <String, dynamic>{'Name': 'OP', 'StartTicks': 20000000},
+        <String, dynamic>{'Name': 'Ending', 'StartTicks': 30000000},
+      ],
+    }));
+
+    expect(
+      metadata.chapters.map((chapter) => chapter.title),
+      <String>['Intro', 'Opening', 'OP', 'Ending'],
+    );
+    expect(metadata.markers, isEmpty);
+  });
+
+  test('authoritative empty segments clear markers while unavailable preserves prior metadata', () {
+    final existing = PlaybackMetadata(
+      markers: const <PlaybackMarker>[
+        PlaybackMarker(
+          kind: 'Intro',
+          start: Duration(seconds: 1),
+          end: Duration(seconds: 2),
+        ),
+      ],
+    );
+
+    final unavailable = existing;
+    final authoritativeEmpty = existing.withMediaSegments(const <PlaybackMarker>[]);
+    final authoritativeDeduplicated = existing.withMediaSegments(const <PlaybackMarker>[
+      PlaybackMarker(
+        kind: 'Outro',
+        start: Duration(seconds: 10),
+        end: Duration(seconds: 12),
+      ),
+      PlaybackMarker(
+        kind: 'Outro',
+        start: Duration(seconds: 10),
+        end: Duration(seconds: 12),
+      ),
+    ]);
+
+    expect(unavailable.markers, hasLength(1));
+    expect(unavailable.markers.single.kind, 'Intro');
+    expect(authoritativeEmpty.markers, isEmpty);
+    expect(authoritativeDeduplicated.markers, hasLength(1));
+    expect(authoritativeDeduplicated.markers.single.kind, 'Outro');
   });
 }
 

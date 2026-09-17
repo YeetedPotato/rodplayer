@@ -5,6 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/api/models/media_source_info.dart';
+import 'package:rodplayer/core/api/models/play_method.dart';
+import 'package:rodplayer/core/playback/advanced_playback.dart';
+import 'package:rodplayer/core/playback/logical_playback_session.dart';
+import 'package:rodplayer/core/playback/playback_metadata.dart';
+import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
@@ -61,6 +67,241 @@ void main() {
     expect(first.playing.value, isFalse);
     expect(second.playing.value, isTrue);
   });
+
+  testWidgets('skip marker visibility uses exact start inclusive end exclusive boundaries', (tester) async {
+    final engine = _RecordingEngine();
+    addTearDown(engine.dispose);
+    final session = _session(markers: const <PlaybackMarker>[_introMarker]);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()),
+    );
+    addTearDown(binding.dispose);
+
+    engine.position = const Duration(milliseconds: 999);
+    await _pumpSkipPlayer(tester, binding, session);
+    expect(find.text('Skip Intro'), findsNothing);
+
+    engine.position = const Duration(seconds: 1);
+    await tester.pump();
+    expect(find.text('Skip Intro'), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Semantics && widget.properties.label == 'Skip Intro'), findsOneWidget);
+
+    engine.position = const Duration(seconds: 2);
+    await tester.pump();
+    expect(find.text('Skip Intro'), findsOneWidget);
+
+    engine.position = const Duration(seconds: 3);
+    await tester.pump();
+    expect(find.text('Skip Intro'), findsNothing);
+
+    session.updateMetadata(
+      PlaybackMetadata(
+        markers: const <PlaybackMarker>[
+          PlaybackMarker(
+            kind: 'Recap',
+            start: Duration(seconds: 1),
+            end: Duration(seconds: 3),
+          ),
+        ],
+      ),
+    );
+    engine.position = const Duration(seconds: 2);
+    await tester.pump();
+    expect(find.text('Skip Intro'), findsNothing);
+    expect(find.text('Skip Outro'), findsNothing);
+  });
+
+  testWidgets('skip marker seeks exactly to marker end and updates logical position after success', (tester) async {
+    final engine = _RecordingEngine();
+    addTearDown(engine.dispose);
+    final session = _session(markers: const <PlaybackMarker>[_introMarker])
+      ..position = const Duration(milliseconds: 250);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()),
+    );
+    addTearDown(binding.dispose);
+    engine.position = const Duration(seconds: 2);
+
+    await _pumpSkipPlayer(tester, binding, session);
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+
+    expect(engine.seekCalls, <Duration>[const Duration(seconds: 3)]);
+    expect(session.position, const Duration(seconds: 3));
+  });
+
+  testWidgets('failed skip does not fake logical position and shows feedback', (tester) async {
+    final engine = _RecordingEngine();
+    addTearDown(engine.dispose);
+    engine.seekHandler = (_) async => throw StateError('seek failed');
+    final session = _session(markers: const <PlaybackMarker>[_introMarker])
+      ..position = const Duration(milliseconds: 250);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()),
+    );
+    addTearDown(binding.dispose);
+    engine.position = const Duration(seconds: 2);
+
+    await _pumpSkipPlayer(tester, binding, session);
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+
+    expect(engine.seekCalls, <Duration>[const Duration(seconds: 3)]);
+    expect(session.position, const Duration(milliseconds: 250));
+    expect(find.text('Unable to skip this segment'), findsOneWidget);
+    expect(find.text('Skip Intro'), findsOneWidget);
+  });
+
+  testWidgets('skip marker ignores duplicate activation while seek is pending', (tester) async {
+    final gate = Completer<void>();
+    final engine = _RecordingEngine();
+    addTearDown(engine.dispose);
+    engine.seekHandler = (_) => gate.future;
+    final session = _session(markers: const <PlaybackMarker>[_introMarker])
+      ..position = const Duration(milliseconds: 250);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()),
+   );
+    addTearDown(binding.dispose);
+    engine.position = const Duration(seconds: 2);
+
+    await _pumpSkipPlayer(tester, binding, session);
+    final button = tester.widget<FilledButton>(find.byType(FilledButton));
+    button.onPressed!();
+    button.onPressed!();
+    await tester.pump();
+
+    expect(engine.seekCalls, <Duration>[const Duration(seconds: 3)]);
+    expect(session.position, const Duration(milliseconds: 250));
+
+    gate.complete();
+    await tester.pump();
+
+    expect(session.position, const Duration(seconds: 3));
+  });
+
+  testWidgets('skip marker reacts when server metadata arrives asynchronously', (tester) async {
+    final engine = _RecordingEngine();
+    addTearDown(engine.dispose);
+    final session = _session();
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()),
+   );
+    addTearDown(binding.dispose);
+    engine.position = const Duration(seconds: 2);
+
+    await _pumpSkipPlayer(tester, binding, session);
+    expect(find.text('Skip Intro'), findsNothing);
+
+    session.updateMetadata(
+      PlaybackMetadata(markers: const <PlaybackMarker>[_introMarker]),
+    );
+    await tester.pump();
+
+    expect(find.text('Skip Intro'), findsOneWidget);
+  });
+
+  testWidgets('skip marker follows active runtime replacement and never seeks stale engine', (tester) async {
+    final first = _RecordingEngine(id: 'first');
+    final second = _RecordingEngine(id: 'second');
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    first.position = const Duration(seconds: 2);
+    second.position = const Duration(seconds: 2);
+    final session = _session(markers: const <PlaybackMarker>[_introMarker]);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(
+      PlaybackRuntimeViewBinding(engine: first, surface: const _NamedSurface('first')),
+   );
+    addTearDown(binding.dispose);
+
+    await _pumpSkipPlayer(tester, binding, session);
+    expect(find.text('first'), findsOneWidget);
+
+    binding.value = PlaybackRuntimeViewBinding(
+      engine: second,
+      surface: const _NamedSurface('second'),
+    );
+    await tester.pump();
+    expect(find.text('second'), findsOneWidget);
+
+    await tester.tap(find.text('Skip Intro'));
+    await tester.pump();
+
+    expect(first.seekCalls, isEmpty);
+    expect(second.seekCalls, <Duration>[const Duration(seconds: 3)]);
+    expect(session.position, const Duration(seconds: 3));
+  });
+}
+
+
+const _introMarker = PlaybackMarker(
+  kind: 'Intro',
+  start: Duration(seconds: 1),
+  end: Duration(seconds: 3),
+);
+
+LogicalPlaybackSession _session({
+  Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
+}) {
+  final plan = PlaybackPlan(
+    itemId: 'item',
+    mediaSourceId: 'source',
+    playSessionId: 'play-session',
+    playMethod: PlayMethod.directPlay,
+    playbackUri: Uri.parse('https://media.example.com/Videos/item/stream'),
+    engineId: 'test',
+    source: MediaSourceInfo.fromJson(<String, dynamic>{
+      'Id': 'source',
+      'MediaStreams': <dynamic>[],
+    }),
+  );
+  return LogicalPlaybackSession(
+    id: 'logical',
+    itemId: 'item',
+    activePlan: plan,
+    metadata: PlaybackMetadata(markers: markers),
+  );
+}
+
+Future<void> _pumpSkipPlayer(
+  WidgetTester tester,
+  ValueNotifier<PlaybackRuntimeViewBinding> binding,
+  LogicalPlaybackSession session,
+) async {
+  final client = JellyfinApiClient(
+    baseUrl: 'https://media.example.com',
+    identity: testIdentity,
+    client: _NoopClient(),
+  );
+  await tester.pumpWidget(
+    MaterialApp(
+      home: VideoPlayerView(
+        activeBinding: binding,
+        client: client,
+        itemId: 'item',
+        logicalSession: session,
+      ),
+    ),
+  );
+  await tester.pump();
+}
+
+class _RecordingEngine extends TestPlaybackEngine {
+  _RecordingEngine({super.id});
+
+  final List<Duration> seekCalls = <Duration>[];
+  Future<void> Function(Duration)? seekHandler;
+
+  @override
+  Future<void> seek(Duration position) async {
+    seekCalls.add(position);
+    final handler = seekHandler;
+    if (handler != null) {
+      await handler(position);
+      return;
+    }
+    await super.seek(position);
+  }
 }
 
 class _FakeSurface implements PlaybackVideoSurface {

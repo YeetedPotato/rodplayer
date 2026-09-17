@@ -512,4 +512,109 @@ void main() {
     expect(uri.queryParameters, containsPair('subtitleStreamIndex', '6'));
     expect(uri.queryParameters, containsPair('api_key', 'token'));
   });
+
+
+  test('getMediaSegments preserves base path, item identity, auth, and QueryResult parsing', () async {
+    final mock = MockClient((request) async => http.Response(
+          jsonEncode(<String, dynamic>{
+            'Items': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'Id': 'segment-id',
+                'ItemId': 'item/id',
+                'Type': 'Intro',
+                'StartTicks': 10000000,
+                'EndTicks': 30000000,
+              },
+            ],
+            'TotalRecordCount': 1,
+            'StartIndex': 0,
+          }),
+          200,
+        ));
+    final client = JellyfinApiClient(
+      baseUrl: '$base/jellyfin',
+      identity: testIdentity,
+      client: mock,
+    )
+      ..accessToken = 'Bearer secret'
+      ..userId = 'must-not-be-sent';
+
+    final segments = await client.getMediaSegments(itemId: 'item/id');
+
+    final request = mock.requests.single;
+    expect(request.url.path, '/jellyfin/MediaSegments/item%2Fid');
+    expect(request.url.queryParameters, isEmpty);
+    expect(request.url.queryParameters.containsKey('UserId'), isFalse);
+    expect(request.headers['Authorization'], contains('Token="secret"'));
+    expect(segments, isNotNull);
+    expect(segments, hasLength(1));
+    final segment = segments!.single;
+    expect(segment.id, 'segment-id');
+    expect(segment.itemId, 'item/id');
+    expect(segment.type, 'Intro');
+    expect(segment.start, const Duration(seconds: 1));
+    expect(segment.end, const Duration(seconds: 3));
+  });
+
+  test('getMediaSegments treats successful empty Items as authoritative empty', () async {
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      client: MockClient((_) async => http.Response(
+            jsonEncode(<String, dynamic>{
+              'Items': <dynamic>[],
+              'TotalRecordCount': 0,
+              'StartIndex': 0,
+            }),
+            200,
+          )),
+    );
+
+    final segments = await client.getMediaSegments(itemId: 'item');
+    expect(segments, isNotNull);
+    expect(segments, isEmpty);
+  });
+
+  test('getMediaSegments treats 404 and 405 as endpoint unavailable', () async {
+    for (final status in <int>[404, 405]) {
+      final client = JellyfinApiClient(
+        baseUrl: base,
+        identity: testIdentity,
+        client: MockClient((_) async => http.Response('', status)),
+      );
+      expect(await client.getMediaSegments(itemId: 'item'), isNull);
+    }
+  });
+
+  test('getMediaSegments surfaces non-availability HTTP failures', () async {
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      client: MockClient((_) async => http.Response('failure', 500)),
+    );
+
+    await expectLater(
+      client.getMediaSegments(itemId: 'item'),
+      throwsA(isA<ServerConnectionException>()),
+    );
+  });
+
+  test('getMediaSegments rejects malformed QueryResult without Items', () async {
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      client: MockClient((_) async => http.Response(
+            jsonEncode(<String, dynamic>{
+              'TotalRecordCount': 0,
+              'StartIndex': 0,
+            }),
+            200,
+          )),
+    );
+
+    await expectLater(
+      client.getMediaSegments(itemId: 'item'),
+      throwsA(isA<ServerConnectionException>()),
+    );
+  });
 }

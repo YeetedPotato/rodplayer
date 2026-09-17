@@ -72,7 +72,9 @@ class _PlayerRouteState extends State<PlayerRoute> {
     required PlaybackNegotiator negotiator,
   }) async {
     final subtitleIndex = track.serverStreamIndex;
-    if (subtitleIndex == null) throw StateError('The selected subtitle has no server stream index.');
+    if (subtitleIndex == null) {
+      throw StateError('The selected subtitle has no server stream index.');
+    }
     final current = coordinator.active;
     final position = current?.engine.position ?? session.position;
     final wasPlaying = current?.engine.playing.value ?? false;
@@ -107,9 +109,13 @@ class _PlayerRouteState extends State<PlayerRoute> {
     }
     if (session.activePlan.source.hasSegments != true) return;
     try {
-      final sourceId = session.activePlan.source.id;
       final segments = await widget.client.getMediaSegments(itemId: session.itemId);
-      if (_disposed || !mounted || !identical(_coordinator, coordinator) || session.activePlan.source.id != sourceId || segments == null) return;
+      if (_disposed ||
+          !mounted ||
+          !identical(_coordinator, coordinator) ||
+          segments == null) {
+        return;
+      }
       session.updateMetadata(session.metadata.withMediaSegments(segments.map((segment) => segment.marker)));
       coordinator.synchronizeActiveMetadata();
     } on Object {
