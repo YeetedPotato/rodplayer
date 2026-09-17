@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
-import 'package:rodplayer/core/playback/playback_metadata.dart';
 import 'package:rodplayer/core/playback/playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
