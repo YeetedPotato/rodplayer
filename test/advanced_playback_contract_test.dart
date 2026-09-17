@@ -85,15 +85,15 @@ class _FakeAdvancedControls implements AdvancedPlaybackControls {
     accurateSeek: CapabilitySupport.supported,
   );
   @override
-  final rate = ValueNotifier<double>(1);
+  final ValueNotifier<double> rate = ValueNotifier<double>(1);
   @override
-  final audioDelay = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> audioDelay = ValueNotifier<Duration>(Duration.zero);
   @override
-  final subtitleDelay = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> subtitleDelay = ValueNotifier<Duration>(Duration.zero);
   @override
-  final chapters = ValueNotifier<List<PlaybackChapter>>(<PlaybackChapter>[]);
+  final ValueNotifier<List<PlaybackChapter>> chapters = ValueNotifier<List<PlaybackChapter>>(<PlaybackChapter>[]);
   @override
-  final markers = ValueNotifier<List<PlaybackMarker>>(<PlaybackMarker>[]);
+  final ValueNotifier<List<PlaybackMarker>> markers = ValueNotifier<List<PlaybackMarker>>(<PlaybackMarker>[]);
 
   @override
   Future<void> adjustAudioDelay(Duration value) async => audioDelay.value = value;
