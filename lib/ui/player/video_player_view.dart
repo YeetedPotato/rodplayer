@@ -219,11 +219,12 @@ class _SkipMarkerButtonState extends State<_SkipMarkerButton> {
                 }
                 final action = marker?.skipAction;
                 if (marker == null || action == null) return const SizedBox.shrink();
+                final actionableMarker = marker;
                 return Semantics(
                   button: true,
                   label: action.label,
                   child: FilledButton.icon(
-                    onPressed: _busy ? null : () => unawaited(_skip(marker)),
+                    onPressed: _busy ? null : () => unawaited(_skip(actionableMarker)),
                     icon: const Icon(Icons.skip_next),
                     label: Text(action.label),
                   ),
@@ -233,6 +234,7 @@ class _SkipMarkerButtonState extends State<_SkipMarkerButton> {
           },
         ),
       );
+}
 
 class _Hud extends StatelessWidget {
   const _Hud({required this.engine, this.logicalSession, this.activeBinding, this.onRenegotiateSubtitle});

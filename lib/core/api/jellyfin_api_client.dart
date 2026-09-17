@@ -286,12 +286,15 @@ class JellyfinApiClient {
       ).items;
 
   /// Jellyfin 10.10+ media segments are keyed by the logical video item ID.
-  /// Older servers that do not expose this optional endpoint simply have none.
-  Future<List<JellyfinMediaSegment>> getMediaSegments({required String itemId}) async {
-    final response = await _client.get(_uri(<String>['MediaSegments', itemId], <String, Object?>{'UserId': _requireUserId()}), headers: headers);
-    if (response.statusCode == 404 || response.statusCode == 405) return const <JellyfinMediaSegment>[];
+  /// Returns null only when an older server does not expose this endpoint.
+  Future<List<JellyfinMediaSegment>?> getMediaSegments({required String itemId}) async {
+    final response = await _client.get(_uri(<String>['MediaSegments', itemId], const <String, Object?>{}), headers: headers);
+    if (response.statusCode == 404 || response.statusCode == 405) return null;
+    final body = _jsonObject(response);
+    final items = body['Items'];
+    if (items is! List) throw ServerConnectionException('Server returned malformed media segment response');
     return List<JellyfinMediaSegment>.unmodifiable(
-      _jsonList(response).map(JellyfinMediaSegment.fromJson).whereType<JellyfinMediaSegment>(),
+      items.whereType<Map>().map((item) => JellyfinMediaSegment.fromJson(Map<String, dynamic>.from(item))).whereType<JellyfinMediaSegment>(),
     );
   }
 

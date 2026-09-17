@@ -13,7 +13,6 @@ class PlaybackMetadata {
     Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
     Iterable<MediaStream> serverStreams = const <MediaStream>[],
     this.duration,
-    this.mediaSourceId,
   })  : chapters = List<PlaybackChapter>.unmodifiable(chapters),
         markers = List<PlaybackMarker>.unmodifiable(markers),
         serverStreams = List<MediaStream>.unmodifiable(serverStreams);
@@ -22,7 +21,6 @@ class PlaybackMetadata {
   final List<PlaybackMarker> markers;
   final List<MediaStream> serverStreams;
   final Duration? duration;
-  final String? mediaSourceId;
 
   factory PlaybackMetadata.fromPlan(PlaybackPlan plan) => _fromSource(plan.source);
 
@@ -43,7 +41,6 @@ class PlaybackMetadata {
       markers: itemMarkers,
       serverStreams: itemStreams.isEmpty ? serverStreams : itemStreams,
       duration: item.runTime ?? duration,
-      mediaSourceId: mediaSourceId,
     );
   }
 
@@ -52,17 +49,15 @@ class PlaybackMetadata {
         markers: _deduplicateMarkers(values),
         serverStreams: serverStreams,
         duration: duration,
-        mediaSourceId: mediaSourceId,
       );
 
   PlaybackMetadata withPlanSource(PlaybackPlan plan) {
     final source = _fromSource(plan.source);
     return PlaybackMetadata(
       chapters: chapters.isEmpty ? source.chapters : chapters,
-      markers: mediaSourceId != null && mediaSourceId != plan.source.id ? source.markers : (markers.isEmpty ? source.markers : markers),
+      markers: markers.isEmpty ? source.markers : markers,
       serverStreams: source.serverStreams.isEmpty ? serverStreams : source.serverStreams,
       duration: source.duration ?? duration,
-      mediaSourceId: plan.source.id,
     );
   }
 
@@ -71,7 +66,6 @@ class PlaybackMetadata {
         markers: _markers(source.raw),
         serverStreams: source.mediaStreams,
         duration: _ticksToDuration(source.runTimeTicks),
-        mediaSourceId: source.id,
       );
 }
 

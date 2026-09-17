@@ -29,7 +29,7 @@ class LogicalPlaybackSession {
         selectedAudio = activePlan.selectedAudioStreamIndex,
         selectedSubtitle = activePlan.selectedSubtitleStreamIndex,
         metadata = metadata ?? PlaybackMetadata.fromPlan(activePlan) {
-    metadataListenable = ValueNotifier<PlaybackMetadata>(this.metadata);
+    _metadataNotifier = ValueNotifier<PlaybackMetadata>(this.metadata);
   }
 
   final String id;
@@ -40,7 +40,8 @@ class LogicalPlaybackSession {
   int? selectedAudio;
   int? selectedSubtitle;
   PlaybackMetadata metadata;
-  late final ValueNotifier<PlaybackMetadata> metadataListenable;
+  late final ValueNotifier<PlaybackMetadata> _metadataNotifier;
+  ValueListenable<PlaybackMetadata> get metadataListenable => _metadataNotifier;
 
   void activatePlan(PlaybackPlan plan) {
     activePlan = plan;
@@ -52,7 +53,7 @@ class LogicalPlaybackSession {
 
   void updateMetadata(PlaybackMetadata value) {
     metadata = value;
-    metadataListenable.value = value;
+    _metadataNotifier.value = value;
   }
 }
 import 'package:flutter/foundation.dart';

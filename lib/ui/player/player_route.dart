@@ -98,18 +98,22 @@ class _PlayerRouteState extends State<PlayerRoute> {
   Future<void> _loadOptionalMetadata(LogicalPlaybackSession session, PlaybackRuntimeCoordinator coordinator) async {
     try {
       final item = await widget.client.getItem(widget.itemId);
-      if (_disposed || !mounted || !identical(_coordinator, coordinator)) return;
-      session.updateMetadata(session.metadata.mergeLibraryItem(item));
-      coordinator.synchronizeActiveMetadata();
-      if (session.activePlan.source.hasSegments == true) {
-        final sourceId = session.activePlan.source.id;
-        final segments = await widget.client.getMediaSegments(itemId: session.itemId);
-        if (_disposed || !mounted || !identical(_coordinator, coordinator) || session.activePlan.source.id != sourceId) return;
-        session.updateMetadata(session.metadata.withMediaSegments(segments.map((segment) => segment.marker)));
+      if (!_disposed && mounted && identical(_coordinator, coordinator)) {
+        session.updateMetadata(session.metadata.mergeLibraryItem(item));
         coordinator.synchronizeActiveMetadata();
       }
     } on Object {
       // Item metadata is optional and must never interrupt playback.
+    }
+    if (session.activePlan.source.hasSegments != true) return;
+    try {
+      final sourceId = session.activePlan.source.id;
+      final segments = await widget.client.getMediaSegments(itemId: session.itemId);
+      if (_disposed || !mounted || !identical(_coordinator, coordinator) || session.activePlan.source.id != sourceId || segments == null) return;
+      session.updateMetadata(session.metadata.withMediaSegments(segments.map((segment) => segment.marker)));
+      coordinator.synchronizeActiveMetadata();
+    } on Object {
+      // Segment metadata is optional and must never interrupt playback.
     }
   }
 

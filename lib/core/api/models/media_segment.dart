@@ -1,12 +1,13 @@
 import 'package:rodplayer/core/playback/advanced_playback.dart';
 
 class JellyfinMediaSegment {
-  const JellyfinMediaSegment({required this.type, required this.start, required this.end, this.id});
+  const JellyfinMediaSegment({required this.type, required this.start, required this.end, this.id, this.itemId});
 
   final String type;
   final Duration start;
   final Duration end;
   final String? id;
+  final String? itemId;
 
   PlaybackMarker get marker => PlaybackMarker(kind: type, start: start, end: end);
 
@@ -16,7 +17,8 @@ class JellyfinMediaSegment {
     final end = _ticks(json['EndTicks'] ?? json['EndPositionTicks']);
     if (type == null || type.isEmpty || start == null || end == null || start.isNegative || end <= start) return null;
     final id = json['Id']?.toString().trim();
-    return JellyfinMediaSegment(type: type, start: start, end: end, id: id == null || id.isEmpty ? null : id);
+    final itemId = json['ItemId']?.toString().trim();
+    return JellyfinMediaSegment(type: type, start: start, end: end, id: id == null || id.isEmpty ? null : id, itemId: itemId == null || itemId.isEmpty ? null : itemId);
   }
 }
 
