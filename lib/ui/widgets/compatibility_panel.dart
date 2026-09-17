@@ -36,6 +36,7 @@ class CompatibilityPanel extends StatelessWidget {
       if (data.subtitleStream != null) ..._subtitle(data.subtitleStream!, theme),
       _section('Runtime telemetry', theme),
       _row('Availability', switch (runtimeDiagnostics) { CapabilitySupport.supported => 'Supported', CapabilitySupport.unknown => 'Unknown', CapabilitySupport.unsupported => 'Not reported' }, theme),
+      Align(alignment: Alignment.centerRight, child: TextButton(autofocus: true, onPressed: () => Navigator.of(context).maybePop(), child: const Text('Close'))),
     ]))));
   }
 

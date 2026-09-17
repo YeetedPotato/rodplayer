@@ -43,8 +43,15 @@ class VideoPlayerView extends StatefulWidget {
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
   Timer? _keepAlive;
+  Timer? _controlsTimer;
+  final FocusNode _playerFocus = FocusNode(debugLabel: 'player-root');
+  final FocusNode _playFocus = FocusNode(debugLabel: 'player-play');
+  final FocusNode _subtitleFocus = FocusNode(debugLabel: 'player-subtitles');
+  final FocusNode _statsFocus = FocusNode(debugLabel: 'player-stats');
   bool _disposed = false;
   bool _reportInFlight = false;
+  bool _controlsVisible = true;
+  bool _sheetOpen = false;
   PlaybackReporter? _reporter;
   late PlaybackEngine _engine;
   late PlaybackVideoSurface _surface;
@@ -61,6 +68,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       unawaited(_reporter!.started());
     }
     _keepAlive = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_report()));
+    _syncControls();
   }
 
   PlaybackEngine get _bindingEngine => widget.activeBinding?.value.engine ?? widget.engine!;
@@ -85,6 +93,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _engine.error.addListener(_showPlaybackError);
     _engine.playing.addListener(_reportingStateChanged);
     _engine.buffering.addListener(_reportingStateChanged);
+    _syncControls();
     if (mounted) setState(() {});
   }
 
@@ -95,6 +104,56 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     } else if (!_disposed && _keepAlive == null) {
       _keepAlive = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_report()));
     }
+    _syncControls();
+  }
+
+  void _syncControls() {
+    _controlsTimer?.cancel();
+    if (_disposed || _sheetOpen || !_engine.playing.value || _engine.buffering.value) {
+      if (mounted && !_controlsVisible) setState(() => _controlsVisible = true);
+      return;
+    }
+    _controlsTimer = Timer(const Duration(seconds: 3), _hideControls);
+  }
+
+  void _hideControls() {
+    if (_disposed || _sheetOpen || !_engine.playing.value || _engine.buffering.value) return;
+    if (mounted) {
+      setState(() => _controlsVisible = false);
+      _playerFocus.requestFocus();
+    }
+  }
+
+  void _showControls({bool focusPlay = false}) {
+    _controlsTimer?.cancel();
+    if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
+    _syncControls();
+    if (focusPlay) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_disposed && _controlsVisible && _playFocus.context != null) _playFocus.requestFocus();
+      });
+    }
+  }
+
+  void _setSheetOpen(bool value) {
+    _sheetOpen = value;
+    if (value) {
+      _controlsTimer?.cancel();
+    } else {
+      _showControls();
+    }
+  }
+
+  Future<void> _seekBy(Duration delta) async {
+    final position = _engine.position + delta;
+    final duration = _engine.duration;
+    final target = position < Duration.zero
+        ? Duration.zero
+        : duration > Duration.zero && position > duration
+            ? duration
+            : position;
+    await _engine.seek(target);
+    _showControls();
   }
 
   void _showPlaybackError() {
@@ -142,6 +201,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _engine.playing.removeListener(_reportingStateChanged);
     _engine.buffering.removeListener(_reportingStateChanged);
     _keepAlive?.cancel();
+    _controlsTimer?.cancel();
+    _playerFocus.dispose();
+    _playFocus.dispose();
+    _subtitleFocus.dispose();
+    _statsFocus.dispose();
     unawaited(_reporter?.stopped(_engine.position));
     super.dispose();
   }
@@ -152,10 +216,32 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         child: FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
           child: Focus(
+            focusNode: _playerFocus,
             autofocus: true,
             onKeyEvent: (_, event) {
-              if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
+              if (event is! KeyDownEvent) return KeyEventResult.ignored;
+              final key = event.logicalKey;
+              final wake = key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.select || key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter;
+              if (!_controlsVisible && wake) {
+                _showControls(focusPlay: true);
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.mediaPlayPause || key == LogicalKeyboardKey.keyK) {
                 unawaited(_engine.playOrPause());
+                _showControls();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.keyJ) {
+                unawaited(_seekBy(const Duration(seconds: -10)));
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.keyL) {
+                unawaited(_seekBy(const Duration(seconds: 10)));
+                return KeyEventResult.handled;
+              }
+              if (_playerFocus.hasPrimaryFocus && key == LogicalKeyboardKey.space) {
+                unawaited(_engine.playOrPause());
+                _showControls();
                 return KeyEventResult.handled;
               }
               return KeyEventResult.ignored;
@@ -164,9 +250,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               backgroundColor: Colors.black,
               body: Stack(children: <Widget>[
                 Center(child: _surface.build(context)),
-                Positioned(top: 20, left: 20, child: _Hud(engine: _engine, logicalSession: widget.logicalSession, activeBinding: widget.activeBinding, onRenegotiateSubtitle: widget.onRenegotiateSubtitle)),
+                Positioned.fill(child: MouseRegion(onHover: (_) => _showControls(), child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: () { if (_controlsVisible && _engine.playing.value && !_engine.buffering.value) { _hideControls(); } else { _showControls(); } }))),
+                Positioned(left: 16, right: 16, bottom: 24, child: SafeArea(top: false, child: AnimatedOpacity(opacity: _controlsVisible ? 1 : 0, duration: const Duration(milliseconds: 180), child: ExcludeFocus(excluding: !_controlsVisible, child: ExcludeSemantics(excluding: !_controlsVisible, child: IgnorePointer(ignoring: !_controlsVisible, child: _Hud(engine: _engine, logicalSession: widget.logicalSession, activeBinding: widget.activeBinding, playFocus: _playFocus, subtitleFocus: _subtitleFocus, statsFocus: _statsFocus, onSeek: _seekBy, onActivity: _showControls, onSheetOpen: _setSheetOpen, onRenegotiateSubtitle: widget.onRenegotiateSubtitle))))))),
                 if (widget.activeBinding != null && widget.logicalSession != null) Positioned(right: 20, bottom: 80, child: _SkipMarkerButton(binding: widget.activeBinding!, session: widget.logicalSession!)),
-                Positioned(left: 20, right: 20, bottom: 24, child: _StatusBar(engine: _engine)),
+                Positioned(top: 20, right: 20, child: _StatusBar(engine: _engine)),
               ]),
             ),
           ),
@@ -239,18 +326,40 @@ class _SkipMarkerButtonState extends State<_SkipMarkerButton> {
 }
 
 class _Hud extends StatelessWidget {
-  const _Hud({required this.engine, this.logicalSession, this.activeBinding, this.onRenegotiateSubtitle});
+  const _Hud({required this.engine, this.logicalSession, this.activeBinding, required this.playFocus, required this.subtitleFocus, required this.statsFocus, required this.onSeek, required this.onActivity, required this.onSheetOpen, this.onRenegotiateSubtitle});
   final PlaybackEngine engine;
   final LogicalPlaybackSession? logicalSession;
   final ValueListenable<PlaybackRuntimeViewBinding>? activeBinding;
+  final FocusNode playFocus;
+  final FocusNode subtitleFocus;
+  final FocusNode statsFocus;
+  final Future<void> Function(Duration) onSeek;
+  final VoidCallback onActivity;
+  final ValueChanged<bool> onSheetOpen;
   final SubtitleRenegotiator? onRenegotiateSubtitle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final plan = logicalSession?.activePlan;
-    return Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-      ValueListenableBuilder<bool>(valueListenable: engine.playing, builder: (_, isPlaying, __) => DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow), child: IconButton(color: theme.goldBright, icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow), onPressed: () => unawaited(engine.playOrPause())))),
+    return DecoratedBox(
+      decoration: BoxDecoration(color: theme.obsidianGlassStrong, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.borderColor(0.25)), boxShadow: theme.glassShadow),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
+          ValueListenableBuilder<Duration>(valueListenable: engine.positionListenable, builder: (_, position, __) => ValueListenableBuilder<Duration>(valueListenable: engine.durationListenable, builder: (_, duration, __) {
+            final knownDuration = duration > Duration.zero;
+            final fraction = knownDuration ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0).toDouble() : null;
+            return Semantics(label: knownDuration ? 'Playback ${_time(position)} of ${_time(duration)}' : 'Playback ${_time(position)}', child: Column(children: <Widget>[
+              if (knownDuration) LinearProgressIndicator(value: fraction, minHeight: 4),
+              Align(alignment: Alignment.centerRight, child: Text(knownDuration ? '${_time(position)} / ${_time(duration)}' : _time(position), style: TextStyle(color: theme.textSecondary, fontSize: 12))),
+            ]));
+          })),
+          const SizedBox(height: 6),
+          Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: <Widget>[
+            _OsdButton(order: 1, tooltip: 'Rewind 10 seconds', icon: Icons.replay_10, onFocus: onActivity, onPressed: () { onActivity(); unawaited(onSeek(const Duration(seconds: -10))); }),
+            ValueListenableBuilder<bool>(valueListenable: engine.playing, builder: (_, isPlaying, __) => _OsdButton(order: 2, focusNode: playFocus, tooltip: isPlaying ? 'Pause' : 'Play', icon: isPlaying ? Icons.pause : Icons.play_arrow, onFocus: onActivity, onPressed: () { onActivity(); unawaited(engine.playOrPause()); })),
+            _OsdButton(order: 3, tooltip: 'Forward 10 seconds', icon: Icons.forward_10, onFocus: onActivity, onPressed: () { onActivity(); unawaited(onSeek(const Duration(seconds: 10))); }),
       if (activeBinding != null)
         ValueListenableBuilder<PlaybackRuntimeViewBinding>(
           valueListenable: activeBinding!,
@@ -258,14 +367,7 @@ class _Hud extends StatelessWidget {
             final capabilities = binding.capabilities;
             final available = capabilities.subtitleTrackSwitching != CapabilitySupport.unsupported || capabilities.subtitleDelay != CapabilitySupport.unsupported || capabilities.subtitleStyling != CapabilitySupport.unsupported;
             if (!available) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(left: 10),
-              child: Semantics(
-                button: true,
-                label: 'Subtitle settings',
-                child: DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow), child: IconButton(tooltip: 'Subtitle settings', color: theme.goldBright, icon: const Icon(Icons.closed_caption_outlined), onPressed: () => TrackSelectorSheet.show(context, controls: activeBinding!, onRenegotiateSubtitle: onRenegotiateSubtitle))),
-              ),
-            );
+            return _OsdButton(order: 4, focusNode: subtitleFocus, tooltip: 'Subtitle settings', icon: Icons.closed_caption_outlined, onFocus: onActivity, onPressed: () async { onActivity(); onSheetOpen(true); try { await TrackSelectorSheet.show(context, controls: activeBinding!, onRenegotiateSubtitle: onRenegotiateSubtitle); } finally { if (context.mounted) { onSheetOpen(false); WidgetsBinding.instance.addPostFrameCallback((_) { if (!context.mounted) return; final current = activeBinding!.value.capabilities; final availableNow = current.subtitleTrackSwitching != CapabilitySupport.unsupported || current.subtitleDelay != CapabilitySupport.unsupported || current.subtitleStyling != CapabilitySupport.unsupported; if (availableNow && subtitleFocus.context != null) { subtitleFocus.requestFocus(); } else if (playFocus.context != null) { playFocus.requestFocus(); } }); } } });
           },
         ),
       if (activeBinding != null && logicalSession != null)
@@ -273,18 +375,10 @@ class _Hud extends StatelessWidget {
           valueListenable: activeBinding!,
           builder: (_, binding, __) {
             if (binding.plan == null) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(left: 10),
-              child: Semantics(
-                button: true,
-                label: 'Stats for Nerds',
-                child: DecoratedBox(
-                  decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright, width: 2), boxShadow: theme.goldGlow),
-                  child: IconButton(
-                    tooltip: 'Stats for Nerds',
-                    color: theme.goldBright,
-                    icon: const Icon(Icons.info_outline),
-                    onPressed: () => showModalBottomSheet<void>(
+            return _OsdButton(order: 5, focusNode: statsFocus, tooltip: 'Stats for Nerds', icon: Icons.info_outline, onFocus: onActivity, onPressed: () async {
+              onActivity();
+              onSheetOpen(true);
+              try { await showModalBottomSheet<void>(
                       context: context,
                       isScrollControlled: true,
                       builder: (_) => ValueListenableBuilder<PlaybackRuntimeViewBinding>(
@@ -301,15 +395,50 @@ class _Hud extends StatelessWidget {
                           runtimeDiagnostics: current.capabilities.diagnostics,
                         ),
                       ),
-                    ),
-                  ),
-                ),
-              ),
-            );
+                    ); } finally { if (context.mounted) { onSheetOpen(false); WidgetsBinding.instance.addPostFrameCallback((_) { if (!context.mounted) return; if (activeBinding!.value.plan != null && statsFocus.context != null) { statsFocus.requestFocus(); } else if (playFocus.context != null) { playFocus.requestFocus(); } }); } }
+            });
           },
         ),
-      if (plan != null) Padding(padding: const EdgeInsets.only(left: 10), child: DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised.withValues(alpha: 0.94), borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright.withValues(alpha: 0.55))), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), child: Text(plan.playMethod.jellyfinName, style: TextStyle(color: theme.goldBright, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis)))),
-    ]);
+      if (plan != null) DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusSmall)), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), child: Text(plan.playMethod.jellyfinName, style: TextStyle(color: theme.goldBright, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis))),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  String _time(Duration value) {
+    final hours = value.inHours;
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$minutes:$seconds' : '${value.inMinutes}:$seconds';
+  }
+}
+
+class _OsdButton extends StatelessWidget {
+  const _OsdButton({required this.order, required this.tooltip, required this.icon, required this.onPressed, this.focusNode, this.onFocus});
+  final double order;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final FocusNode? focusNode;
+  final VoidCallback? onFocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(order),
+      child: Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (hasFocus) { if (hasFocus) onFocus?.call(); },
+      child: Builder(builder: (context) => AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: Focus.of(context).hasFocus ? theme.goldBright : theme.goldBright.withValues(alpha: 0.45), width: Focus.of(context).hasFocus ? 3 : 2), boxShadow: Focus.of(context).hasFocus ? theme.goldGlow : null),
+        child: Semantics(button: true, label: tooltip, child: IconButton(focusNode: focusNode, tooltip: tooltip, color: theme.goldBright, icon: Icon(icon), onPressed: onPressed)),
+      )),
+    ),
+    );
   }
 }
 

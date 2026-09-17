@@ -46,6 +46,132 @@ void main() {
     expect(engine.playing.value, isFalse);
   });
 
+  testWidgets('player OSD auto-hides only during active playback and background tap restores it', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    await engine.play();
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(_osdOpacity(tester), 0);
+    await tester.tapAt(const Offset(200, 200));
+    await tester.pump();
+    expect(_osdOpacity(tester), 1);
+    await engine.pause();
+    await tester.pump(const Duration(seconds: 4));
+    expect(_osdOpacity(tester), 1);
+  });
+
+  testWidgets('buffering keeps OSD visible and hidden controls wake on directional input', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    await engine.play();
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(_osdOpacity(tester), 0);
+    expect(tester.binding.focusManager.primaryFocus?.debugLabel, 'player-root');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(_osdOpacity(tester), 1);
+    expect(tester.binding.focusManager.primaryFocus?.debugLabel, 'player-play');
+    engine.buffering.value = true;
+    await tester.pump(const Duration(seconds: 4));
+    expect(_osdOpacity(tester), 1);
+  });
+
+  testWidgets('new engine state replaces old OSD timer state', (tester) async {
+    final paused = TestPlaybackEngine();
+    final playing = TestPlaybackEngine();
+    addTearDown(paused.dispose);
+    addTearDown(playing.dispose);
+    await playing.play();
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: paused, surface: const _FakeSurface()));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
+    binding.value = PlaybackRuntimeViewBinding(engine: playing, surface: const _FakeSurface());
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(_osdOpacity(tester), 0);
+  });
+
+  testWidgets('paused and buffering replacement engines keep OSD visible', (tester) async {
+    final playing = TestPlaybackEngine();
+    final paused = TestPlaybackEngine();
+    final buffering = TestPlaybackEngine();
+    addTearDown(playing.dispose);
+    addTearDown(paused.dispose);
+    addTearDown(buffering.dispose);
+    await playing.play();
+    buffering.buffering.value = true;
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: playing, surface: const _FakeSurface()));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
+    binding.value = PlaybackRuntimeViewBinding(engine: paused, surface: const _FakeSurface());
+    await tester.pump(const Duration(seconds: 4));
+    expect(_osdOpacity(tester), 1);
+    binding.value = PlaybackRuntimeViewBinding(engine: buffering, surface: const _FakeSurface());
+    await tester.pump(const Duration(seconds: 4));
+    expect(_osdOpacity(tester), 1);
+  });
+
+  testWidgets('player keyboard transport uses the current engine and clamps seeks', (tester) async {
+    final first = _RecordingEngine(id: 'first')..position = const Duration(seconds: 5);
+    final second = _RecordingEngine(id: 'second')..position = const Duration(seconds: 95);
+    final third = _RecordingEngine(id: 'third')..position = const Duration(seconds: 95);
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    addTearDown(third.dispose);
+    second.duration = const Duration(seconds: 100);
+    final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: first, surface: const _FakeSurface()));
+    addTearDown(binding.dispose);
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
+    final player = tester.element(find.byType(Scaffold));
+    Focus.of(player).requestFocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(first.seekCalls, <Duration>[Duration.zero]);
+    binding.value = PlaybackRuntimeViewBinding(engine: second, surface: const _FakeSurface());
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(first.seekCalls, <Duration>[Duration.zero]);
+    expect(second.seekCalls, <Duration>[const Duration(seconds: 100)]);
+    binding.value = PlaybackRuntimeViewBinding(engine: third, surface: const _FakeSurface());
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(third.seekCalls, <Duration>[const Duration(seconds: 105)]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(third.playing.value, isTrue);
+  });
+
+  testWidgets('OSD activity replaces an expiring timer and pointer hover restores hidden controls', (tester) async {
+    final engine = TestPlaybackEngine();
+    addTearDown(engine.dispose);
+    await engine.play();
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
+    await tester.pump(const Duration(milliseconds: 2900));
+    await tester.sendEventToBinding(const PointerHoverEvent(position: Offset(200, 200)));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(_osdOpacity(tester), 1);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(_osdOpacity(tester), 0);
+    await tester.sendEventToBinding(const PointerHoverEvent(position: Offset(200, 200)));
+    await tester.pump();
+    expect(_osdOpacity(tester), 1);
+  });
+
   testWidgets('VideoPlayerView rebinds its surface and media controls with the active runtime', (tester) async {
     final first = TestPlaybackEngine();
     final second = TestPlaybackEngine();
@@ -302,6 +428,11 @@ const _introMarker = PlaybackMarker(
   start: Duration(seconds: 1),
   end: Duration(seconds: 3),
 );
+
+double _osdOpacity(WidgetTester tester) => tester
+    .widgetList<AnimatedOpacity>(find.byType(AnimatedOpacity))
+    .map((widget) => widget.opacity)
+    .first;
 
 LogicalPlaybackSession _session({
   Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
