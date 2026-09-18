@@ -149,11 +149,16 @@ jobs:
         run: flutter build macos --release 2>&1 | tee build.log
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
-        with: {name: rodplayer-macos-${{ matrix.name }}, path: RodPlayer-macOS.zip}
+        with:
+          name: rodplayer-macos-${{ matrix.name }}
+          path: RodPlayer-macOS.zip
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
-        with: {name: debug-logs-macos-${{ matrix.name }}, path: '*.log', if-no-files-found: warn}
+        with:
+          name: debug-logs-macos-${{ matrix.name }}
+          path: '*.log'
+          if-no-files-found: warn
 
   windows:
     runs-on: windows-2022
@@ -237,4 +242,7 @@ jobs:
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
-        with: {name: debug-logs-ios-${{ matrix.name }}, path: '*.log', if-no-files-found: warn}
+        with:
+          name: debug-logs-ios-${{ matrix.name }}
+          path: '*.log'
+          if-no-files-found: warn
