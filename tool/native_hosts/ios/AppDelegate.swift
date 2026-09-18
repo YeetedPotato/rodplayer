@@ -9,6 +9,7 @@ import VideoToolbox
   private var events: FlutterEventSink?
   private let applePlayback = ApplePlaybackManager()
   private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
+  private let privateNetwork = PrivateNetworkHost()
 
   override func application(
     _ application: UIApplication,
@@ -27,6 +28,10 @@ import VideoToolbox
       }
     FlutterEventChannel(name: "rodplayer/playback_capability_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(self)
+    FlutterMethodChannel(name: "rodplayer/private_network", binaryMessenger: controller.binaryMessenger)
+      .setMethodCallHandler(privateNetwork.handle)
+    FlutterEventChannel(name: "rodplayer/private_network_events", binaryMessenger: controller.binaryMessenger)
+      .setStreamHandler(privateNetwork)
     FlutterMethodChannel(name: "rodplayer/apple_playback", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler(applePlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_playback_events", binaryMessenger: controller.binaryMessenger)
@@ -100,6 +105,56 @@ import VideoToolbox
       "pcmOutput": route == nil ? "unknown" : "supported",
       "maxChannels": route?.channels?.count as Any,
       "sampleRates": [Int(session.sampleRate)].filter { $0 > 0 },
+    ]
+  }
+}
+
+private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
+  private var eventSink: FlutterEventSink?
+  private var hasPersistedIdentity = false
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "ping":
+      result(true)
+    case "status":
+      result(statusPayload())
+    case "stop":
+      emitStatus()
+      result(nil)
+    case "reset":
+      hasPersistedIdentity = false
+      emitStatus()
+      result(nil)
+    case "bootstrap", "resume":
+      result(FlutterError(code: "private_network_not_ready", message: nil, details: nil))
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    self.eventSink = eventSink
+    emitStatus()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func emitStatus() {
+    eventSink?(statusPayload())
+  }
+
+  private func statusPayload() -> [String: Any] {
+    [
+      "state": "stopped",
+      "path": "none",
+      "hasPersistedIdentity": hasPersistedIdentity,
+      "reason": "none",
+      "gatewayUrl": NSNull(),
     ]
   }
 }

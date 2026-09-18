@@ -9,6 +9,7 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
   private var events: FlutterEventSink?
   private let applePlayback = ApplePlaybackManager()
   private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
+  private let privateNetwork = PrivateNetworkHost()
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -29,6 +30,10 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
       }
     FlutterEventChannel(name: "rodplayer/playback_capability_events", binaryMessenger: messenger)
       .setStreamHandler(self)
+    FlutterMethodChannel(name: "rodplayer/private_network", binaryMessenger: messenger)
+      .setMethodCallHandler(privateNetwork.handle)
+    FlutterEventChannel(name: "rodplayer/private_network_events", binaryMessenger: messenger)
+      .setStreamHandler(privateNetwork)
     FlutterMethodChannel(name: "rodplayer/apple_playback", binaryMessenger: messenger)
       .setMethodCallHandler(applePlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_playback_events", binaryMessenger: messenger)
@@ -127,6 +132,56 @@ class MainFlutterWindow: NSWindow, FlutterStreamHandler {
     var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     guard AudioObjectGetPropertyData(deviceId, &address, 0, nil, &size, &value) == noErr else { return nil }
     return value
+  }
+}
+
+private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
+  private var eventSink: FlutterEventSink?
+  private var hasPersistedIdentity = false
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "ping":
+      result(true)
+    case "status":
+      result(statusPayload())
+    case "stop":
+      emitStatus()
+      result(nil)
+    case "reset":
+      hasPersistedIdentity = false
+      emitStatus()
+      result(nil)
+    case "bootstrap", "resume":
+      result(FlutterError(code: "private_network_not_ready", message: nil, details: nil))
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    self.eventSink = eventSink
+    emitStatus()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func emitStatus() {
+    eventSink?(statusPayload())
+  }
+
+  private func statusPayload() -> [String: Any] {
+    [
+      "state": "stopped",
+      "path": "none",
+      "hasPersistedIdentity": hasPersistedIdentity,
+      "reason": "none",
+      "gatewayUrl": NSNull(),
+    ]
   }
 }
 
