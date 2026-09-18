@@ -4,14 +4,17 @@ import CoreAudio
 import FlutterMacOS
 import VideoToolbox
 import VLCKit
+import TailscaleKit
 
 class MainFlutterWindow: NSWindow, FlutterStreamHandler {
   private var events: FlutterEventSink?
   private let applePlayback = ApplePlaybackManager()
   private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
   private let privateNetwork = PrivateNetworkHost()
+  private let tailscaleKitLinkProof: TailscaleNode.Type = TailscaleNode.self
 
   override func awakeFromNib() {
+    _ = tailscaleKitLinkProof
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
     self.contentViewController = flutterViewController

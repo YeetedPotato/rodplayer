@@ -1,6 +1,7 @@
 import AVFoundation
 import Flutter
 import MobileVLCKit
+import TailscaleKit
 import UIKit
 import VideoToolbox
 
@@ -10,11 +11,13 @@ import VideoToolbox
   private let applePlayback = ApplePlaybackManager()
   private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
   private let privateNetwork = PrivateNetworkHost()
+  private let tailscaleKitLinkProof: TailscaleNode.Type = TailscaleNode.self
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    _ = tailscaleKitLinkProof
     let controller = window?.rootViewController as! FlutterViewController
     FlutterMethodChannel(name: "rodplayer/playback_capabilities", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler { call, result in
