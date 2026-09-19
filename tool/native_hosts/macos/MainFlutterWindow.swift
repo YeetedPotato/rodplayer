@@ -171,8 +171,10 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
       stop(result: result)
     case "reset":
       reset(result: result)
-    case "bootstrap", "resume":
-      result(FlutterError(code: "private_network_not_ready", message: nil, details: nil))
+    case "bootstrap":
+      bootstrap(call.arguments, result: result)
+    case "resume":
+      resume(result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -233,11 +235,58 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     }
   }
 
+  private func bootstrap(_ arguments: Any?, result: @escaping FlutterResult) {
+    Task { @MainActor [weak self] in
+      guard let self, self.stateStore != nil, let nodeOwner = self.nodeOwner else {
+        result(Self.operationFailed())
+        return
+      }
+      do {
+        let bootstrap = try ApplePrivateNetworkBootstrap(arguments: arguments)
+        let metadata = ApplePrivateNetworkMetadata.from(bootstrap: bootstrap)
+        try await nodeOwner.bootstrap(metadata: metadata, authKey: bootstrap.authKey)
+        emitStatus()
+        result(statusPayload())
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private func resume(result: @escaping FlutterResult) {
+    Task { @MainActor [weak self] in
+      guard let self, self.stateStore != nil, let nodeOwner = self.nodeOwner else {
+        result(Self.operationFailed())
+        return
+      }
+      do {
+        try await nodeOwner.resume()
+        emitStatus()
+        result(statusPayload())
+      } catch ApplePrivateNetworkNodeOwnerError.noIdentity {
+        result(Self.noIdentityPayload())
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
   private static func operationFailed() -> FlutterError {
     FlutterError(code: "private_network_operation_failed", message: nil, details: nil)
   }
 
+  private static func noIdentityPayload() -> [String: Any] {
+    [
+      "state": "unavailable",
+      "path": "none",
+      "hasPersistedIdentity": false,
+      "reason": "no_identity",
+      "gatewayUrl": NSNull(),
+    ]
+  }
+
   private func statusPayload() -> [String: Any] {
+    // D3 keeps the app-visible data plane fail-closed until P5-E/P5-F.
     [
       "state": "stopped",
       "path": "none",
@@ -252,6 +301,7 @@ struct ApplePrivateNetworkStateStore: Sendable {
   let privateNetworkRoot: URL
   let nodeStateDirectory: URL
   let tailscaledState: URL
+  let metadataFile: URL
 
   init(fileManager: FileManager = .default) throws {
     let applicationSupport = try fileManager.url(
@@ -265,6 +315,7 @@ struct ApplePrivateNetworkStateStore: Sendable {
       .appendingPathComponent("PrivateNetwork", isDirectory: true)
     nodeStateDirectory = privateNetworkRoot.appendingPathComponent("node", isDirectory: true)
     tailscaledState = nodeStateDirectory.appendingPathComponent("tailscaled.state", isDirectory: false)
+    metadataFile = privateNetworkRoot.appendingPathComponent("metadata.json", isDirectory: false)
   }
 
   func prepare(fileManager: FileManager = .default) throws {
@@ -279,6 +330,23 @@ struct ApplePrivateNetworkStateStore: Sendable {
     FileManager.default.fileExists(atPath: tailscaledState.path)
   }
 
+  func write(metadata: ApplePrivateNetworkMetadata) throws {
+    try JSONEncoder().encode(metadata).write(to: metadataFile, options: .atomic)
+  }
+
+  func loadMetadata() throws -> ApplePrivateNetworkMetadata {
+    try ApplePrivateNetworkMetadata.decodeAndValidate(from: Data(contentsOf: metadataFile))
+  }
+
+  func waitForPersistedIdentity() async throws -> Bool {
+    if hasPersistedIdentity { return true }
+    for _ in 0 ..< 20 {
+      try await Task.sleep(nanoseconds: 50_000_000)
+      if hasPersistedIdentity { return true }
+    }
+    return false
+  }
+
   func reset(fileManager: FileManager = .default) throws {
     guard fileManager.fileExists(atPath: privateNetworkRoot.path) else { return }
     try fileManager.removeItem(at: privateNetworkRoot)
@@ -286,30 +354,100 @@ struct ApplePrivateNetworkStateStore: Sendable {
 }
 
 protocol ApplePrivateNetworkNode: AnyObject, Sendable {
+  func up() async throws
   func close() async throws
+}
+
+private protocol ApplePrivateNetworkNodeFactory: Sendable {
+  func make(config: TailscaleKit.Configuration) throws -> any ApplePrivateNetworkNode
 }
 
 private enum ApplePrivateNetworkNodeOwnerError: Error {
   case nodeAlreadyActive
+  case existingIdentity
+  case noIdentity
+  case startFailed
 }
 
 actor ApplePrivateNetworkNodeOwner {
   private let stateStore: ApplePrivateNetworkStateStore
+  private let factory: any ApplePrivateNetworkNodeFactory
   private var activeNode: (any ApplePrivateNetworkNode)?
   private var lifecycleLocked = false
   private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
 
-  init(stateStore: ApplePrivateNetworkStateStore) {
+  init(
+    stateStore: ApplePrivateNetworkStateStore,
+    factory: any ApplePrivateNetworkNodeFactory = TailscaleKitNodeFactory()
+  ) {
     self.stateStore = stateStore
+    self.factory = factory
   }
 
-  func install(_ node: any ApplePrivateNetworkNode) async throws {
+  func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws {
     await acquireLifecycle()
     defer { releaseLifecycle() }
     guard activeNode == nil else {
       throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
     }
+    guard !stateStore.hasPersistedIdentity else {
+      throw ApplePrivateNetworkNodeOwnerError.existingIdentity
+    }
+    try stateStore.prepare()
+    try stateStore.write(metadata: metadata)
+    try await startLocked(config: configuration(metadata: metadata, authKey: authKey))
+    guard try await stateStore.waitForPersistedIdentity() else {
+      try await stopLocked()
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+  }
+
+  func resume() async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    guard activeNode == nil else {
+      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
+    }
+    guard stateStore.hasPersistedIdentity else {
+      throw ApplePrivateNetworkNodeOwnerError.noIdentity
+    }
+    try stateStore.prepare()
+    let metadata = try stateStore.loadMetadata()
+    try await startLocked(config: configuration(metadata: metadata, authKey: nil))
+  }
+
+  private func startLocked(config: TailscaleKit.Configuration) async throws {
+    let node: any ApplePrivateNetworkNode
+    do {
+      node = try factory.make(config: config)
+    } catch {
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
     activeNode = node
+    do {
+      try await node.up()
+    } catch {
+      do {
+        try await node.close()
+        activeNode = nil
+      } catch {
+        // Retain ownership when cleanup fails; reset must not delete its state.
+      }
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+  }
+
+  private func configuration(
+    metadata: ApplePrivateNetworkMetadata,
+    authKey: String?
+  ) -> TailscaleKit.Configuration {
+    TailscaleKit.Configuration(
+      hostName: metadata.nodeHostname,
+      path: stateStore.nodeStateDirectory.path,
+      authKey: authKey,
+      controlURL: metadata.controlUrl,
+      ephemeral: false
+    )
   }
 
   func stop() async throws {
@@ -355,14 +493,149 @@ private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked
     self.node = node
   }
 
+  func up() async throws {
+    try await node.up()
+  }
+
   func close() async throws {
     try await node.close()
   }
 }
 
-private struct TailscaleKitNodeFactory {
+private struct RodPlayerTailscaleLogSink: TailscaleKit.LogSink {
+  let logFileHandle: Int32? = -1
+
+  func log(_ message: String) {}
+}
+
+private struct TailscaleKitNodeFactory: ApplePrivateNetworkNodeFactory {
   func make(config: TailscaleKit.Configuration) throws -> any ApplePrivateNetworkNode {
-    TailscaleKitNodeAdapter(node: try TailscaleNode(config: config, logger: nil))
+    TailscaleKitNodeAdapter(
+      node: try TailscaleNode(config: config, logger: RodPlayerTailscaleLogSink())
+    )
+  }
+}
+
+private struct ApplePrivateNetworkBootstrap: Sendable {
+  let version: Int
+  let controlUrl: String
+  let authKey: String
+  let homeIpv4: String
+  let homePort: Int
+
+  init(arguments: Any?) throws {
+    guard
+      let values = arguments as? [String: Any],
+      let version = values["version"] as? Int,
+      version == 1,
+      let controlUrl = values["controlUrl"] as? String,
+      let authKey = values["authKey"] as? String,
+      let homeIpv4 = values["homeIpv4"] as? String,
+      let homePort = values["homePort"] as? Int
+    else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+    let metadata = ApplePrivateNetworkMetadata(
+      version: version,
+      controlUrl: controlUrl,
+      homeIpv4: homeIpv4,
+      homePort: homePort,
+      nodeHostname: "rodplayer-validation"
+    )
+    try metadata.validated()
+    guard ApplePrivateNetworkValidation.isAuthKey(authKey) else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+    self.version = version
+    self.controlUrl = controlUrl
+    self.authKey = authKey
+    self.homeIpv4 = homeIpv4
+    self.homePort = homePort
+  }
+}
+
+private struct ApplePrivateNetworkMetadata: Codable, Sendable {
+  let version: Int
+  let controlUrl: String
+  let homeIpv4: String
+  let homePort: Int
+  let nodeHostname: String
+
+  static func from(bootstrap: ApplePrivateNetworkBootstrap) -> ApplePrivateNetworkMetadata {
+    let suffix = UUID().uuidString
+      .replacingOccurrences(of: "-", with: "")
+      .lowercased()
+      .prefix(16)
+    return ApplePrivateNetworkMetadata(
+      version: bootstrap.version,
+      controlUrl: bootstrap.controlUrl,
+      homeIpv4: bootstrap.homeIpv4,
+      homePort: bootstrap.homePort,
+      nodeHostname: "rodplayer-\(suffix)"
+    )
+  }
+
+  static func decodeAndValidate(from data: Data) throws -> ApplePrivateNetworkMetadata {
+    let metadata = try JSONDecoder().decode(ApplePrivateNetworkMetadata.self, from: data)
+    try metadata.validated()
+    return metadata
+  }
+
+  func validated() throws {
+    guard
+      version == 1,
+      ApplePrivateNetworkValidation.isControlUrl(controlUrl),
+      ApplePrivateNetworkValidation.isIpv4(homeIpv4),
+      (1 ... 65_535).contains(homePort),
+      ApplePrivateNetworkValidation.isHostname(nodeHostname)
+    else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+  }
+}
+
+private enum ApplePrivateNetworkMetadataError: Error {
+  case invalid
+}
+
+private enum ApplePrivateNetworkValidation {
+  static func isControlUrl(_ value: String) -> Bool {
+    guard
+      let components = URLComponents(string: value),
+      components.scheme?.lowercased() == "https",
+      components.host?.isEmpty == false,
+      components.user == nil,
+      components.password == nil,
+      components.query == nil,
+      components.fragment == nil,
+      components.path.isEmpty || components.path == "/"
+    else {
+      return false
+    }
+    return true
+  }
+
+  static func isAuthKey(_ value: String) -> Bool {
+    value.range(
+      of: "^hskey-auth-[A-Za-z0-9_-]{12}-[A-Za-z0-9_-]{64}$",
+      options: .regularExpression
+    ) != nil
+  }
+
+  static func isIpv4(_ value: String) -> Bool {
+    let components = value.split(separator: ".", omittingEmptySubsequences: false)
+    guard components.count == 4 else { return false }
+    return components.allSatisfy { component in
+      guard let number = Int(component), (0 ... 255).contains(number) else { return false }
+      return String(number) == component
+    }
+  }
+
+  static func isHostname(_ value: String) -> Bool {
+    value.range(
+      of: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      options: .regularExpression
+    ) != nil
   }
 }
 
