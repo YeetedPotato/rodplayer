@@ -146,11 +146,11 @@ jobs:
           { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build macOS app
-        run: flutter build macos --release 2>&1 | tee build.log
+        run: flutter build macos --release -t lib/d3_live_proof.dart 2>&1 | tee build.log
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: rodplayer-macos-${{ matrix.name }}
+          name: rodplayer-d3-live-macos-${{ matrix.name }}
           path: RodPlayer-macOS.zip
       - name: Upload debug logs
         if: ${{ failure() }}
