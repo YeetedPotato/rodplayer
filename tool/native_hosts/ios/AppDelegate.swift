@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 import Flutter
 import MobileVLCKit
 import TailscaleKit
@@ -114,21 +115,36 @@ import VideoToolbox
 
 private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
   private var eventSink: FlutterEventSink?
-  private var hasPersistedIdentity = false
+  private let stateStore: ApplePrivateNetworkStateStore?
+  private let nodeOwner: ApplePrivateNetworkNodeOwner?
+
+  override init() {
+    do {
+      let stateStore = try ApplePrivateNetworkStateStore()
+      try stateStore.prepare()
+      self.stateStore = stateStore
+      nodeOwner = ApplePrivateNetworkNodeOwner(stateStore: stateStore)
+    } catch {
+      stateStore = nil
+      nodeOwner = nil
+    }
+    super.init()
+  }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "ping":
       result(true)
     case "status":
+      guard stateStore != nil else {
+        result(Self.operationFailed())
+        return
+      }
       result(statusPayload())
     case "stop":
-      emitStatus()
-      result(nil)
+      stop(result: result)
     case "reset":
-      hasPersistedIdentity = false
-      emitStatus()
-      result(nil)
+      reset(result: result)
     case "bootstrap", "resume":
       result(FlutterError(code: "private_network_not_ready", message: nil, details: nil))
     default:
@@ -138,6 +154,10 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
 
   func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
     self.eventSink = eventSink
+    guard stateStore != nil else {
+      eventSink(Self.operationFailed())
+      return nil
+    }
     emitStatus()
     return nil
   }
@@ -148,17 +168,175 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
   }
 
   private func emitStatus() {
+    guard stateStore != nil else {
+      eventSink?(Self.operationFailed())
+      return
+    }
     eventSink?(statusPayload())
+  }
+
+  private func stop(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      do {
+        try await nodeOwner.stop()
+        self?.emitStatus()
+        result(nil)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private func reset(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      do {
+        try await nodeOwner.reset()
+        self?.emitStatus()
+        result(nil)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private static func operationFailed() -> FlutterError {
+    FlutterError(code: "private_network_operation_failed", message: nil, details: nil)
   }
 
   private func statusPayload() -> [String: Any] {
     [
       "state": "stopped",
       "path": "none",
-      "hasPersistedIdentity": hasPersistedIdentity,
+      "hasPersistedIdentity": stateStore?.hasPersistedIdentity ?? false,
       "reason": "none",
       "gatewayUrl": NSNull(),
     ]
+  }
+}
+
+struct ApplePrivateNetworkStateStore: Sendable {
+  let privateNetworkRoot: URL
+  let nodeStateDirectory: URL
+  let tailscaledState: URL
+
+  init(fileManager: FileManager = .default) throws {
+    let applicationSupport = try fileManager.url(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: true
+    )
+    privateNetworkRoot = applicationSupport
+      .appendingPathComponent("RodPlayer", isDirectory: true)
+      .appendingPathComponent("PrivateNetwork", isDirectory: true)
+    nodeStateDirectory = privateNetworkRoot.appendingPathComponent("node", isDirectory: true)
+    tailscaledState = nodeStateDirectory.appendingPathComponent("tailscaled.state", isDirectory: false)
+  }
+
+  func prepare(fileManager: FileManager = .default) throws {
+    try fileManager.createDirectory(at: nodeStateDirectory, withIntermediateDirectories: true)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    var root = privateNetworkRoot
+    try root.setResourceValues(values)
+  }
+
+  var hasPersistedIdentity: Bool {
+    FileManager.default.fileExists(atPath: tailscaledState.path)
+  }
+
+  func reset(fileManager: FileManager = .default) throws {
+    guard fileManager.fileExists(atPath: privateNetworkRoot.path) else { return }
+    try fileManager.removeItem(at: privateNetworkRoot)
+  }
+}
+
+protocol ApplePrivateNetworkNode: AnyObject, Sendable {
+  func close() async throws
+}
+
+private enum ApplePrivateNetworkNodeOwnerError: Error {
+  case nodeAlreadyActive
+}
+
+actor ApplePrivateNetworkNodeOwner {
+  private let stateStore: ApplePrivateNetworkStateStore
+  private var activeNode: (any ApplePrivateNetworkNode)?
+  private var lifecycleLocked = false
+  private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(stateStore: ApplePrivateNetworkStateStore) {
+    self.stateStore = stateStore
+  }
+
+  func install(_ node: any ApplePrivateNetworkNode) async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    guard activeNode == nil else {
+      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
+    }
+    activeNode = node
+  }
+
+  func stop() async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    try await stopLocked()
+  }
+
+  func reset() async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    try await stopLocked()
+    try stateStore.reset()
+  }
+
+  private func stopLocked() async throws {
+    guard let activeNode else { return }
+    try await activeNode.close()
+    self.activeNode = nil
+  }
+
+  private func acquireLifecycle() async {
+    guard lifecycleLocked else {
+      lifecycleLocked = true
+      return
+    }
+    await withCheckedContinuation { lifecycleWaiters.append($0) }
+  }
+
+  private func releaseLifecycle() {
+    guard !lifecycleWaiters.isEmpty else {
+      lifecycleLocked = false
+      return
+    }
+    lifecycleWaiters.removeFirst().resume()
+  }
+}
+
+private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked Sendable {
+  private let node: TailscaleNode
+
+  init(node: TailscaleNode) {
+    self.node = node
+  }
+
+  func close() async throws {
+    try await node.close()
+  }
+}
+
+private struct TailscaleKitNodeFactory {
+  func make(config: TailscaleKit.Configuration) throws -> any ApplePrivateNetworkNode {
+    TailscaleKitNodeAdapter(node: try TailscaleNode(config: config, logger: nil))
   }
 }
 
