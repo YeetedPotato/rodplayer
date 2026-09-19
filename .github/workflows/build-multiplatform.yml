@@ -145,8 +145,41 @@ jobs:
           status=${PIPESTATUS[0]}
           { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - name: Prepare minimal D3 live-proof dependencies
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('pubspec.yaml')
+          excluded = {
+              'media_kit',
+              'media_kit_video',
+              'media_kit_libs_ios_video',
+              'media_kit_libs_macos_video',
+              'media_kit_libs_windows_video',
+              'media_kit_libs_linux',
+          }
+          output = []
+          in_dependencies = False
+          for line in path.read_text().splitlines(keepends=True):
+              if line == 'dependencies:\n':
+                  in_dependencies = True
+              elif line and not line.startswith((' ', '\t')):
+                  in_dependencies = False
+              if in_dependencies and line.startswith('  ') and not line.startswith('    '):
+                  key = line.split(':', 1)[0].strip()
+                  if key in excluded:
+                      continue
+              output.append(line)
+          path.write_text(''.join(output))
+          PY
+          flutter pub get
+          cd macos
+          pod install --repo-update
       - name: Build macOS app
-        run: flutter build macos --release -t lib/d3_live_proof.dart 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          flutter build macos --release -t lib/d3_live_proof.dart 2>&1 | tee build.log
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
