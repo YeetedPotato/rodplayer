@@ -196,6 +196,11 @@ jobs:
               raise SystemExit('Expected exactly one generated VLCKit pod line')
           podfile.write_text(''.join(line for line in lines if vlckit not in line))
           PY
+      - name: Configure temporary D3 arm64 release build
+        run: |
+          config=macos/Runner/Configs/Release.xcconfig
+          test -f "$config"
+          printf '\nEXCLUDED_ARCHS = x86_64\n' >> "$config"
       - run: flutter pub get && cd macos && pod install --repo-update
       - name: Analyze Dart code
         run: |
@@ -258,6 +263,10 @@ jobs:
           grep -Fq "pod 'RodPlayerTailscaleKit'" "$podfile" || { echo 'Missing RodPlayerTailscaleKit pod' >&2; exit 1; }
       - name: Build macOS app
         run: |
+          framework=build/apple_mesh/macos/TailscaleKit.framework/TailscaleKit
+          test -f "$framework"
+          file "$framework"
+          lipo -info "$framework"
           set -o pipefail
           flutter build macos --release -t lib/d3_live_proof.dart 2>&1 | tee build.log
       - name: Validate D3 macOS app bundle
@@ -270,6 +279,9 @@ jobs:
           test -f "$binary"
           test -x "$binary"
           file "$binary"
+          architectures=$(lipo -info "$binary")
+          printf '%s\n' "$architectures"
+          case "$architectures" in *arm64*) ;; *) echo 'RodPlayer executable is missing arm64' >&2; exit 1 ;; esac
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
