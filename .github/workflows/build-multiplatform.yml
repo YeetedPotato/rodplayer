@@ -137,6 +137,65 @@ jobs:
         run: flutter create --platforms=macos .
       - name: Apply checked-in macOS native playback handlers
         run: python3 tool/apply_native_hosts.py macos
+      - name: Prepare minimal D3 macOS native host
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('tool/native_hosts/macos/MainFlutterWindow.swift').read_text()
+          start_marker = 'private final class PrivateNetworkHost'
+          end_marker = 'private final class AppleCompatibilityPlaybackManager'
+          if source.count(start_marker) != 1 or source.count(end_marker) != 1:
+              raise SystemExit('Private-network source markers must occur exactly once')
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          if end <= start:
+              raise SystemExit('Invalid private-network source marker order')
+          private_network = source[start:end]
+          host = '''import Cocoa
+          import Foundation
+          import FlutterMacOS
+          import TailscaleKit
+
+          class MainFlutterWindow: NSWindow {
+            private let privateNetwork = PrivateNetworkHost()
+            private let tailscaleKitLinkProof: TailscaleNode.Type = TailscaleNode.self
+
+            override func awakeFromNib() {
+              _ = tailscaleKitLinkProof
+              let flutterViewController = FlutterViewController()
+              let windowFrame = self.frame
+              self.contentViewController = flutterViewController
+              self.setFrame(windowFrame, display: true)
+
+              let messenger = flutterViewController.engine.binaryMessenger
+
+              FlutterMethodChannel(
+                name: "rodplayer/private_network",
+                binaryMessenger: messenger
+              ).setMethodCallHandler(privateNetwork.handle)
+
+              FlutterEventChannel(
+                name: "rodplayer/private_network_events",
+                binaryMessenger: messenger
+              ).setStreamHandler(privateNetwork)
+
+              RegisterGeneratedPlugins(registry: flutterViewController)
+              super.awakeFromNib()
+            }
+          }
+
+          '''
+          Path('macos/Runner/MainFlutterWindow.swift').write_text(host + private_network)
+
+          podfile = Path('macos/Podfile')
+          lines = podfile.read_text().splitlines(keepends=True)
+          vlckit = "pod 'VLCKit', '~> 3.3.0'"
+          matches = [line for line in lines if vlckit in line]
+          if len(matches) != 1:
+              raise SystemExit('Expected exactly one generated VLCKit pod line')
+          podfile.write_text(''.join(line for line in lines if vlckit not in line))
+          PY
       - run: flutter pub get && cd macos && pod install --repo-update
       - name: Analyze Dart code
         run: |
@@ -173,13 +232,44 @@ jobs:
               output.append(line)
           path.write_text(''.join(output))
           PY
+          rm -rf macos/Pods
+          rm -f macos/Podfile.lock
+          rm -rf build/macos
           flutter pub get
           cd macos
           pod install --repo-update
+      - name: Verify minimal D3 macOS build inputs
+        run: |
+          host=macos/Runner/MainFlutterWindow.swift
+          podfile=macos/Podfile
+          for forbidden in 'import VLCKit' AppleCompatibilityPlayback ApplePlaybackManager; do
+            if grep -Fq "$forbidden" "$host"; then
+              echo "Unexpected playback input: $forbidden" >&2
+              exit 1
+            fi
+          done
+          if grep -Fq "pod 'VLCKit'" "$podfile" || test -d macos/Pods/VLCKit; then
+            echo 'VLCKit remains in the temporary D3 build' >&2
+            exit 1
+          fi
+          for required in 'private final class PrivateNetworkHost' ApplePrivateNetworkNodeOwner TailscaleKitNodeFactory RodPlayerTailscaleLogSink 'import TailscaleKit'; do
+            grep -Fq "$required" "$host" || { echo "Missing required private-network input: $required" >&2; exit 1; }
+          done
+          grep -Fq "pod 'RodPlayerTailscaleKit'" "$podfile" || { echo 'Missing RodPlayerTailscaleKit pod' >&2; exit 1; }
       - name: Build macOS app
         run: |
           set -o pipefail
           flutter build macos --release -t lib/d3_live_proof.dart 2>&1 | tee build.log
+      - name: Validate D3 macOS app bundle
+        run: |
+          app=build/macos/Build/Products/Release/rodplayer.app
+          test -d "$app"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          test -n "$executable"
+          binary="$app/Contents/MacOS/$executable"
+          test -f "$binary"
+          test -x "$binary"
+          file "$binary"
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
