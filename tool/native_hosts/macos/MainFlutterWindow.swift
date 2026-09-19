@@ -297,7 +297,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
   }
 }
 
-struct ApplePrivateNetworkStateStore: Sendable {
+private struct ApplePrivateNetworkStateStore: Sendable {
   let privateNetworkRoot: URL
   let nodeStateDirectory: URL
   let tailscaledState: URL
@@ -353,7 +353,7 @@ struct ApplePrivateNetworkStateStore: Sendable {
   }
 }
 
-protocol ApplePrivateNetworkNode: AnyObject, Sendable {
+private protocol ApplePrivateNetworkNode: AnyObject, Sendable {
   func up() async throws
   func close() async throws
 }
@@ -369,7 +369,7 @@ private enum ApplePrivateNetworkNodeOwnerError: Error {
   case startFailed
 }
 
-actor ApplePrivateNetworkNodeOwner {
+private actor ApplePrivateNetworkNodeOwner {
   private let stateStore: ApplePrivateNetworkStateStore
   private let factory: any ApplePrivateNetworkNodeFactory
   private var activeNode: (any ApplePrivateNetworkNode)?
