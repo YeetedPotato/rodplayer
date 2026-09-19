@@ -81,9 +81,15 @@ jobs:
           { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build Android arm64 APK
-        run: flutter build apk --release --target-platform android-arm64 --split-per-abi 2>&1 | tee build.log
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release --target-platform android-arm64 --split-per-abi 2>&1 | tee build.log
       - name: Build Android armeabi-v7a APK
-        run: flutter build apk --release --target-platform android-arm --split-per-abi 2>&1 | tee -a build.log
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release --target-platform android-arm --split-per-abi 2>&1 | tee -a build.log
       - uses: actions/upload-artifact@v4
         with:
           name: android-firetv-apks
@@ -97,16 +103,41 @@ jobs:
           if-no-files-found: warn
 
   macos:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Stable lane blocks merges; the preview lane is early-warning only.
+          - name: stable
+            runner: macos-26
+            xcode_major: 26
+            ios_sdk_major: 26
+            macos_sdk_major: 26
+            experimental: false
+          - name: latest
+            runner: xcode-27
+            xcode_major: 27
+            ios_sdk_major: 27
+            macos_sdk_major: 27
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    # Deployment target stays 15.0; selected Xcode/SDK is the compatibility target.
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25.5'}
+      - name: Verify Apple SDK policy
+        run: python3 tool/apple_mesh/verify_apple_toolchain.py --xcode-major ${{ matrix.xcode_major }} --ios-sdk-major ${{ matrix.ios_sdk_major }} --macos-sdk-major ${{ matrix.macos_sdk_major }} --go-version 1.25.5
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
+      - name: Build pinned macOS TailscaleKit framework
+        run: python3 tool/apple_mesh/build_tailscalekit.py macos --xcode-major ${{ matrix.xcode_major }}
       - name: Generate macOS project
         run: flutter create --platforms=macos .
       - name: Apply checked-in macOS native playback handlers
         run: python3 tool/apply_native_hosts.py macos
-      - run: flutter pub get
+      - run: flutter pub get && cd macos && pod install --repo-update
       - name: Analyze Dart code
         run: |
           set -o pipefail
@@ -118,11 +149,16 @@ jobs:
         run: flutter build macos --release 2>&1 | tee build.log
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
-        with: {name: rodplayer-macos, path: RodPlayer-macOS.zip}
+        with:
+          name: rodplayer-macos-${{ matrix.name }}
+          path: RodPlayer-macOS.zip
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
-        with: {name: debug-logs-macos, path: '*.log', if-no-files-found: warn}
+        with:
+          name: debug-logs-macos-${{ matrix.name }}
+          path: '*.log'
+          if-no-files-found: warn
 
   windows:
     runs-on: windows-2022
@@ -154,24 +190,42 @@ jobs:
         with: {name: debug-logs-windows, path: '*.log', if-no-files-found: warn}
 
   ios:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Stable lane blocks merges; the preview lane is early-warning only.
+          - name: stable
+            runner: macos-26
+            xcode_major: 26
+            ios_sdk_major: 26
+            macos_sdk_major: 26
+            experimental: false
+          - name: latest
+            runner: xcode-27
+            xcode_major: 27
+            ios_sdk_major: 27
+            macos_sdk_major: 27
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    # Deployment target stays 18.1; selected Xcode/SDK is the compatibility target.
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25.5'}
+      - name: Verify Apple SDK policy
+        run: python3 tool/apple_mesh/verify_apple_toolchain.py --xcode-major ${{ matrix.xcode_major }} --ios-sdk-major ${{ matrix.ios_sdk_major }} --macos-sdk-major ${{ matrix.macos_sdk_major }} --go-version 1.25.5
       - uses: subosito/flutter-action@v2
         with: {channel: stable, architecture: arm64, cache: true}
+      - name: Build pinned iOS TailscaleKit framework
+        run: python3 tool/apple_mesh/build_tailscalekit.py ios --xcode-major ${{ matrix.xcode_major }}
       - name: Generate iOS project
         run: flutter create --platforms=ios .
       - name: Apply checked-in iOS native playback handlers
         run: python3 tool/apply_native_hosts.py ios
-      - name: Configure CocoaPods and unsigned build
+      - name: Configure unsigned build
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('ios/Podfile')
-          s = p.read_text().replace("platform :ios, '12.0'", "platform :ios, '15.0'")
-          if 'platform :ios' not in s: s = "platform :ios, '15.0'\n" + s
-          p.write_text(s)
-          PY
           mkdir -p ios/Flutter
           for c in Debug Release; do printf '%s\n' 'CODE_SIGNING_ALLOWED = NO' 'CODE_SIGNING_REQUIRED = NO' 'CODE_SIGN_IDENTITY =' >> "ios/Flutter/$c.xcconfig"; done
       - name: Install dependencies and CocoaPods
@@ -188,4 +242,7 @@ jobs:
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
-        with: {name: debug-logs-ios, path: '*.log', if-no-files-found: warn}
+        with:
+          name: debug-logs-ios-${{ matrix.name }}
+          path: '*.log'
+          if-no-files-found: warn
