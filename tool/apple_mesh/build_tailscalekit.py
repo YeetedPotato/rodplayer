@@ -58,6 +58,82 @@ def checkout_source() -> None:
         raise SystemExit("Pinned libtailscale dependency versions do not match metadata.")
 
 
+def _replace_exact(
+    text: str,
+    original: str,
+    patched: str,
+    *,
+    label: str,
+    expected_count: int,
+    required: bool = True,
+) -> str:
+    original_count = text.count(original)
+    patched_count = text.count(patched)
+    if original_count == expected_count and patched_count == 0:
+        return text.replace(original, patched)
+    if original_count == 0 and patched_count == expected_count:
+        return text
+    if not required and original_count == 0 and patched_count == 0:
+        return text
+    raise SystemExit(f"Unexpected pinned libtailscale {label} source shape.")
+
+
+def patch_pinned_source(source_root: Path = SOURCE) -> None:
+    tailscale_path = source_root / "tailscale.go"
+    makefile_path = source_root / "Makefile"
+    if not tailscale_path.is_file() or not makefile_path.is_file():
+        raise SystemExit("Pinned libtailscale source files are missing.")
+
+    tailscale = tailscale_path.read_text()
+    function_start = tailscale.find("func TsnetSetLogFD")
+    function_end = tailscale.find("\n//export", function_start + 1)
+    if function_start == -1 or function_end == -1:
+        raise SystemExit("Pinned libtailscale TsnetSetLogFD source marker is missing.")
+    function = tailscale[function_start:function_end]
+    original_branch = """if fd == -1 {
+\t\ts.s.Logf = logger.Discard
+\t\treturn 0
+\t}"""
+    patched_branch = """if fd == -1 {
+\t\ts.s.Logf = logger.Discard
+\t\ts.s.UserLogf = logger.Discard
+\t\treturn 0
+\t}"""
+    patched_function = _replace_exact(
+        function,
+        original_branch,
+        patched_branch,
+        label="TsnetSetLogFD",
+        expected_count=1,
+    )
+    tailscale_path.write_text(tailscale[:function_start] + patched_function + tailscale[function_end:])
+
+    makefile = makefile_path.read_text()
+    makefile = _replace_exact(
+        makefile,
+        "go build -buildmode=c-archive -o $@",
+        "go build -tags=ts_omit_logtail -buildmode=c-archive -o $@",
+        label="macOS c-archive",
+        expected_count=1,
+    )
+    makefile = _replace_exact(
+        makefile,
+        "go build -v -ldflags -w -tags ios -o $@ -buildmode=c-archive",
+        "go build -v -ldflags -w -tags=ios,ts_omit_logtail -o $@ -buildmode=c-archive",
+        label="iOS c-archive",
+        expected_count=3,
+    )
+    makefile = _replace_exact(
+        makefile,
+        "go build -v -buildmode=c-shared -o $@",
+        "go build -v -tags=ts_omit_logtail -buildmode=c-shared -o $@",
+        label="shared-library",
+        expected_count=1,
+        required=False,
+    )
+    makefile_path.write_text(makefile)
+
+
 def create_local_pod(target: str) -> None:
     product = {
         "ios": SOURCE / "swift" / "build" / "Build" / "Products" / "Release-iphoneos" / "TailscaleKit.framework",
@@ -83,6 +159,7 @@ def main() -> None:
     require_darwin()
     verify_toolchain(args.xcode_major)
     checkout_source()
+    patch_pinned_source()
     execute("make", args.platform, cwd=SOURCE / "swift")
     create_local_pod(args.platform)
 

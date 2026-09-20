@@ -18,6 +18,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Apple mesh source policies
+        run: |
+          python3 tool/apple_mesh/test_private_network_state_policy.py
+          python3 tool/apple_mesh/test_macos_entitlements_policy.py
+          python3 tool/apple_mesh/test_libtailscale_logging_policy.py
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
