@@ -137,6 +137,20 @@ jobs:
         run: flutter create --platforms=macos .
       - name: Apply checked-in macOS native playback handlers
         run: python3 tool/apply_native_hosts.py macos
+      - name: Verify generated macOS network entitlements
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          for name in ('DebugProfile.entitlements', 'Release.entitlements'):
+              path = Path('macos/Runner') / name
+              with path.open('rb') as handle:
+                  entitlements = plistlib.load(handle)
+              for key in ('com.apple.security.network.client', 'com.apple.security.network.server'):
+                  if entitlements.get(key) is not True:
+                      raise SystemExit(f'{path}: {key} must be true')
+          PY
       - name: Prepare minimal D3 macOS native host
         run: |
           python3 - <<'PY'
@@ -282,6 +296,17 @@ jobs:
           architectures=$(lipo -info "$binary")
           printf '%s\n' "$architectures"
           case "$architectures" in *arm64*) ;; *) echo 'RodPlayer executable is missing arm64' >&2; exit 1 ;; esac
+          /usr/bin/codesign -d --entitlements :- "$app" > signed-entitlements.plist
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          with Path('signed-entitlements.plist').open('rb') as handle:
+              entitlements = plistlib.load(handle)
+          for key in ('com.apple.security.network.client', 'com.apple.security.network.server'):
+              if entitlements.get(key) is not True:
+                  raise SystemExit(f'signed app: {key} must be true')
+          PY
       - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:

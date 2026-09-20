@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,7 +7,26 @@ import 'package:rodplayer/core/network/family_enrollment.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/platform/network/method_channel_private_network_runtime.dart';
 
-void main() => runApp(const D3LiveProofApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const D3LiveProofApp());
+  if (Platform.environment['RODPLAYER_D3_STDIO'] == '1') {
+    unawaited(_D3StdioController(MethodChannelPrivateNetworkRuntime()).run());
+  }
+}
+
+Future<PrivateNetworkStatus> _bootstrapPrivateNetwork(
+  PrivateNetworkRuntime runtime,
+  String setupCode,
+) async {
+  final enrollmentClient = FamilyEnrollmentClient();
+  try {
+    final enrollment = await enrollmentClient.enroll(setupCode);
+    return runtime.bootstrap(PrivateNetworkBootstrap.fromEnrollment(enrollment));
+  } finally {
+    enrollmentClient.close();
+  }
+}
 
 class D3LiveProofApp extends StatelessWidget {
   const D3LiveProofApp({super.key});
@@ -72,14 +93,7 @@ class _D3LiveProofPageState extends State<D3LiveProofPage> {
   Future<void> _bootstrap() => _run(() async {
         final setupCode = _setupCode.text.trim();
         _setupCode.clear();
-        final enrollmentClient = FamilyEnrollmentClient();
-        try {
-          final enrollment = await enrollmentClient.enroll(setupCode);
-          final bootstrap = PrivateNetworkBootstrap.fromEnrollment(enrollment);
-          _setStatus(await _runtime.bootstrap(bootstrap));
-        } finally {
-          enrollmentClient.close();
-        }
+        _setStatus(await _bootstrapPrivateNetwork(_runtime, setupCode));
       });
 
   Future<void> _ping() => _run(() async {
@@ -158,5 +172,95 @@ class _D3LiveProofPageState extends State<D3LiveProofPage> {
   Widget _action(String label, Future<void> Function() action) => FilledButton(
         onPressed: _busy ? null : action,
         child: Text(label),
+      );
+}
+
+class _D3StdioController {
+  _D3StdioController(this._runtime);
+
+  final PrivateNetworkRuntime _runtime;
+
+  Future<void> run() async {
+    final input = StreamIterator<String>(
+      stdin.transform(utf8.decoder).transform(const LineSplitter()),
+    );
+    _writeHelp();
+    while (await input.moveNext()) {
+      switch (input.current.trim()) {
+        case 'ping':
+          await _run(() async {
+            _result(await _runtime.confirmHostAvailable() ? 'available' : 'unavailable');
+          });
+        case 'status':
+          await _run(() async => _status(await _runtime.status()));
+        case 'bootstrap':
+          await _bootstrap(input);
+        case 'resume':
+          await _run(() async => _status(await _runtime.resume()));
+        case 'stop':
+          await _run(() async {
+            await _runtime.stop();
+            _status(await _runtime.status());
+          });
+        case 'reset':
+          await _run(() async {
+            await _runtime.reset();
+            _status(await _runtime.status());
+          });
+        case 'help':
+          _writeHelp();
+        case 'quit':
+          exit(0);
+        default:
+          _result('unknown_command');
+      }
+    }
+  }
+
+  Future<void> _bootstrap(StreamIterator<String> input) async {
+    final setupCode = await _readSetupCode(input);
+    if (setupCode == null) return;
+    await _run(() async => _status(await _bootstrapPrivateNetwork(_runtime, setupCode)));
+  }
+
+  Future<String?> _readSetupCode(StreamIterator<String> input) async {
+    final terminal = stdin.hasTerminal;
+    final previousEchoMode = terminal ? stdin.echoMode : false;
+    try {
+      if (terminal) stdin.echoMode = false;
+      stdout.write('SETUP_CODE> ');
+      if (!await input.moveNext()) return null;
+      return input.current.trim();
+    } finally {
+      if (terminal) stdin.echoMode = previousEchoMode;
+      stdout.writeln();
+    }
+  }
+
+  Future<void> _run(Future<void> Function() operation) async {
+    try {
+      await operation();
+    } on FamilyEnrollmentException catch (error) {
+      stdout.writeln('ERROR family=${error.failure.name}');
+    } on PrivateNetworkException catch (error) {
+      stdout.writeln('ERROR private=${error.failure.name}');
+    } catch (error) {
+      stdout.writeln('ERROR unknown=${error.runtimeType}');
+    }
+  }
+
+  void _status(PrivateNetworkStatus status) {
+    _result('completed');
+    stdout.writeln('STATUS state=${status.state.name}');
+    stdout.writeln('STATUS path=${status.path.name}');
+    stdout.writeln('STATUS hasPersistedIdentity=${status.hasPersistedIdentity}');
+    stdout.writeln('STATUS unavailableReason=${status.unavailableReason.name}');
+    stdout.writeln('STATUS gatewayBaseUrl=${status.gatewayBaseUrl}');
+  }
+
+  void _result(String value) => stdout.writeln('RESULT $value');
+
+  void _writeHelp() => stdout.writeln(
+        'COMMANDS ping status bootstrap resume stop reset help quit',
       );
 }
