@@ -1,4 +1,5 @@
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import sys
@@ -109,6 +110,19 @@ def patch_macos_deployment_target() -> None:
         path.write_text(updated)
 
 
+def patch_macos_entitlements(root: Path = ROOT) -> None:
+    for name in ("DebugProfile.entitlements", "Release.entitlements"):
+        path = root / "macos" / "Runner" / name
+        if not path.exists():
+            raise FileNotFoundError(f"missing generated macOS entitlement file: {path}")
+        with path.open("rb") as handle:
+            entitlements = plistlib.load(handle)
+        entitlements["com.apple.security.network.client"] = True
+        entitlements["com.apple.security.network.server"] = True
+        with path.open("wb") as handle:
+            plistlib.dump(entitlements, handle)
+
+
 def patch_ios_deployment_target() -> None:
     path = ROOT / "ios" / "Runner.xcodeproj" / "project.pbxproj"
     if not path.exists():
@@ -136,6 +150,7 @@ def main(platform: str) -> None:
         copy("macos/MainFlutterWindow.swift", "macos/Runner/MainFlutterWindow.swift")
         patch_podfile("macos")
         patch_macos_deployment_target()
+        patch_macos_entitlements()
     elif platform == "windows":
         copy("windows/flutter_window.cpp", "windows/runner/flutter_window.cpp")
         patch_windows_cmake()
