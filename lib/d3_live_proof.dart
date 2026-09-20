@@ -22,7 +22,7 @@ Future<PrivateNetworkStatus> _bootstrapPrivateNetwork(
   final enrollmentClient = FamilyEnrollmentClient();
   try {
     final enrollment = await enrollmentClient.enroll(setupCode);
-    return runtime.bootstrap(PrivateNetworkBootstrap.fromEnrollment(enrollment));
+    return await runtime.bootstrap(PrivateNetworkBootstrap.fromEnrollment(enrollment));
   } finally {
     enrollmentClient.close();
   }
