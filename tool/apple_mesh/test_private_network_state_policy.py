@@ -175,6 +175,28 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("func onListen", source)
             self.assertNotIn("startMonitorLocked()", source[source.index("func onListen"):source.index("func onCancel")])
 
+            sample = owner[
+                owner.index("private func sampleStatus()"):owner.index("private func publish(")
+            ]
+            peer_guard = sample[
+                sample.index("let homePeers"):sample.index("guard let currentAddress")
+            ]
+            self.assertIn("homePeers.count == 1", peer_guard)
+            self.assertIn("peer.online", peer_guard)
+            self.assertIn("peer.peerRelay?.isEmpty != false", peer_guard)
+            self.assertNotIn("currentAddress", peer_guard)
+            self.assertIn('reason: "direct_path_unavailable"', peer_guard)
+
+            cur_addr_guard = sample[
+                sample.index("guard let currentAddress"):sample.index(
+                    'return .starting(path: "direct"'
+                )
+            ]
+            self.assertIn("let currentAddress = peer.currentAddress", cur_addr_guard)
+            self.assertIn("!currentAddress.isEmpty", cur_addr_guard)
+            self.assertIn('return .starting(path: "none"', cur_addr_guard)
+            self.assertNotIn('reason: "direct_path_unavailable"', cur_addr_guard)
+
     def test_status_failures_and_observers_remain_authoritative(self) -> None:
         for path in HOSTS:
             source = private_network_source(path)

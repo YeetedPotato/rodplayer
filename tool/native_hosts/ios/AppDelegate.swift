@@ -561,11 +561,12 @@ private actor ApplePrivateNetworkNodeOwner {
         homePeers.count == 1,
         let peer = homePeers.first,
         peer.online,
-        let currentAddress = peer.currentAddress,
-        !currentAddress.isEmpty,
         peer.peerRelay?.isEmpty != false
       else {
         return .unavailable(reason: "direct_path_unavailable", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      guard let currentAddress = peer.currentAddress, !currentAddress.isEmpty else {
+        return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
       }
       return .starting(path: "direct", hasPersistedIdentity: stateStore.hasPersistedIdentity)
     } catch {
