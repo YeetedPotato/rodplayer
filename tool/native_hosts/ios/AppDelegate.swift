@@ -40,13 +40,19 @@ import VideoToolbox
       .setMethodCallHandler(applePlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_playback_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(applePlayback)
-    registrar(forPlugin: "RodPlayerApplePlayback")
-      .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
     FlutterMethodChannel(name: "rodplayer/apple_compatibility_playback", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler(compatibilityPlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_compatibility_playback_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(compatibilityPlayback)
-    registrar(forPlugin: "RodPlayerAppleCompatibilityPlayback")
+    guard
+      let applePlaybackRegistrar = registrar(forPlugin: "RodPlayerApplePlayback"),
+      let compatibilityPlaybackRegistrar = registrar(forPlugin: "RodPlayerAppleCompatibilityPlayback")
+    else {
+      return false
+    }
+    applePlaybackRegistrar
+      .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
+    compatibilityPlaybackRegistrar
       .register(AppleCompatibilityPlaybackViewFactory(manager: compatibilityPlayback), withId: "rodplayer/apple_compatibility_playback_view")
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

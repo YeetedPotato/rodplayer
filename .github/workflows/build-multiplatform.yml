@@ -151,8 +151,16 @@ jobs:
           { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build macOS app
-        run: flutter build macos --release 2>&1 | tee build.log
-      - run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/rodplayer.app RodPlayer-macOS.zip
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build macos --release 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          app=build/macos/Build/Products/Release/rodplayer.app
+          test -d "$app"
+          test -x "$app/Contents/MacOS/rodplayer"
+          ditto -c -k --sequesterRsrc --keepParent "$app" RodPlayer-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
           name: rodplayer-macos-${{ matrix.name }}
@@ -243,7 +251,12 @@ jobs:
           { echo '## Dart Analyzer Output'; echo '```text'; cat analyze.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Build unsigned iOS app
-        run: flutter build ios --release --no-codesign 2>&1 | tee build.log
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
