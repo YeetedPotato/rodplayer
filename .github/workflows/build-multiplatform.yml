@@ -155,7 +155,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          flutter build macos --release 2>&1 | tee build.log
+          flutter build macos --release --target lib/p5e_live_proof.dart 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then exit "$status"; fi
           app=build/macos/Build/Products/Release/rodplayer.app
