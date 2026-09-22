@@ -128,7 +128,7 @@ void main() {
     expect(ios, contains('VLCMediaPlayer'));
     expect(macos, contains('rodplayer/apple_compatibility_playback'));
     expect(macos, contains('VLCKit'));
-    expect(macos, contains('import CoreGraphics'));
+    expect(patcher, contains('rodplayer_patch_vlckit_coregraphics'));
     expect(ios, contains('let applePlaybackRegistrar = registrar(forPlugin:'));
     expect(ios, contains('let compatibilityPlaybackRegistrar = registrar(forPlugin:'));
     expect(ios, contains('else {\n      return false\n    }'));

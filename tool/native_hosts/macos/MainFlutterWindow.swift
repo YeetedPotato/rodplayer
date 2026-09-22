@@ -1,7 +1,6 @@
 import Cocoa
 import AVFoundation
 import CoreAudio
-import CoreGraphics
 import Foundation
 import FlutterMacOS
 import VideoToolbox

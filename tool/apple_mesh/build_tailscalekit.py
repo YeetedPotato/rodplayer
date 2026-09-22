@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -21,9 +22,18 @@ def query(*args: str, cwd: Path | None = None) -> str:
     return subprocess.check_output(args, cwd=cwd, text=True).strip()
 
 
-def execute(*args: str, cwd: Path | None = None) -> None:
+def execute(
+    *args: str,
+    cwd: Path | None = None,
+    environment: dict[str, str] | None = None,
+) -> None:
     print(f"+ {shlex.join(args)}")
-    subprocess.run(args, cwd=cwd, check=True)
+    subprocess.run(
+        args,
+        cwd=cwd,
+        check=True,
+        env={**os.environ, **(environment or {})},
+    )
 
 
 def require_darwin() -> None:
@@ -151,6 +161,105 @@ def create_local_pod(target: str) -> None:
     shutil.copyfile(template, pod_root / template.name)
 
 
+def build_macos_framework(architecture: str, derived_data: Path) -> Path:
+    go_architecture = {"arm64": "arm64", "x86_64": "amd64"}[architecture]
+    environment = {
+        "GOARCH": go_architecture,
+        "CGO_CFLAGS": f"-arch {architecture}",
+        "CGO_LDFLAGS": f"-arch {architecture}",
+    }
+    execute("make", "-B", "c-archive", cwd=SOURCE, environment=environment)
+    if derived_data.exists():
+        shutil.rmtree(derived_data)
+    execute(
+        "xcodebuild",
+        "build",
+        "-scheme",
+        "TailscaleKit (macOS)",
+        "-derivedDataPath",
+        str(derived_data),
+        "-configuration",
+        "Release",
+        "-destination",
+        f"platform=macOS,arch={architecture}",
+        "MACOSX_DEPLOYMENT_TARGET=15.0",
+        "CODE_SIGNING_ALLOWED=NO",
+        cwd=SOURCE / "swift",
+    )
+    framework = derived_data / "Build" / "Products" / "Release" / "TailscaleKit.framework"
+    if not framework.is_dir():
+        raise SystemExit(f"Upstream macOS {architecture} build did not produce {framework}")
+    return framework
+
+
+def resolve_framework_entry(
+    framework: Path,
+    relative_path: Path,
+    *,
+    directory: bool,
+) -> tuple[Path, Path, bool]:
+    entry = framework / relative_path
+    try:
+        resolved = entry.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise SystemExit(f"Missing macOS TailscaleKit framework entry: {entry}") from error
+    if directory != resolved.is_dir():
+        kind = "directory" if directory else "file"
+        raise SystemExit(f"Expected macOS TailscaleKit {kind}: {entry}")
+    return entry, resolved, entry.is_symlink()
+
+
+def merge_macos_frameworks(arm64: Path, x86_64: Path) -> None:
+    binary, arm64_binary, binary_was_symlink = resolve_framework_entry(
+        arm64,
+        Path("TailscaleKit"),
+        directory=False,
+    )
+    _, x86_64_binary, _ = resolve_framework_entry(
+        x86_64,
+        Path("TailscaleKit"),
+        directory=False,
+    )
+    modules, arm64_modules_root, modules_were_symlink = resolve_framework_entry(
+        arm64,
+        Path("Modules"),
+        directory=True,
+    )
+    _, x86_64_modules_root, _ = resolve_framework_entry(
+        x86_64,
+        Path("Modules"),
+        directory=True,
+    )
+    arm64_modules = arm64_modules_root / "TailscaleKit.swiftmodule"
+    x86_64_modules = x86_64_modules_root / "TailscaleKit.swiftmodule"
+    if not arm64_modules.is_dir() or not x86_64_modules.is_dir():
+        raise SystemExit("Upstream macOS build did not produce architecture-specific Swift modules.")
+
+    universal = arm64_binary.with_name(f".{arm64_binary.name}.universal")
+    if universal.exists() or universal.is_symlink():
+        universal.unlink()
+    execute("lipo", "-create", str(arm64_binary), str(x86_64_binary), "-output", str(universal))
+    universal.replace(arm64_binary)
+    for module in x86_64_modules.glob("x86_64-apple-macos.*"):
+        shutil.copy2(module, arm64_modules / module.name)
+
+    architectures = set(query("lipo", "-archs", str(binary)).split())
+    if architectures != {"arm64", "x86_64"}:
+        raise SystemExit(f"Expected universal macOS TailscaleKit, found: {' '.join(sorted(architectures))}")
+    for architecture in ("arm64", "x86_64"):
+        if not (arm64_modules / f"{architecture}-apple-macos.swiftmodule").is_file():
+            raise SystemExit(f"Missing {architecture} macOS TailscaleKit Swift module.")
+    if binary.is_symlink() != binary_was_symlink or modules.is_symlink() != modules_were_symlink:
+        raise SystemExit("macOS TailscaleKit framework symlink structure changed during universal merge.")
+
+
+def build_macos_universal_framework() -> None:
+    swift_build = SOURCE / "swift" / "build"
+    arm64 = build_macos_framework("arm64", swift_build)
+    x86_64 = build_macos_framework("x86_64", SOURCE / "swift" / "build-x86_64")
+    merge_macos_frameworks(arm64, x86_64)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("platform", choices=("ios", "macos"))
@@ -160,7 +269,10 @@ def main() -> None:
     verify_toolchain(args.xcode_major)
     checkout_source()
     patch_pinned_source()
-    execute("make", args.platform, cwd=SOURCE / "swift")
+    if args.platform == "macos":
+        build_macos_universal_framework()
+    else:
+        execute("make", args.platform, cwd=SOURCE / "swift")
     create_local_pod(args.platform)
 
 

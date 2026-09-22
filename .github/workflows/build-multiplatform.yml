@@ -23,6 +23,7 @@ jobs:
           python3 tool/apple_mesh/test_private_network_state_policy.py
           python3 tool/apple_mesh/test_macos_entitlements_policy.py
           python3 tool/apple_mesh/test_libtailscale_logging_policy.py
+          python3 tool/apple_mesh/test_macos_build_compatibility_policy.py
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}

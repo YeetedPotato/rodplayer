@@ -7,6 +7,20 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 HOSTS = ROOT / "tool" / "native_hosts"
+VLCKIT_COREGRAPHICS_HELPER = """\
+def rodplayer_patch_vlckit_coregraphics(installer)
+  header = File.join(installer.sandbox.root, 'VLCKit', 'VLCKit.framework', 'Headers', 'VLCMediaThumbnailer.h')
+  original = "#if TARGET_OS_IPHONE\\n# import <CoreGraphics/CoreGraphics.h>\\n#endif"
+  replacement = '#import <CoreGraphics/CoreGraphics.h>'
+  raise 'RodPlayer expected VLCKit header was not installed' unless File.file?(header)
+
+  contents = File.read(header)
+  return if contents.include?(replacement)
+  raise 'RodPlayer cannot safely patch VLCKit header' unless contents.scan(original).length == 1
+  File.write(header, contents.sub(original, replacement))
+end
+"""
+VLCKIT_POST_INSTALL_HOOK = "  rodplayer_patch_vlckit_coregraphics(installer)\n"
 
 
 def copy(src: str, dst: str) -> None:
@@ -87,12 +101,32 @@ def patch_podfile(platform: str) -> None:
             for pod_line in reversed(pods):
                 if pod_line not in lines:
                     lines.insert(index + 1, pod_line)
-            path.write_text("\n".join(lines) + "\n")
+            patched = "\n".join(lines) + "\n"
+            if platform == "macos":
+                patched = patch_macos_vlckit_podfile(patched)
+            path.write_text(patched)
             return
     for pod_line in pods:
         if pod_line not in lines:
             lines.append(pod_line)
-    path.write_text("\n".join(lines) + "\n")
+    patched = "\n".join(lines) + "\n"
+    if platform == "macos":
+        patched = patch_macos_vlckit_podfile(patched)
+    path.write_text(patched)
+
+
+def patch_macos_vlckit_podfile(text: str) -> str:
+    if VLCKIT_COREGRAPHICS_HELPER not in text:
+        post_install = "post_install do |installer|\n"
+        if text.count(post_install) != 1:
+            raise RuntimeError("expected one generated macOS Podfile post_install block")
+        text = text.replace(post_install, f"{VLCKIT_COREGRAPHICS_HELPER}\n{post_install}")
+    post_install = "post_install do |installer|\n"
+    if text.count(post_install) != 1:
+        raise RuntimeError("expected one generated macOS Podfile post_install block")
+    if VLCKIT_POST_INSTALL_HOOK not in text:
+        text = text.replace(post_install, f"{post_install}{VLCKIT_POST_INSTALL_HOOK}")
+    return text
 
 
 def patch_macos_deployment_target() -> None:
