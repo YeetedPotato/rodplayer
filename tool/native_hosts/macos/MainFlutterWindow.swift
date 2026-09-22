@@ -181,6 +181,10 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
       bootstrap(call.arguments, result: result)
     case "resume":
       resume(result: result)
+    // P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN
+    case "p5eDebugStatus":
+      p5eDebugStatus(result: result)
+    // P5E_LIVE_PROOF_DIAGNOSTIC_END
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -297,6 +301,22 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     }
   }
 
+  // P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN
+  private func p5eDebugStatus(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor in
+      do {
+        result(try await nodeOwner.p5eDebugStatus().payload)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+  // P5E_LIVE_PROOF_DIAGNOSTIC_END
+
   private static func operationFailed() -> FlutterError {
     FlutterError(code: "private_network_operation_failed", message: nil, details: nil)
   }
@@ -331,6 +351,30 @@ private struct ApplePrivateNetworkStatus: Equatable, Sendable {
     ]
   }
 }
+
+// P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN
+private struct ApplePrivateNetworkDiagnostic: Sendable {
+  let backendState: String
+  let totalPeerCount: Int
+  let homePeerMatchCount: Int
+  let homePeerOnline: Bool?
+  let homePeerHasCurAddr: Bool?
+  let homePeerHasPeerRelay: Bool?
+  let persistedIdentity: Bool
+
+  var payload: [String: Any] {
+    [
+      "backendState": backendState,
+      "totalPeerCount": totalPeerCount,
+      "homePeerMatchCount": homePeerMatchCount,
+      "homePeerOnline": homePeerOnline ?? NSNull(),
+      "homePeerHasCurAddr": homePeerHasCurAddr ?? NSNull(),
+      "homePeerHasPeerRelay": homePeerHasPeerRelay ?? NSNull(),
+      "persistedIdentity": persistedIdentity,
+    ]
+  }
+}
+// P5E_LIVE_PROOF_DIAGNOSTIC_END
 
 private struct ApplePrivateNetworkStateStore: Sendable {
   let privateNetworkRoot: URL
@@ -468,6 +512,26 @@ private actor ApplePrivateNetworkNodeOwner {
     activeMetadata = metadata
     return await startMonitorLocked()
   }
+
+  // P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN
+  func p5eDebugStatus() async throws -> ApplePrivateNetworkDiagnostic {
+    guard let activeNode, let metadata = activeMetadata else {
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+    let backend = try JSONDecoder().decode(AppleTsnetStatus.self, from: await activeNode.statusJSON())
+    let homePeers = backend.peer.values.filter { $0.tailscaleIPs.contains(metadata.homeIpv4) }
+    let homePeer = homePeers.count == 1 ? homePeers.first : nil
+    return ApplePrivateNetworkDiagnostic(
+      backendState: backend.backendState,
+      totalPeerCount: backend.peer.count,
+      homePeerMatchCount: homePeers.count,
+      homePeerOnline: homePeer?.online,
+      homePeerHasCurAddr: homePeer.map { !($0.currentAddress?.isEmpty ?? true) },
+      homePeerHasPeerRelay: homePeer.map { $0.peerRelay?.isEmpty == false },
+      persistedIdentity: stateStore.hasPersistedIdentity
+    )
+  }
+  // P5E_LIVE_PROOF_DIAGNOSTIC_END
 
   private func startLocked(config: TailscaleKit.Configuration) async throws {
     let node: any ApplePrivateNetworkNode

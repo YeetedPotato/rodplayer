@@ -95,6 +95,92 @@ void main() {
     expect(proof, isNot(contains(authKey)));
   });
 
+  test('diagnose records only the allowlisted diagnostic payload', () async {
+    final home = await Directory.systemTemp.createTemp('p5e-proof-');
+    addTearDown(() => home.delete(recursive: true));
+    final runtime = _ProofRuntime(_directStatus);
+
+    final result = await runP5ELiveProof(
+      environment: <String, String>{
+        'P5E_ACTION': 'diagnose',
+        'P5E_PROOF_HOME': home.path,
+      },
+      runtime: runtime,
+      diagnose: () async => <String, Object?>{
+        'backendState': 'Running',
+        'totalPeerCount': 2,
+        'homePeerMatchCount': 1,
+        'homePeerOnline': true,
+        'homePeerHasCurAddr': true,
+        'homePeerHasPeerRelay': false,
+        'persistedIdentity': true,
+      },
+    );
+
+    expect(result, 0);
+    final proof = await File(
+      '${home.path}${Platform.pathSeparator}Library${Platform.pathSeparator}'
+      'Application Support${Platform.pathSeparator}RodPlayer'
+      '${Platform.pathSeparator}P5EProof${Platform.pathSeparator}proof.jsonl',
+    ).readAsString();
+    final record = jsonDecode(proof) as Map<String, Object?>;
+    expect(record.keys.toSet(), <String>{
+      'timestamp',
+      'action',
+      'backendState',
+      'totalPeerCount',
+      'homePeerMatchCount',
+      'homePeerOnline',
+      'homePeerHasCurAddr',
+      'homePeerHasPeerRelay',
+      'persistedIdentity',
+    });
+    expect(proof, isNot(contains('auth-key-sentinel')));
+  });
+
+  test('diagnose rejects unallowlisted endpoint and key data', () async {
+    final home = await Directory.systemTemp.createTemp('p5e-proof-');
+    addTearDown(() => home.delete(recursive: true));
+    final runtime = _ProofRuntime(_directStatus);
+
+    final result = await runP5ELiveProof(
+      environment: <String, String>{
+        'P5E_ACTION': 'diagnose',
+        'P5E_PROOF_HOME': home.path,
+      },
+      runtime: runtime,
+      diagnose: () async => <String, Object?>{
+        'backendState': 'Running',
+        'totalPeerCount': 1,
+        'homePeerMatchCount': 1,
+        'homePeerOnline': true,
+        'homePeerHasCurAddr': true,
+        'homePeerHasPeerRelay': false,
+        'persistedIdentity': true,
+        'curAddr': 'endpoint-sentinel',
+        'authKey': 'auth-key-sentinel',
+      },
+    );
+
+    expect(result, 1);
+  });
+
+  test('bounded cancellation returns when an event subscription never closes', () async {
+    final home = await Directory.systemTemp.createTemp('p5e-proof-');
+    addTearDown(() => home.delete(recursive: true));
+    final runtime = _ProofRuntime(_directStatus, hangOnCancel: true);
+    final watch = Stopwatch()..start();
+
+    final result = await runP5ELiveProof(
+      arguments: const <String>['--p5e-action=resume'],
+      environment: <String, String>{'HOME': home.path},
+      runtime: runtime,
+    );
+
+    expect(result, 0);
+    expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+  });
+
   test('reset requires the authoritative stopped identity-free status', () async {
     final home = await Directory.systemTemp.createTemp('p5e-proof-');
     addTearDown(() => home.delete(recursive: true));
@@ -126,15 +212,22 @@ const _stoppedWithoutIdentity = PrivateNetworkStatus(
 );
 
 class _ProofRuntime implements PrivateNetworkRuntime {
-  _ProofRuntime(this._status) : _events = StreamController<PrivateNetworkStatus>.broadcast(sync: true) {
+  _ProofRuntime(this._status, {bool hangOnCancel = false})
+    : _hangOnCancel = hangOnCancel,
+      _events = StreamController<PrivateNetworkStatus>.broadcast(sync: true) {
     _events.onListen = () {
       cachedReplayDelivered = true;
       _events.add(_status);
     };
+    if (_hangOnCancel) {
+      _events.onCancel = () => _neverCancel.future;
+    }
   }
 
   PrivateNetworkStatus _status;
   final StreamController<PrivateNetworkStatus> _events;
+  final bool _hangOnCancel;
+  final Completer<void> _neverCancel = Completer<void>();
   bool cachedReplayDelivered = false;
   bool operationCalledAfterCachedReplay = false;
   int resetCalls = 0;

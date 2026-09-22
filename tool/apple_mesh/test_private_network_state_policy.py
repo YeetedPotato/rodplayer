@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Static contract checks for the duplicated Apple D3 private-network host."""
 
+import re
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,15 @@ def private_network_source(path: Path) -> str:
     start = source.index("private final class PrivateNetworkHost")
     end = source.index("private final class AppleCompatibilityPlaybackManager", start)
     return source[start:end]
+
+
+def without_p5e_live_proof_diagnostics(source: str) -> str:
+    return re.sub(
+        r"\n?\s*// P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN.*?// P5E_LIVE_PROOF_DIAGNOSTIC_END\n?",
+        "\n",
+        source,
+        flags=re.DOTALL,
+    )
 
 
 class PrivateNetworkStatePolicyTest(unittest.TestCase):
@@ -237,10 +247,41 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertNotIn('case relay = "Relay"', status)
             self.assertNotIn('"Relay"', status)
 
+    def test_macos_live_proof_diagnostic_is_allowlisted(self) -> None:
+        source = private_network_source(HOSTS[1])
+        blocks = re.findall(
+            r"// P5E_LIVE_PROOF_DIAGNOSTIC_BEGIN(.*?)// P5E_LIVE_PROOF_DIAGNOSTIC_END",
+            source,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(len(blocks), 4)
+        diagnostic = "\n".join(blocks)
+        self.assertIn('case "p5eDebugStatus"', diagnostic)
+        self.assertIn("activeNode.statusJSON()", diagnostic)
+        for field in (
+            "backendState",
+            "totalPeerCount",
+            "homePeerMatchCount",
+            "homePeerOnline",
+            "homePeerHasCurAddr",
+            "homePeerHasPeerRelay",
+            "persistedIdentity",
+        ):
+            self.assertIn(f'"{field}"', diagnostic)
+        for forbidden in (
+            "gatewayUrl",
+            "controlUrl",
+            "authKey",
+            "tailscaleIPs:",
+            "currentAddress:",
+            "peerRelay:",
+        ):
+            self.assertNotIn(forbidden, diagnostic)
+
     def test_apple_hosts_keep_identical_private_network_implementations(self) -> None:
         self.assertEqual(
             private_network_source(HOSTS[0]),
-            private_network_source(HOSTS[1]),
+            without_p5e_live_proof_diagnostics(private_network_source(HOSTS[1])),
         )
 
 
