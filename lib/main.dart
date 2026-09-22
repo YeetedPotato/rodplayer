@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
+import 'package:rodplayer/core/network/private_network_session_controller.dart';
+import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
+import 'package:rodplayer/platform/network/method_channel_private_network_runtime.dart';
 import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
@@ -24,26 +29,45 @@ Future<void> main() async {
 }
 
 class RodPlayerApp extends StatelessWidget {
-  const RodPlayerApp({required this.preferences, required this.credentialStore, this.clientFactory = _defaultClientFactory, super.key});
+  const RodPlayerApp({
+    required this.preferences,
+    required this.credentialStore,
+    this.clientFactory = _defaultClientFactory,
+    this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
+    super.key,
+  });
 
   final SharedPreferences preferences;
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
+  final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'RodPlayer',
         theme: rodPlayerThemeData(),
-        home: RodPlayerShell(preferences: preferences, credentialStore: credentialStore, clientFactory: clientFactory),
+        home: RodPlayerShell(
+          preferences: preferences,
+          credentialStore: credentialStore,
+          clientFactory: clientFactory,
+          privateNetworkRuntimeFactory: privateNetworkRuntimeFactory,
+        ),
       );
 }
 
 class RodPlayerShell extends StatefulWidget {
-  const RodPlayerShell({required this.preferences, required this.credentialStore, this.clientFactory = _defaultClientFactory, super.key});
+  const RodPlayerShell({
+    required this.preferences,
+    required this.credentialStore,
+    this.clientFactory = _defaultClientFactory,
+    this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
+    super.key,
+  });
 
   final SharedPreferences preferences;
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
+  final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
@@ -53,11 +77,22 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   JellyfinApiClient? _client;
   InstallationIdentity? _identity;
   bool _loading = true;
+  late final PrivateNetworkSessionController _privateNetwork;
 
   @override
   void initState() {
     super.initState();
+    _privateNetwork = PrivateNetworkSessionController(
+      widget.privateNetworkRuntimeFactory(),
+    );
+    unawaited(_privateNetwork.start());
     _restore();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_privateNetwork.close());
+    super.dispose();
   }
 
   Future<void> _restore() async {
@@ -124,3 +159,6 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
 Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client, String itemId) => VideoPlayerView(engine: engine, surface: MediaKitPlaybackVideoSurface(engine), client: client, itemId: itemId);
 
 JellyfinApiClient _defaultClientFactory(String baseUrl, InstallationIdentity identity) => JellyfinApiClient(baseUrl: baseUrl, identity: identity);
+
+PrivateNetworkRuntime _defaultPrivateNetworkRuntimeFactory() =>
+    MethodChannelPrivateNetworkRuntime();

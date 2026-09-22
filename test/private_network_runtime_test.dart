@@ -84,6 +84,87 @@ void main() {
       },
     );
 
+    test('rejects malformed or non-exact loopback gateways', () {
+      const invalidGateways = <String>[
+        'https://127.0.0.1:43127',
+        'http://localhost:43127',
+        'http://0.0.0.0:43127',
+        'http://100.64.0.1:43127',
+        'http://[::1]:43127',
+        'http://127.0.0.1',
+        'http://127.0.0.1:0',
+        'http://127.0.0.1:65536',
+        'http://user@127.0.0.1:43127',
+        'http://127.0.0.1:43127?token=secret',
+        'http://127.0.0.1:43127#fragment',
+        'http://127.0.0.1:43127/jellyfin',
+        'not a uri',
+      ];
+
+      for (final gateway in invalidGateways) {
+        expect(
+          () => PrivateNetworkStatus.fromPayload(
+            <String, Object?>{
+              'state': 'ready',
+              'path': 'direct',
+              'hasPersistedIdentity': true,
+              'reason': 'none',
+              'gatewayUrl': gateway,
+            },
+          ),
+          throwsA(
+            isA<PrivateNetworkException>().having(
+              (error) => error.failure,
+              'failure',
+              PrivateNetworkFailure.invalidNativeResponse,
+            ),
+          ),
+          reason: gateway,
+        );
+      }
+    });
+
+    test('rejects invalid ready and non-ready gateway combinations', () {
+      const validGateway = 'http://127.0.0.1:43127';
+      final invalidPayloads = <Map<String, Object?>>[
+        <String, Object?>{
+          'state': 'ready',
+          'path': 'none',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': validGateway,
+        },
+        <String, Object?>{
+          'state': 'ready',
+          'path': 'direct',
+          'hasPersistedIdentity': false,
+          'reason': 'none',
+          'gatewayUrl': validGateway,
+        },
+        <String, Object?>{
+          'state': 'ready',
+          'path': 'direct',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': null,
+        },
+        <String, Object?>{
+          'state': 'starting',
+          'path': 'direct',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': validGateway,
+        },
+      ];
+
+      for (final payload in invalidPayloads) {
+        expect(
+          () => PrivateNetworkStatus.fromPayload(payload),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+      }
+    });
+
     test(
       'rejects unavailable status without a reason',
       () {
