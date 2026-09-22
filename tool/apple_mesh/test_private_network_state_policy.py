@@ -71,9 +71,6 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertNotIn("try await stop()", reset)
             self.assertLess(reset.index("try await stopLocked()"), reset.index("try stateStore.reset()"))
             self.assertIn("private_network_operation_failed", source)
-            self.assertIn('"state": "stopped"', source)
-            self.assertIn('"path": "none"', source)
-            self.assertIn('"gatewayUrl": NSNull()', source)
             self.assertIn("for _ in 0 ..< 20", source)
             self.assertIn("Task.sleep(nanoseconds: 50_000_000)", source)
             self.assertIn("guard try await stateStore.waitForPersistedIdentity() else", bootstrap)
@@ -89,7 +86,9 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertNotIn("result(operationFailed())", source)
             self.assertNotIn("eventSink(operationFailed())", source)
             status = source[source.index('case "status":'):source.index('case "stop":')]
-            self.assertLess(status.index("guard stateStore != nil"), status.index("result(statusPayload())"))
+            self.assertIn("status(result: result)", status)
+            self.assertIn("private func status(result:", source)
+            self.assertIn("await nodeOwner.currentStatus()", source)
             listen = source[source.index("func onListen"):source.index("func onCancel")]
             self.assertIn("eventSink(Self.operationFailed())", listen)
 
@@ -122,17 +121,11 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("try await nodeOwner.bootstrap", host_bootstrap)
             self.assertIn("try await nodeOwner.resume()", host_resume)
             self.assertIn("guard stateStore.hasPersistedIdentity else", source)
-            self.assertIn('"state": "unavailable"', source)
-            self.assertIn('"reason": "no_identity"', source)
-            self.assertIn('"state": "stopped"', source)
-            self.assertIn('"path": "none"', source)
-            self.assertIn('"gatewayUrl": NSNull()', source)
+            self.assertIn('reason: "no_identity"', source)
             self.assertNotIn('"state": "ready"', source)
-            self.assertNotIn('"path": "direct"', source)
             self.assertNotIn('"path": "relay"', source)
             self.assertNotIn(".down()", source)
             self.assertNotIn(".loopback()", source)
-            self.assertNotIn(".statusJSON()", source)
             self.assertNotIn(".addrs()", source)
             self.assertNotIn(".dial(", source)
             self.assertIn("components.path.isEmpty || components.path == \"/\"", source)
@@ -146,8 +139,103 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             ]
             self.assertIn("try await node.up()", adapter)
             self.assertIn("try await node.close()", adapter)
+            self.assertIn("try await node.statusJSON()", adapter)
             self.assertNotIn("TailscaleNode", source[:source.index("private final class TailscaleKitNodeAdapter")])
             self.assertNotRegex(source, r"hskey-auth-[A-Za-z0-9_-]{12}-[A-Za-z0-9_-]{64}")
+
+    def test_status_monitor_is_direct_only_and_lifecycle_owned(self) -> None:
+        for path in HOSTS:
+            source = private_network_source(path)
+            owner = source[source.index("actor ApplePrivateNetworkNodeOwner"):]
+            self.assertIn("func statusJSON() async throws -> Data", source)
+            self.assertIn("private struct AppleTsnetStatus: Decodable", source)
+            self.assertIn('case backendState = "BackendState"', source)
+            self.assertIn('case peer = "Peer"', source)
+            for field in ("TailscaleIPs", "Online", "CurAddr", "PeerRelay"):
+                self.assertIn(f'"{field}"', source)
+            self.assertIn("$0.tailscaleIPs.contains(metadata.homeIpv4)", owner)
+            self.assertIn('backend.backendState == "Running"', owner)
+            self.assertIn("peer.online", owner)
+            self.assertIn("let currentAddress = peer.currentAddress", owner)
+            self.assertIn("!currentAddress.isEmpty", owner)
+            self.assertIn("peer.peerRelay?.isEmpty != false", owner)
+            self.assertIn('return .starting(path: "direct"', owner)
+            self.assertIn('reason: "direct_path_unavailable"', owner)
+            self.assertIn('reason: "transport_failure"', owner)
+            self.assertIn("private var monitorTask: Task<Void, Never>?", owner)
+            self.assertIn("private func startMonitorLocked()", owner)
+            self.assertIn("private func stopMonitorLocked()", owner)
+            self.assertIn("Task.sleep(nanoseconds: 1_000_000_000)", owner)
+            self.assertIn("guard cachedStatus != status else { return }", owner)
+            stop = owner[owner.index("func stop() async throws"):owner.index("func reset()")]
+            reset = owner[owner.index("func reset() async throws"):owner.index("private func stopLocked()")]
+            self.assertLess(stop.index("await stopMonitorLocked()"), stop.index("try await stopLocked()"))
+            self.assertLess(reset.index("await stopMonitorLocked()"), reset.index("try await stopLocked()"))
+            self.assertIn("return await startMonitorLocked()", owner)
+            self.assertIn("func onListen", source)
+            self.assertNotIn("startMonitorLocked()", source[source.index("func onListen"):source.index("func onCancel")])
+
+    def test_status_failures_and_observers_remain_authoritative(self) -> None:
+        for path in HOSTS:
+            source = private_network_source(path)
+            owner = source[source.index("actor ApplePrivateNetworkNodeOwner"):]
+            resume = owner[owner.index("func resume() async throws"):owner.index("private func startLocked")]
+            self.assertLess(
+                resume.index('publish(.unavailable(reason: "no_identity"'),
+                resume.index("throw ApplePrivateNetworkNodeOwnerError.noIdentity"),
+            )
+            observer = owner[
+                owner.index("func setStatusObserver"):
+                owner.index("func currentStatus()")
+            ]
+            self.assertLess(
+                observer.index("statusObserver = observer"),
+                observer.index("observer(cachedStatus)"),
+            )
+            host_resume = source[
+                source.index("private func resume(result:"):
+                source.index("private static func operationFailed")
+            ]
+            no_identity = host_resume[
+                host_resume.index("catch ApplePrivateNetworkNodeOwnerError.noIdentity"):
+                host_resume.index("catch {", host_resume.index("catch ApplePrivateNetworkNodeOwnerError.noIdentity"))
+            ]
+            self.assertIn("await nodeOwner.currentStatus()", no_identity)
+            self.assertIn("result(status.payload)", no_identity)
+            self.assertNotIn("noIdentityPayload", source)
+
+            stop = owner[owner.index("func stop() async throws"):owner.index("func reset()")]
+            reset = owner[owner.index("func reset() async throws"):owner.index("private func stopLocked()")]
+            for operation in (stop, reset):
+                self.assertIn("await stopMonitorLocked()", operation)
+                self.assertIn("catch {", operation)
+                self.assertIn('publish(.unavailable(reason: "transport_failure"', operation)
+                self.assertIn("throw error", operation)
+            self.assertLess(
+                reset.index('publish(.unavailable(reason: "transport_failure"'),
+                reset.index("try stateStore.reset()"),
+            )
+            stop_locked = owner[
+                owner.index("private func stopLocked()"):
+                owner.index("private func startMonitorLocked()")
+            ]
+            self.assertLess(
+                stop_locked.index("try await activeNode.close()"),
+                stop_locked.index("self.activeNode = nil"),
+            )
+            monitor = owner[
+                owner.index("private func startMonitorLocked()"):
+                owner.index("private func stopMonitorLocked()")
+            ]
+            self.assertIn("guard !Task.isCancelled, let self else { return }", monitor)
+
+    def test_relay_is_not_a_directness_input(self) -> None:
+        for path in HOSTS:
+            source = private_network_source(path)
+            status = source[source.index("private struct AppleTsnetStatus"):source.index("private struct RodPlayerTailscaleLogSink")]
+            self.assertIn('case peerRelay = "PeerRelay"', status)
+            self.assertNotIn('case relay = "Relay"', status)
+            self.assertNotIn('"Relay"', status)
 
     def test_apple_hosts_keep_identical_private_network_implementations(self) -> None:
         self.assertEqual(

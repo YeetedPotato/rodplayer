@@ -128,6 +128,46 @@ void main() {
         );
       },
     );
+
+    test(
+      'direct monitoring state is not proxyable before a gateway exists',
+      () {
+        final status = PrivateNetworkStatus.fromPayload(
+          <String, Object?>{
+            'state': 'starting',
+            'path': 'direct',
+            'hasPersistedIdentity': true,
+            'reason': 'none',
+            'gatewayUrl': null,
+          },
+        );
+
+        expect(status.path, PrivateNetworkPath.direct);
+        expect(status.canProxy, isFalse);
+        expect(status.gatewayBaseUrl, isNull);
+      },
+    );
+
+    test(
+      'direct path unavailable state is not proxyable',
+      () {
+        final status = PrivateNetworkStatus.fromPayload(
+          <String, Object?>{
+            'state': 'unavailable',
+            'path': 'none',
+            'hasPersistedIdentity': true,
+            'reason': 'direct_path_unavailable',
+            'gatewayUrl': null,
+          },
+        );
+
+        expect(
+          status.unavailableReason,
+          PrivateNetworkUnavailableReason.directPathUnavailable,
+        );
+        expect(status.canProxy, isFalse);
+      },
+    );
   });
 
   group('PrivateNetworkBootstrap', () {

@@ -143,6 +143,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
   private var eventSink: FlutterEventSink?
   private let stateStore: ApplePrivateNetworkStateStore?
   private let nodeOwner: ApplePrivateNetworkNodeOwner?
+  private var cachedStatus: ApplePrivateNetworkStatus
 
   override init() {
     do {
@@ -150,11 +151,20 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
       try stateStore.prepare()
       self.stateStore = stateStore
       nodeOwner = ApplePrivateNetworkNodeOwner(stateStore: stateStore)
+      cachedStatus = .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
     } catch {
       stateStore = nil
       nodeOwner = nil
+      cachedStatus = .stopped(hasPersistedIdentity: false)
     }
     super.init()
+    if let nodeOwner {
+      Task { [weak self, nodeOwner] in
+        await nodeOwner.setStatusObserver { [weak self] status in
+          Task { @MainActor [weak self] in self?.receiveStatus(status) }
+        }
+      }
+    }
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -162,11 +172,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     case "ping":
       result(true)
     case "status":
-      guard stateStore != nil else {
-        result(Self.operationFailed())
-        return
-      }
-      result(statusPayload())
+      status(result: result)
     case "stop":
       stop(result: result)
     case "reset":
@@ -200,7 +206,25 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
       eventSink?(Self.operationFailed())
       return
     }
-    eventSink?(statusPayload())
+    eventSink?(cachedStatus.payload)
+  }
+
+  private func receiveStatus(_ status: ApplePrivateNetworkStatus) {
+    guard cachedStatus != status else { return }
+    cachedStatus = status
+    eventSink?(status.payload)
+  }
+
+  private func status(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      let status = await nodeOwner.currentStatus()
+      self?.receiveStatus(status)
+      result(status.payload)
+    }
   }
 
   private func stop(result: @escaping FlutterResult) {
@@ -211,7 +235,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     Task { @MainActor [weak self] in
       do {
         try await nodeOwner.stop()
-        self?.emitStatus()
+        self?.receiveStatus(await nodeOwner.currentStatus())
         result(nil)
       } catch {
         result(Self.operationFailed())
@@ -227,7 +251,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     Task { @MainActor [weak self] in
       do {
         try await nodeOwner.reset()
-        self?.emitStatus()
+        self?.receiveStatus(await nodeOwner.currentStatus())
         result(nil)
       } catch {
         result(Self.operationFailed())
@@ -244,9 +268,9 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
       do {
         let bootstrap = try ApplePrivateNetworkBootstrap(arguments: arguments)
         let metadata = ApplePrivateNetworkMetadata.from(bootstrap: bootstrap)
-        try await nodeOwner.bootstrap(metadata: metadata, authKey: bootstrap.authKey)
-        emitStatus()
-        result(statusPayload())
+        let status = try await nodeOwner.bootstrap(metadata: metadata, authKey: bootstrap.authKey)
+        receiveStatus(status)
+        result(status.payload)
       } catch {
         result(Self.operationFailed())
       }
@@ -260,11 +284,13 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
         return
       }
       do {
-        try await nodeOwner.resume()
-        emitStatus()
-        result(statusPayload())
+        let status = try await nodeOwner.resume()
+        receiveStatus(status)
+        result(status.payload)
       } catch ApplePrivateNetworkNodeOwnerError.noIdentity {
-        result(Self.noIdentityPayload())
+        let status = await nodeOwner.currentStatus()
+        receiveStatus(status)
+        result(status.payload)
       } catch {
         result(Self.operationFailed())
       }
@@ -275,23 +301,32 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     FlutterError(code: "private_network_operation_failed", message: nil, details: nil)
   }
 
-  private static func noIdentityPayload() -> [String: Any] {
-    [
-      "state": "unavailable",
-      "path": "none",
-      "hasPersistedIdentity": false,
-      "reason": "no_identity",
-      "gatewayUrl": NSNull(),
-    ]
+}
+
+private struct ApplePrivateNetworkStatus: Equatable, Sendable {
+  let state: String
+  let path: String
+  let hasPersistedIdentity: Bool
+  let reason: String
+
+  static func stopped(hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "stopped", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: "none")
   }
 
-  private func statusPayload() -> [String: Any] {
-    // D3 keeps the app-visible data plane fail-closed until P5-E/P5-F.
+  static func starting(path: String, hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "starting", path: path, hasPersistedIdentity: hasPersistedIdentity, reason: "none")
+  }
+
+  static func unavailable(reason: String, hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "unavailable", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: reason)
+  }
+
+  var payload: [String: Any] {
     [
-      "state": "stopped",
-      "path": "none",
-      "hasPersistedIdentity": stateStore?.hasPersistedIdentity ?? false,
-      "reason": "none",
+      "state": state,
+      "path": path,
+      "hasPersistedIdentity": hasPersistedIdentity,
+      "reason": reason,
       "gatewayUrl": NSNull(),
     ]
   }
@@ -356,6 +391,7 @@ private struct ApplePrivateNetworkStateStore: Sendable {
 private protocol ApplePrivateNetworkNode: AnyObject, Sendable {
   func up() async throws
   func close() async throws
+  func statusJSON() async throws -> Data
 }
 
 private protocol ApplePrivateNetworkNodeFactory: Sendable {
@@ -373,6 +409,10 @@ private actor ApplePrivateNetworkNodeOwner {
   private let stateStore: ApplePrivateNetworkStateStore
   private let factory: any ApplePrivateNetworkNodeFactory
   private var activeNode: (any ApplePrivateNetworkNode)?
+  private var activeMetadata: ApplePrivateNetworkMetadata?
+  private var cachedStatus: ApplePrivateNetworkStatus
+  private var statusObserver: (@Sendable (ApplePrivateNetworkStatus) -> Void)?
+  private var monitorTask: Task<Void, Never>?
   private var lifecycleLocked = false
   private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -382,9 +422,17 @@ private actor ApplePrivateNetworkNodeOwner {
   ) {
     self.stateStore = stateStore
     self.factory = factory
+    cachedStatus = .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
   }
 
-  func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws {
+  func setStatusObserver(_ observer: @escaping @Sendable (ApplePrivateNetworkStatus) -> Void) {
+    statusObserver = observer
+    observer(cachedStatus)
+  }
+
+  func currentStatus() -> ApplePrivateNetworkStatus { cachedStatus }
+
+  func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws -> ApplePrivateNetworkStatus {
     await acquireLifecycle()
     defer { releaseLifecycle() }
     guard activeNode == nil else {
@@ -400,20 +448,25 @@ private actor ApplePrivateNetworkNodeOwner {
       try await stopLocked()
       throw ApplePrivateNetworkNodeOwnerError.startFailed
     }
+    activeMetadata = metadata
+    return await startMonitorLocked()
   }
 
-  func resume() async throws {
+  func resume() async throws -> ApplePrivateNetworkStatus {
     await acquireLifecycle()
     defer { releaseLifecycle() }
     guard activeNode == nil else {
       throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
     }
     guard stateStore.hasPersistedIdentity else {
+      publish(.unavailable(reason: "no_identity", hasPersistedIdentity: false))
       throw ApplePrivateNetworkNodeOwnerError.noIdentity
     }
     try stateStore.prepare()
     let metadata = try stateStore.loadMetadata()
     try await startLocked(config: configuration(metadata: metadata, authKey: nil))
+    activeMetadata = metadata
+    return await startMonitorLocked()
   }
 
   private func startLocked(config: TailscaleKit.Configuration) async throws {
@@ -453,20 +506,97 @@ private actor ApplePrivateNetworkNodeOwner {
   func stop() async throws {
     await acquireLifecycle()
     defer { releaseLifecycle() }
-    try await stopLocked()
+    await stopMonitorLocked()
+    do {
+      try await stopLocked()
+    } catch {
+      publish(.unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity))
+      throw error
+    }
+    publish(.stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity))
   }
 
   func reset() async throws {
     await acquireLifecycle()
     defer { releaseLifecycle() }
-    try await stopLocked()
+    await stopMonitorLocked()
+    do {
+      try await stopLocked()
+    } catch {
+      publish(.unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity))
+      throw error
+    }
     try stateStore.reset()
+    publish(.stopped(hasPersistedIdentity: false))
   }
 
   private func stopLocked() async throws {
     guard let activeNode else { return }
     try await activeNode.close()
     self.activeNode = nil
+    activeMetadata = nil
+  }
+
+  private func startMonitorLocked() async -> ApplePrivateNetworkStatus {
+    await stopMonitorLocked()
+    let status = await sampleStatus()
+    publish(status)
+    monitorTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(nanoseconds: 1_000_000_000)
+        } catch {
+          return
+        }
+        guard !Task.isCancelled, let self else { return }
+        await self.pollStatus()
+      }
+    }
+    return status
+  }
+
+  private func stopMonitorLocked() async {
+    let task = monitorTask
+    monitorTask = nil
+    task?.cancel()
+    await task?.value
+  }
+
+  private func pollStatus() async {
+    guard monitorTask != nil else { return }
+    publish(await sampleStatus())
+  }
+
+  private func sampleStatus() async -> ApplePrivateNetworkStatus {
+    guard let activeNode, let metadata = activeMetadata else {
+      return .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    }
+    do {
+      let backend = try JSONDecoder().decode(AppleTsnetStatus.self, from: await activeNode.statusJSON())
+      guard backend.backendState == "Running" else {
+        return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      let homePeers = backend.peer.values.filter { $0.tailscaleIPs.contains(metadata.homeIpv4) }
+      guard
+        homePeers.count == 1,
+        let peer = homePeers.first,
+        peer.online,
+        let currentAddress = peer.currentAddress,
+        !currentAddress.isEmpty,
+        peer.peerRelay?.isEmpty != false
+      else {
+        return .unavailable(reason: "direct_path_unavailable", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      return .starting(path: "direct", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    } catch {
+      return .unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    }
+  }
+
+  private func publish(_ status: ApplePrivateNetworkStatus) {
+    guard cachedStatus != status else { return }
+    cachedStatus = status
+    statusObserver?(status)
   }
 
   private func acquireLifecycle() async {
@@ -499,6 +629,34 @@ private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked
 
   func close() async throws {
     try await node.close()
+  }
+
+  func statusJSON() async throws -> Data {
+    try await node.statusJSON()
+  }
+}
+
+private struct AppleTsnetStatus: Decodable {
+  let backendState: String
+  let peer: [String: AppleTsnetPeer]
+
+  enum CodingKeys: String, CodingKey {
+    case backendState = "BackendState"
+    case peer = "Peer"
+  }
+}
+
+private struct AppleTsnetPeer: Decodable {
+  let tailscaleIPs: [String]
+  let currentAddress: String?
+  let peerRelay: String?
+  let online: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case tailscaleIPs = "TailscaleIPs"
+    case currentAddress = "CurAddr"
+    case peerRelay = "PeerRelay"
+    case online = "Online"
   }
 }
 
