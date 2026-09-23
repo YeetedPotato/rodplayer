@@ -83,10 +83,15 @@ void main() {
 
     test('event status wins over a stale startup result', () async {
       final status = Completer<PrivateNetworkStatus>();
-      final runtime = _FakeRuntime(statusFuture: status.future);
+      final statusStarted = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusFuture: status.future,
+        statusStarted: statusStarted,
+      );
       final controller = PrivateNetworkSessionController(runtime);
 
       final start = controller.start();
+      await statusStarted.future;
       runtime.events.add(
         _status(
           state: PrivateNetworkState.unavailable,
@@ -107,6 +112,45 @@ void main() {
         PrivateNetworkUnavailableReason.directPathUnavailable,
       );
       expect(runtime.resumeCalls, 0);
+      await controller.close();
+    });
+
+    test('event status wins over a stale resume result', () async {
+      final resume = Completer<PrivateNetworkStatus>();
+      final resumeStarted = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusValue: _status(
+          state: PrivateNetworkState.stopped,
+          hasIdentity: true,
+        ),
+        resumeFuture: resume.future,
+        resumeStarted: resumeStarted,
+      );
+      final controller = PrivateNetworkSessionController(runtime);
+
+      final start = controller.start();
+      await resumeStarted.future;
+      runtime.events.add(
+        _status(
+          state: PrivateNetworkState.unavailable,
+          reason: PrivateNetworkUnavailableReason.directPathUnavailable,
+          hasIdentity: true,
+        ),
+      );
+      resume.complete(
+        _status(
+          state: PrivateNetworkState.starting,
+          hasIdentity: true,
+        ),
+      );
+      await start;
+
+      expect(runtime.resumeCalls, 1);
+      expect(runtime.bootstrapCalls, 0);
+      expect(
+        controller.status.value?.unavailableReason,
+        PrivateNetworkUnavailableReason.directPathUnavailable,
+      );
       await controller.close();
     });
 
@@ -147,8 +191,11 @@ class _FakeRuntime implements PrivateNetworkRuntime {
     this.hostAvailable = true,
     this.statusValue,
     this.statusFuture,
+    this.statusStarted,
     this.statusError,
     this.resumeValue,
+    this.resumeFuture,
+    this.resumeStarted,
     this.resumeError,
     void Function()? onCancel,
   }) : events = StreamController<PrivateNetworkStatus>.broadcast(
@@ -159,8 +206,11 @@ class _FakeRuntime implements PrivateNetworkRuntime {
   final bool hostAvailable;
   final PrivateNetworkStatus? statusValue;
   final Future<PrivateNetworkStatus>? statusFuture;
+  final Completer<void>? statusStarted;
   final Object? statusError;
   final PrivateNetworkStatus? resumeValue;
+  final Future<PrivateNetworkStatus>? resumeFuture;
+  final Completer<void>? resumeStarted;
   final Object? resumeError;
   final StreamController<PrivateNetworkStatus> events;
   int resumeCalls = 0;
@@ -183,12 +233,16 @@ class _FakeRuntime implements PrivateNetworkRuntime {
   @override
   Future<PrivateNetworkStatus> resume() async {
     resumeCalls++;
+    resumeStarted?.complete();
     if (resumeError != null) throw resumeError!;
-    return resumeValue ?? statusValue!;
+    return resumeFuture != null
+        ? await resumeFuture!
+        : resumeValue ?? statusValue!;
   }
 
   @override
   Future<PrivateNetworkStatus> status() {
+    statusStarted?.complete();
     if (statusError != null) {
       return Future<PrivateNetworkStatus>.error(statusError!);
     }
