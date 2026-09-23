@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import build_tailscalekit as build
 import prepare_pinned_tailscale_source as proof
+import run_direct_only_go_proof as go_proof
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,14 +43,71 @@ class DirectOnlyIntegrationPolicyTest(unittest.TestCase):
             build.verify_clean_checkout(source, revision)
             with self.assertRaises(SystemExit):
                 build.verify_clean_checkout(source, "0" * 40)
+            subprocess.run(["git", "remote", "add", "origin", "https://example.invalid/repository.git"], cwd=source, check=True)
+            with self.assertRaises(SystemExit):
+                build.verify_clean_checkout(source, revision, "https://wrong.example/repository.git")
             (source / "file").write_text("dirty\n")
             with self.assertRaises(SystemExit):
                 build.verify_clean_checkout(source, revision)
 
+    def test_two_preparations_start_from_clean_exact_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base"
+            base.mkdir()
+
+            def repository(name: str, origin: str) -> tuple[Path, str]:
+                source = base / name
+                subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+                (source / "pin.txt").write_text(f"{name}\n")
+                subprocess.run(["git", "add", "pin.txt"], cwd=source, check=True)
+                subprocess.run(
+                    ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                     "commit", "--quiet", "-m", "pin"], cwd=source, check=True,
+                )
+                subprocess.run(["git", "remote", "add", "origin", origin], cwd=source, check=True)
+                return source, build.query("git", "rev-parse", "HEAD", cwd=source)
+
+            lib, lib_commit = repository("libtailscale", build.PIN["repository"])
+            tailscale, ts_commit = repository("tailscale", build.TAILSCALE_REPOSITORY)
+            patches = root / "patches"
+            patches.mkdir()
+            for name, filename in (
+                ("libtailscale", LIBTAILSCALE_PATCH.name),
+                ("tailscale", TAILSCALE_PATCH.name),
+            ):
+                (patches / filename).write_text(
+                    "diff --git a/pin.txt b/pin.txt\n"
+                    "--- a/pin.txt\n+++ b/pin.txt\n@@ -1 +1 @@\n"
+                    f"-{name}\n+patched-{name}\n"
+                )
+            with (patch.object(build, "BUILD_ROOT", root / "runs"),
+                  patch.object(build, "SOURCE", lib),
+                  patch.object(build, "TAILSCALE_SOURCE", tailscale),
+                  patch.object(build, "PATCHES", patches),
+                  patch.dict(build.PIN, {"commit": lib_commit}),
+                  patch.object(build, "TAILSCALE_COMMIT", ts_commit)):
+                for _ in range(2):
+                    with build.disposable_build_sources() as (run, lib_worktree, ts_worktree):
+                        for worktree, commit, origin, name in (
+                            (lib_worktree, lib_commit, build.PIN["repository"], "libtailscale"),
+                            (ts_worktree, ts_commit, build.TAILSCALE_REPOSITORY, "tailscale"),
+                        ):
+                            build.verify_clean_checkout(worktree, commit, origin)
+                            self.assertEqual((worktree / "pin.txt").read_text(), f"{name}\n")
+                        build.apply_direct_only_patches(lib_worktree, ts_worktree)
+                        for worktree, name in ((lib_worktree, "libtailscale"), (ts_worktree, "tailscale")):
+                            self.assertEqual((worktree / "pin.txt").read_text(), f"patched-{name}\n")
+                            (worktree / "generated.txt").write_text("build output\n")
+                        environment = build.build_workspace_environment(run)
+                        self.assertEqual(Path(environment["GOWORK"]).parent, run)
+                    build.verify_clean_checkout(lib, lib_commit, build.PIN["repository"])
+                    build.verify_clean_checkout(tailscale, ts_commit, build.TAILSCALE_REPOSITORY)
+
     def test_patches_are_ordered_and_source_checked(self) -> None:
         calls = []
         with patch.object(build, "execute", side_effect=lambda *a, **k: calls.append((a, k))):
-            build.apply_direct_only_patches()
+            build.apply_direct_only_patches(build.SOURCE, build.TAILSCALE_SOURCE)
         self.assertEqual(len(calls), 4)
         for index, (source, patch_file) in enumerate(
             ((build.TAILSCALE_SOURCE, TAILSCALE_PATCH), (build.SOURCE, LIBTAILSCALE_PATCH))
@@ -62,19 +120,19 @@ class DirectOnlyIntegrationPolicyTest(unittest.TestCase):
             self.assertEqual(check[1]["cwd"], source)
             self.assertEqual(apply[1]["cwd"], source)
         main = inspect.getsource(build.main)
-        self.assertLess(main.index("checkout_source()"), main.index("apply_direct_only_patches()"))
-        self.assertLess(main.index("apply_direct_only_patches()"), main.index("patch_pinned_source()"))
-        self.assertLess(main.index("patch_pinned_source()"), main.index("build_workspace_environment()"))
+        self.assertLess(main.index("checkout_source()"), main.index("with disposable_build_sources()"))
+        self.assertLess(main.index("with disposable_build_sources()"), main.index("apply_direct_only_patches("))
+        self.assertLess(main.index("apply_direct_only_patches("), main.index("patch_pinned_source("))
+        self.assertLess(main.index("patch_pinned_source("), main.index("build_workspace_environment("))
 
     def test_build_explicitly_selects_patched_local_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            with patch.object(build, "BUILD_SOURCE", Path(temporary)):
-                environment = build.build_workspace_environment()
-                work = Path(environment["GOWORK"])
-                self.assertEqual(work.parent, Path(temporary))
-                self.assertEqual(environment["GOTOOLCHAIN"], "local")
-                self.assertIn("use ./libtailscale", work.read_text())
-                self.assertIn("replace tailscale.com v1.94.1 => ./tailscale", work.read_text())
+            environment = build.build_workspace_environment(Path(temporary))
+            work = Path(environment["GOWORK"])
+            self.assertEqual(work.parent, Path(temporary))
+            self.assertEqual(environment["GOTOOLCHAIN"], "local")
+            self.assertIn("use ./libtailscale", work.read_text())
+            self.assertIn("replace tailscale.com v1.94.1 => ./tailscale", work.read_text())
         macos_build = inspect.getsource(build.build_macos_framework)
         self.assertIn("**build_env", macos_build)
         self.assertEqual(macos_build.count("environment=environment"), 2)
@@ -93,6 +151,23 @@ class DirectOnlyIntegrationPolicyTest(unittest.TestCase):
             "TestDirectOnlyDataIsPerServer",
         ):
             self.assertIn(text, transport)
+
+    def test_ci_runs_substantive_go_proof_and_patched_bridge_tests(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-multiplatform.yml").read_text()
+        proof_job = workflow[workflow.index("  direct-only-proof:"):workflow.index("  test:")]
+        self.assertIn("actions/setup-go@v5", proof_job)
+        self.assertIn("go-version: '1.25.5'", proof_job)
+        self.assertIn("prepare_pinned_tailscale_source.py --go", proof_job)
+        self.assertIn("run_direct_only_go_proof.py --go", proof_job)
+        self.assertIn("--broader", proof_job)
+        self.assertIn('packages = ["./wgengine/...", "./tsnet"]', inspect.getsource(go_proof.run_proof))
+        macos_job = workflow[workflow.index("  macos:"):workflow.index("  windows:")]
+        self.assertIn("build_tailscalekit.py macos", macos_job)
+        self.assertIn("--run-bridge-tests", macos_job)
+        builder = inspect.getsource(build.main)
+        self.assertLess(builder.index("apply_direct_only_patches("), builder.index("if args.run_bridge_tests:"))
+        self.assertIn('"^(TestDirectOnlyDataConfiguration|TestConn)$"', builder)
+        self.assertIn("cwd=lib_source, environment=build_env", builder)
 
     def test_bridge_and_swift_contract(self) -> None:
         bridge = LIBTAILSCALE_PATCH.read_text()

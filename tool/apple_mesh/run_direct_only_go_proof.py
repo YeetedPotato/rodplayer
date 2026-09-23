@@ -49,7 +49,7 @@ def run_proof(source: Path, go: Path, broader: bool) -> None:
     }
     packages = ["./wgengine/magicsock"]
     if broader:
-        packages = ["./wgengine/..."]
+        packages = ["./wgengine/...", "./tsnet"]
     subprocess.run([str(go), "test", *packages, "-count=1"], cwd=source, env=env, check=True)
 
 

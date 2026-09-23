@@ -14,6 +14,17 @@ env:
   FLUTTER_CHANNEL: stable
 
 jobs:
+  direct-only-proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25.5'}
+      - name: Verify pinned direct-only transport
+        run: |
+          python3 tool/apple_mesh/prepare_pinned_tailscale_source.py --go "$(command -v go)"
+          python3 tool/apple_mesh/run_direct_only_go_proof.py --go "$(command -v go)" --broader
+
   test:
     runs-on: ubuntu-24.04
     steps:
@@ -139,7 +150,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
       - name: Build pinned macOS TailscaleKit framework
-        run: python3 tool/apple_mesh/build_tailscalekit.py macos --xcode-major ${{ matrix.xcode_major }}
+        run: python3 tool/apple_mesh/build_tailscalekit.py macos --xcode-major ${{ matrix.xcode_major }} --run-bridge-tests
       - name: Generate macOS project
         run: flutter create --platforms=macos .
       - name: Apply checked-in macOS native playback handlers

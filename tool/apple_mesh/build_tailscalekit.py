@@ -2,6 +2,7 @@
 """Build the pinned upstream TailscaleKit framework for one Apple platform."""
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ import re
 import shutil
 import shlex
 import subprocess
+import tempfile
+from typing import Iterator
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,12 +59,21 @@ def verify_toolchain(xcode_major: int) -> None:
         raise SystemExit(f"Xcode {xcode_major} is required; found: {xcode_version}")
 
 
-def verify_clean_checkout(source: Path, commit: str) -> None:
-    if not (source / ".git").is_dir():
+def verify_clean_checkout(source: Path, commit: str, origin: str | None = None) -> None:
+    if not (source / ".git").exists():
         raise SystemExit(f"Refusing non-Git build source: {source}")
+    if Path(query("git", "rev-parse", "--show-toplevel", cwd=source)).resolve() != source.resolve():
+        raise SystemExit(f"Unexpected build source root: {source}")
     revision = query("git", "rev-parse", "HEAD", cwd=source)
     if revision != commit:
         raise SystemExit(f"Pinned revision mismatch: expected {commit}, got {revision}")
+    if origin is not None:
+        try:
+            actual_origin = query("git", "remote", "get-url", "origin", cwd=source)
+        except subprocess.CalledProcessError as error:
+            raise SystemExit(f"Missing build source origin: {source}") from error
+        if actual_origin != origin:
+            raise SystemExit(f"Unexpected build source origin: {source}")
     if query("git", "status", "--porcelain", cwd=source):
         raise SystemExit(f"Build source is dirty; use a fresh build-managed checkout: {source}")
 
@@ -72,7 +84,7 @@ def checkout_pinned(source: Path, repository: str, commit: str) -> None:
         execute("git", "clone", "--filter=blob:none", "--no-checkout", repository, str(source))
         execute("git", "fetch", "--depth", "1", "origin", commit, cwd=source)
         execute("git", "checkout", "--detach", "FETCH_HEAD", cwd=source)
-    verify_clean_checkout(source, commit)
+    verify_clean_checkout(source, commit, repository)
 
 
 def checkout_source() -> None:
@@ -85,10 +97,37 @@ def checkout_source() -> None:
         raise SystemExit("Pinned Tailscale module name differs.")
 
 
-def apply_direct_only_patches() -> None:
+@contextmanager
+def disposable_build_sources() -> Iterator[tuple[Path, Path, Path]]:
+    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="build-run-", dir=BUILD_ROOT) as temporary:
+        run_root = Path(temporary).resolve()
+        if not run_root.is_relative_to(BUILD_ROOT.resolve()):
+            raise SystemExit("Disposable build source escaped the ignored build workspace.")
+        worktrees: list[tuple[Path, Path]] = []
+        lib_source = run_root / "libtailscale"
+        tailscale_source = run_root / "tailscale"
+        try:
+            for base, source, commit, origin in (
+                (SOURCE, lib_source, PIN["commit"], PIN["repository"]),
+                (TAILSCALE_SOURCE, tailscale_source, TAILSCALE_COMMIT, TAILSCALE_REPOSITORY),
+            ):
+                verify_clean_checkout(base, commit, origin)
+                execute("git", "worktree", "add", "--detach", str(source), commit, cwd=base)
+                worktrees.append((base, source))
+                verify_clean_checkout(source, commit, origin)
+            yield run_root, lib_source, tailscale_source
+        finally:
+            for base, source in reversed(worktrees):
+                if not source.resolve().is_relative_to(run_root):
+                    raise SystemExit(f"Refusing to remove build worktree outside {run_root}: {source}")
+                execute("git", "worktree", "remove", "--force", str(source), cwd=base)
+
+
+def apply_direct_only_patches(lib_source: Path, tailscale_source: Path) -> None:
     for source, patch in (
-        (TAILSCALE_SOURCE, PATCHES / "tailscale-v1.94.1-direct-only-data.patch"),
-        (SOURCE, PATCHES / "libtailscale-59d4bb-direct-only-data.patch"),
+        (tailscale_source, PATCHES / "tailscale-v1.94.1-direct-only-data.patch"),
+        (lib_source, PATCHES / "libtailscale-59d4bb-direct-only-data.patch"),
     ):
         if not patch.is_file():
             raise SystemExit(f"Missing pinned direct-only patch: {patch}")
@@ -96,8 +135,8 @@ def apply_direct_only_patches() -> None:
         execute("git", "apply", "--whitespace=error", str(patch), cwd=source)
 
 
-def build_workspace_environment() -> dict[str, str]:
-    workspace = BUILD_SOURCE / "go.work"
+def build_workspace_environment(run_root: Path) -> dict[str, str]:
+    workspace = run_root / "go.work"
     workspace.write_text(
         f"go {PIN['goVersion']}\n\nuse ./libtailscale\n\n"
         f"replace tailscale.com v{PIN['tailscaleVersion']} => ./tailscale\n"
@@ -181,10 +220,10 @@ def patch_pinned_source(source_root: Path = SOURCE) -> None:
     makefile_path.write_text(makefile)
 
 
-def create_local_pod(target: str) -> None:
+def create_local_pod(target: str, source: Path) -> None:
     product = {
-        "ios": SOURCE / "swift" / "build" / "Build" / "Products" / "Release-iphoneos" / "TailscaleKit.framework",
-        "macos": SOURCE / "swift" / "build" / "Build" / "Products" / "Release" / "TailscaleKit.framework",
+        "ios": source / "swift" / "build" / "Build" / "Products" / "Release-iphoneos" / "TailscaleKit.framework",
+        "macos": source / "swift" / "build" / "Build" / "Products" / "Release" / "TailscaleKit.framework",
     }[target]
     if not product.is_dir():
         raise SystemExit(f"Upstream {target} build did not produce {product}")
@@ -198,7 +237,7 @@ def create_local_pod(target: str) -> None:
     shutil.copyfile(template, pod_root / template.name)
 
 
-def build_macos_framework(architecture: str, derived_data: Path, build_env: dict[str, str]) -> Path:
+def build_macos_framework(architecture: str, derived_data: Path, build_env: dict[str, str], source: Path) -> Path:
     go_architecture = {"arm64": "arm64", "x86_64": "amd64"}[architecture]
     environment = {
         **build_env,
@@ -206,7 +245,7 @@ def build_macos_framework(architecture: str, derived_data: Path, build_env: dict
         "CGO_CFLAGS": f"-arch {architecture}",
         "CGO_LDFLAGS": f"-arch {architecture}",
     }
-    execute("make", "-B", "c-archive", cwd=SOURCE, environment=environment)
+    execute("make", "-B", "c-archive", cwd=source, environment=environment)
     if derived_data.exists():
         shutil.rmtree(derived_data)
     execute(
@@ -222,7 +261,7 @@ def build_macos_framework(architecture: str, derived_data: Path, build_env: dict
         f"platform=macOS,arch={architecture}",
         "MACOSX_DEPLOYMENT_TARGET=15.0",
         "CODE_SIGNING_ALLOWED=NO",
-        cwd=SOURCE / "swift",
+        cwd=source / "swift",
         environment=environment,
     )
     framework = derived_data / "Build" / "Products" / "Release" / "TailscaleKit.framework"
@@ -292,10 +331,10 @@ def merge_macos_frameworks(arm64: Path, x86_64: Path) -> None:
         raise SystemExit("macOS TailscaleKit framework symlink structure changed during universal merge.")
 
 
-def build_macos_universal_framework(build_env: dict[str, str]) -> None:
-    swift_build = SOURCE / "swift" / "build"
-    arm64 = build_macos_framework("arm64", swift_build, build_env)
-    x86_64 = build_macos_framework("x86_64", SOURCE / "swift" / "build-x86_64", build_env)
+def build_macos_universal_framework(build_env: dict[str, str], source: Path) -> None:
+    swift_build = source / "swift" / "build"
+    arm64 = build_macos_framework("arm64", swift_build, build_env, source)
+    x86_64 = build_macos_framework("x86_64", source / "swift" / "build-x86_64", build_env, source)
     merge_macos_frameworks(arm64, x86_64)
 
 
@@ -303,18 +342,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("platform", choices=("ios", "macos"))
     parser.add_argument("--xcode-major", type=int, required=True)
+    parser.add_argument("--run-bridge-tests", action="store_true")
     args = parser.parse_args()
+    if args.run_bridge_tests and args.platform != "macos":
+        parser.error("Bridge tests are supported only in the macOS build lane.")
     require_darwin()
     verify_toolchain(args.xcode_major)
     checkout_source()
-    apply_direct_only_patches()
-    patch_pinned_source()
-    build_env = build_workspace_environment()
-    if args.platform == "macos":
-        build_macos_universal_framework(build_env)
-    else:
-        execute("make", args.platform, cwd=SOURCE / "swift", environment=build_env)
-    create_local_pod(args.platform)
+    with disposable_build_sources() as (run_root, lib_source, tailscale_source):
+        apply_direct_only_patches(lib_source, tailscale_source)
+        patch_pinned_source(lib_source)
+        build_env = build_workspace_environment(run_root)
+        if args.run_bridge_tests:
+            execute(
+                "go", "test", ".", "-run", "^(TestDirectOnlyDataConfiguration|TestConn)$", "-count=1",
+                cwd=lib_source, environment=build_env,
+            )
+        if args.platform == "macos":
+            build_macos_universal_framework(build_env, lib_source)
+        else:
+            execute("make", args.platform, cwd=lib_source / "swift", environment=build_env)
+        create_local_pod(args.platform, lib_source)
 
 
 if __name__ == "__main__":
