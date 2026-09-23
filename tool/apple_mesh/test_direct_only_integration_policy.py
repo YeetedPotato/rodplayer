@@ -19,6 +19,91 @@ LIBTAILSCALE_PATCH = build.PATCHES / "libtailscale-59d4bb-direct-only-data.patch
 
 
 class DirectOnlyIntegrationPolicyTest(unittest.TestCase):
+    def _shallow_proof_base(self, root: Path) -> tuple[Path, Path, Path, str]:
+        seed = root / "seed"
+        subprocess.run(["git", "init", "--quiet", str(seed)], check=True)
+        (seed / "pin.txt").write_text("pinned\n")
+        subprocess.run(["git", "add", "pin.txt"], cwd=seed, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+             "commit", "--quiet", "-m", "pin"], cwd=seed, check=True,
+        )
+        revision = build.query("git", "rev-parse", "HEAD", cwd=seed)
+        proof_root = root / "direct_only_proof"
+        source = proof_root / "source"
+        source.mkdir(parents=True)
+        base = source / "tailscale"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", seed.as_uri(), str(base)], check=True)
+        self.assertEqual(build.query("git", "rev-parse", "--is-shallow-repository", cwd=base), "true")
+        return proof_root, source, base, revision
+
+    def test_proof_worktree_repeats_from_shallow_pin_and_cleans_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proof_root, source, base, revision = self._shallow_proof_base(Path(temporary))
+            with (patch.object(go_proof, "BUILD_ROOT", proof_root),
+                  patch.object(go_proof, "SOURCE", source),
+                  patch.object(go_proof, "TAILSCALE_COMMIT", revision)):
+                for _ in range(2):
+                    with go_proof.disposable_proof_worktree(base) as checkout:
+                        self.assertEqual(build.query("git", "rev-parse", "HEAD", cwd=checkout), revision)
+                        self.assertTrue(checkout.resolve().is_relative_to(proof_root.resolve()))
+                        self.assertEqual((checkout / "pin.txt").read_text(), "pinned\n")
+                        (checkout / "pin.txt").write_text("patched\n")
+                        (checkout / "generated.txt").write_text("build output\n")
+                    self.assertFalse(checkout.exists())
+                    self.assertEqual((base / "pin.txt").read_text(), "pinned\n")
+                    proof.verify_checkout(base, revision)
+                with self.assertRaisesRegex(RuntimeError, "injected proof failure"):
+                    with go_proof.disposable_proof_worktree(base) as checkout:
+                        raise RuntimeError("injected proof failure")
+                self.assertFalse(checkout.exists())
+                worktrees = build.query("git", "worktree", "list", "--porcelain", cwd=base).splitlines()
+                self.assertEqual(sum(line.startswith("worktree ") for line in worktrees), 1)
+                proof.verify_checkout(base, revision)
+
+    def test_proof_worktree_rejects_wrong_or_dirty_base_and_outside_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof_root, source, base, revision = self._shallow_proof_base(root)
+            with (patch.object(go_proof, "BUILD_ROOT", proof_root),
+                  patch.object(go_proof, "SOURCE", source)):
+                with patch.object(go_proof, "TAILSCALE_COMMIT", "0" * 40):
+                    with self.assertRaises(SystemExit):
+                        with go_proof.disposable_proof_worktree(base):
+                            self.fail("Wrong revision was accepted")
+                with patch.object(go_proof, "TAILSCALE_COMMIT", revision):
+                    (base / "pin.txt").write_text("dirty\n")
+                    with self.assertRaises(SystemExit):
+                        with go_proof.disposable_proof_worktree(base):
+                            self.fail("Dirty base was accepted")
+                    (base / "pin.txt").write_text("pinned\n")
+                    with self.assertRaises(SystemExit):
+                        with go_proof.disposable_proof_worktree(base, checkout_parent=root / "outside"):
+                            self.fail("Outside worktree was accepted")
+                proof.verify_checkout(base, revision)
+
+    def test_proof_applies_crlf_checked_out_patch_only_to_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof_root, source, base, revision = self._shallow_proof_base(root)
+            patch_file = root / "policy.patch"
+            patch_file.write_bytes(
+                b"diff --git a/pin.txt b/pin.txt\r\n"
+                b"--- a/pin.txt\r\n+++ b/pin.txt\r\n@@ -1 +1 @@\r\n"
+                b"-pinned\r\n+patched\r\n"
+            )
+            with (patch.object(go_proof, "BUILD_ROOT", proof_root),
+                  patch.object(go_proof, "SOURCE", source),
+                  patch.object(go_proof, "TAILSCALE_COMMIT", revision),
+                  patch.object(go_proof, "PATCH", patch_file)):
+                with go_proof.disposable_proof_worktree(base) as checkout:
+                    go_proof.verify_patch_source(checkout)
+                    go_proof.apply_policy_patch(checkout, check_only=False)
+                    self.assertEqual((checkout / "pin.txt").read_text(), "patched\n")
+                self.assertEqual((base / "pin.txt").read_text(), "pinned\n")
+                self.assertIn(b"\r\n", patch_file.read_bytes())
+                proof.verify_checkout(base, revision)
+
     def test_exact_pins_and_isolated_workspaces(self) -> None:
         self.assertEqual(build.PIN["commit"], "59d4bb82744915815178e0f0776d60026a397ee7")
         self.assertEqual(build.TAILSCALE_COMMIT, "d885b34776cd2e96f1f368a4d31729e37ff8b59b")
