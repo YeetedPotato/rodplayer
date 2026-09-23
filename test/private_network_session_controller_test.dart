@@ -20,10 +20,15 @@ void main() {
       final controller = PrivateNetworkSessionController(runtime);
 
       await controller.start();
+      expect(controller.status.value?.state, PrivateNetworkState.starting);
+      runtime.events.add(_status(
+        state: PrivateNetworkState.stopped,
+        hasIdentity: true,
+      ));
+      await controller.start();
 
       expect(runtime.resumeCalls, 1);
       expect(runtime.bootstrapCalls, 0);
-      expect(controller.status.value?.state, PrivateNetworkState.starting);
       await controller.close();
     });
 
@@ -65,7 +70,8 @@ void main() {
       }
     });
 
-    test('retains starting direct status without making it proxyable', () async {
+    test('retains starting direct status without making it proxyable',
+        () async {
       final direct = _status(
         state: PrivateNetworkState.starting,
         path: PrivateNetworkPath.direct,
@@ -113,6 +119,147 @@ void main() {
       );
       expect(runtime.resumeCalls, 0);
       await controller.close();
+    });
+
+    test('cached stopped event resumes despite a stale status result',
+        () async {
+      final status = Completer<PrivateNetworkStatus>();
+      final statusStarted = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusFuture: status.future,
+        statusStarted: statusStarted,
+        resumeValue: _status(
+          state: PrivateNetworkState.starting,
+          hasIdentity: true,
+        ),
+      );
+      final controller = PrivateNetworkSessionController(runtime);
+
+      final start = controller.start();
+      await statusStarted.future;
+      runtime.events.add(_status(
+        state: PrivateNetworkState.stopped,
+        hasIdentity: true,
+      ));
+      status.complete(_status(
+        state: PrivateNetworkState.stopped,
+        hasIdentity: false,
+      ));
+      await start;
+
+      expect(runtime.resumeCalls, 1);
+      expect(runtime.bootstrapCalls, 0);
+      expect(runtime.resetCalls, 0);
+      expect(controller.status.value?.hasPersistedIdentity, isTrue);
+      expect(controller.status.value?.state, PrivateNetworkState.starting);
+      await controller.close();
+    });
+
+    test('cached starting event prevents resume from a stale stopped result',
+        () async {
+      final status = Completer<PrivateNetworkStatus>();
+      final statusStarted = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusFuture: status.future,
+        statusStarted: statusStarted,
+      );
+      final controller = PrivateNetworkSessionController(runtime);
+
+      final start = controller.start();
+      await statusStarted.future;
+      runtime.events.add(_status(
+        state: PrivateNetworkState.starting,
+        hasIdentity: true,
+      ));
+      status.complete(_status(
+        state: PrivateNetworkState.stopped,
+        hasIdentity: true,
+      ));
+      await start;
+
+      expect(runtime.resumeCalls, 0);
+      expect(controller.status.value?.state, PrivateNetworkState.starting);
+      await controller.close();
+    });
+
+    test('latest of multiple events controls the resume decision', () async {
+      for (final latest in <PrivateNetworkState>[
+        PrivateNetworkState.stopped,
+        PrivateNetworkState.starting,
+      ]) {
+        final status = Completer<PrivateNetworkStatus>();
+        final statusStarted = Completer<void>();
+        final runtime = _FakeRuntime(
+          statusFuture: status.future,
+          statusStarted: statusStarted,
+          resumeValue: _status(
+            state: PrivateNetworkState.starting,
+            hasIdentity: true,
+          ),
+        );
+        final controller = PrivateNetworkSessionController(runtime);
+
+        final start = controller.start();
+        await statusStarted.future;
+        runtime.events.add(_status(
+          state: PrivateNetworkState.stopped,
+          hasIdentity: true,
+        ));
+        runtime.events.add(_status(
+          state: latest,
+          hasIdentity: true,
+        ));
+        status.complete(_status(
+          state: PrivateNetworkState.stopped,
+          hasIdentity: false,
+        ));
+        await start;
+
+        expect(
+            runtime.resumeCalls, latest == PrivateNetworkState.stopped ? 1 : 0);
+        expect(controller.status.value?.hasPersistedIdentity, isTrue);
+        await controller.close();
+      }
+    });
+
+    test('close during status or resume discards pending results', () async {
+      final pendingStatus = Completer<PrivateNetworkStatus>();
+      final statusStarted = Completer<void>();
+      final statusRuntime = _FakeRuntime(
+        statusFuture: pendingStatus.future,
+        statusStarted: statusStarted,
+      );
+      final statusController = PrivateNetworkSessionController(statusRuntime);
+      final statusStart = statusController.start();
+      await statusStarted.future;
+      await statusController.close();
+      pendingStatus.complete(_status(
+        state: PrivateNetworkState.stopped,
+        hasIdentity: true,
+      ));
+      await statusStart;
+      expect(statusRuntime.resumeCalls, 0);
+
+      final pendingResume = Completer<PrivateNetworkStatus>();
+      final resumeStarted = Completer<void>();
+      final resumeRuntime = _FakeRuntime(
+        statusValue: _status(
+          state: PrivateNetworkState.stopped,
+          hasIdentity: true,
+        ),
+        resumeFuture: pendingResume.future,
+        resumeStarted: resumeStarted,
+      );
+      final resumeController = PrivateNetworkSessionController(resumeRuntime);
+      final resumeStart = resumeController.start();
+      await resumeStarted.future;
+      await resumeController.close();
+      pendingResume.complete(_status(
+        state: PrivateNetworkState.starting,
+        hasIdentity: true,
+      ));
+      await resumeStart;
+      expect(resumeRuntime.resumeCalls, 1);
     });
 
     test('event status wins over a stale resume result', () async {
@@ -215,6 +362,7 @@ class _FakeRuntime implements PrivateNetworkRuntime {
   final StreamController<PrivateNetworkStatus> events;
   int resumeCalls = 0;
   int bootstrapCalls = 0;
+  int resetCalls = 0;
 
   @override
   Future<PrivateNetworkStatus> bootstrap(
@@ -228,7 +376,7 @@ class _FakeRuntime implements PrivateNetworkRuntime {
   Future<bool> confirmHostAvailable() async => hostAvailable;
 
   @override
-  Future<void> reset() async {}
+  Future<void> reset() async => resetCalls++;
 
   @override
   Future<PrivateNetworkStatus> resume() async {

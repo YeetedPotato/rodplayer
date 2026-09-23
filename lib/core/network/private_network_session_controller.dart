@@ -39,11 +39,20 @@ class PrivateNetworkSessionController {
     final statusRevision = _revision;
     try {
       final current = await _runtime.status();
-      if (_closed || statusRevision != _revision) return;
-      _acceptStatus(current);
+      if (_closed) return;
+      PrivateNetworkStatus? effective;
+      if (statusRevision == _revision) {
+        _acceptStatus(current);
+        effective = current;
+      } else {
+        // The cached EventChannel replay may arrive before status() returns.
+        effective = status.value;
+      }
 
-      if (!current.hasPersistedIdentity ||
-          current.state != PrivateNetworkState.stopped) {
+      if (_closed ||
+          effective == null ||
+          !effective.hasPersistedIdentity ||
+          effective.state != PrivateNetworkState.stopped) {
         return;
       }
 
