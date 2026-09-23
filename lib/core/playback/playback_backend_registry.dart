@@ -15,6 +15,7 @@ class PlaybackBackendIds {
 class PlaybackBackendRegistry {
   const PlaybackBackendRegistry({
     this.mediaKitCapabilities = ConservativePlaybackEnvironmentProvider.mediaKitCapabilities,
+    this.mediaKitAvailable = true,
     this.appleNativeAvailable = false,
     this.appleCompatibilityAvailable = false,
     this.androidNativeAvailable = false,
@@ -22,6 +23,7 @@ class PlaybackBackendRegistry {
   });
 
   final PlaybackBackendCapabilities mediaKitCapabilities;
+  final bool mediaKitAvailable;
   final bool appleNativeAvailable;
   final bool appleCompatibilityAvailable;
   final bool androidNativeAvailable;
@@ -32,7 +34,7 @@ class PlaybackBackendRegistry {
       PlaybackBackendDescriptor(
         id: PlaybackBackendIds.mediaKit,
         displayName: 'Default playback engine',
-        availability: BackendAvailability.available,
+        availability: mediaKitAvailable ? BackendAvailability.available : BackendAvailability.unavailable,
         priority: 30,
         capabilities: mediaKitCapabilities,
       ),

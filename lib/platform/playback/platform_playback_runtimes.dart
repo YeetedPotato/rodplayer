@@ -1,4 +1,6 @@
 import 'package:rodplayer/core/playback/playback_backend_registry.dart';
+import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/platform/playback/android_native_playback_runtime.dart';
@@ -24,7 +26,10 @@ Future<PlatformPlaybackRuntimeSet> createPlatformPlaybackRuntimes({
   PlaybackRuntimeFactory? appleCompatibilityFactory,
   PlaybackRuntimeFactory? androidNativeFactory,
   PlaybackRuntimeFactory? androidCompatibilityFactory,
+  PlatformFamily? platformFamily,
 }) async {
+  final effectivePlatformFamily = platformFamily ?? platformFamilyForCurrentTarget();
+  final mediaKitAvailable = mediaKitPlaybackSupportedOn(effectivePlatformFamily);
   final probeFailures = <String, Object>{};
   final appleNative = await _optionalRuntime(PlaybackBackendIds.appleNative, appleNativeFactory ?? () => AppleNativePlaybackRuntime.create(), probeFailures);
   final appleCompatibility = await _optionalRuntime(PlaybackBackendIds.appleCompatibility, appleCompatibilityFactory ?? () => AppleCompatibilityPlaybackRuntime.create(), probeFailures);
@@ -37,11 +42,17 @@ Future<PlatformPlaybackRuntimeSet> createPlatformPlaybackRuntimes({
     if (androidCompatibility != null) androidCompatibility,
   ];
   return PlatformPlaybackRuntimeSet(
-    registry: PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[
-      MediaKitPlaybackRuntime(),
-      ...optionalRuntimes,
-    ]),
+    registry: PlaybackRuntimeRegistry(
+      runtimes: <PlaybackBackendRuntime>[
+        if (mediaKitAvailable) MediaKitPlaybackRuntime(),
+        ...optionalRuntimes,
+      ],
+      executableBackendIds: mediaKitAvailable
+          ? const <String>{PlaybackBackendIds.mediaKit}
+          : const <String>{},
+    ),
     backendRegistry: PlaybackBackendRegistry(
+      mediaKitAvailable: mediaKitAvailable,
       appleNativeAvailable: appleNative?.isAvailable ?? false,
       appleCompatibilityAvailable: appleCompatibility?.isAvailable ?? false,
       androidNativeAvailable: androidNative?.isAvailable ?? false,
@@ -50,6 +61,9 @@ Future<PlatformPlaybackRuntimeSet> createPlatformPlaybackRuntimes({
     probeFailures: Map<String, Object>.unmodifiable(probeFailures),
   );
 }
+
+bool mediaKitPlaybackSupportedOn(PlatformFamily platformFamily) =>
+    platformFamily != PlatformFamily.android;
 
 Future<PlaybackBackendRuntime?> _optionalRuntime(String backendId, PlaybackRuntimeFactory create, Map<String, Object> failures) async {
   try {

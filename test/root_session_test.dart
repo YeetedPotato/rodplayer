@@ -3,15 +3,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
-import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/main.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets(
+    'app resumes a persisted private identity once without tying it to logout',
+    (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final runtime = _RootPrivateNetworkRuntime();
+
+      await tester.pumpWidget(RodPlayerApp(
+        preferences: prefs,
+        credentialStore: MemoryCredentialStore(),
+        privateNetworkRuntimeFactory: () => runtime,
+      ));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(RodPlayerApp(
+        preferences: prefs,
+        credentialStore: MemoryCredentialStore(),
+        privateNetworkRuntimeFactory: () => runtime,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(runtime.resumeCalls, 1);
+      expect(runtime.bootstrapCalls, 0);
+      expect(runtime.resetCalls, 0);
+    },
+  );
+
   testWidgets('switch profile keeps server URL and full logout clears it despite server logout failure', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1000, 1000);
@@ -22,9 +49,11 @@ void main() {
     final store = MemoryCredentialStore();
     await store.writeToken(CredentialMigration.tokenKey, 'token');
     final clients = <_RootClient>[];
+    final privateNetwork = _RootPrivateNetworkRuntime();
     await tester.pumpWidget(RodPlayerApp(
       preferences: prefs,
       credentialStore: store,
+      privateNetworkRuntimeFactory: () => privateNetwork,
       clientFactory: (url, identity) {
         final client = _RootClient(baseUrl: url, identity: identity, failLogout: clients.isEmpty);
         clients.add(client);
@@ -56,6 +85,7 @@ void main() {
     expect(prefs.getString(CredentialMigration.serverUrlKey), isNull);
     expect(await store.readToken(CredentialMigration.tokenKey), isNull);
     expect(find.byType(LoginScreen), findsOneWidget);
+    expect(privateNetwork.resetCalls, 0);
   });
 }
 
@@ -83,4 +113,50 @@ class _RootClient extends JellyfinApiClient {
 
   @override
   void close() => closed = true;
+}
+
+class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
+  int resumeCalls = 0;
+  int bootstrapCalls = 0;
+  int resetCalls = 0;
+
+  @override
+  Future<PrivateNetworkStatus> bootstrap(
+    PrivateNetworkBootstrap bootstrap,
+  ) async {
+    bootstrapCalls++;
+    throw UnsupportedError('startup must not bootstrap');
+  }
+
+  @override
+  Future<bool> confirmHostAvailable() async => true;
+
+  @override
+  Future<void> reset() async => resetCalls++;
+
+  @override
+  Future<PrivateNetworkStatus> resume() async {
+    resumeCalls++;
+    return const PrivateNetworkStatus(
+      state: PrivateNetworkState.starting,
+      path: PrivateNetworkPath.none,
+      hasPersistedIdentity: true,
+      unavailableReason: PrivateNetworkUnavailableReason.none,
+    );
+  }
+
+  @override
+  Future<PrivateNetworkStatus> status() async => const PrivateNetworkStatus(
+        state: PrivateNetworkState.stopped,
+        path: PrivateNetworkPath.none,
+        hasPersistedIdentity: true,
+        unavailableReason: PrivateNetworkUnavailableReason.none,
+      );
+
+  @override
+  Stream<PrivateNetworkStatus> get statuses =>
+      const Stream<PrivateNetworkStatus>.empty();
+
+  @override
+  Future<void> stop() async {}
 }

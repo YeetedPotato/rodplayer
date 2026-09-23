@@ -1,0 +1,552 @@
+diff --git a/tsnet/tsnet.go b/tsnet/tsnet.go
+index 6c840c335..715565130 100644
+--- a/tsnet/tsnet.go
++++ b/tsnet/tsnet.go
+@@ -70,6 +70,10 @@
+ //
+ // Its exported fields may be changed until the first method call.
+ type Server struct {
++	// DirectOnlyData permits WireGuard data only over verified direct UDP.
++	// Set before Start; discovery signaling remains available.
++	DirectOnlyData bool
++
+ 	// Dir specifies the name of the directory to use for
+ 	// state. If empty, a directory is selected automatically
+ 	// under os.UserConfigDir (https://golang.org/pkg/os/#UserConfigDir).
+@@ -659,14 +663,15 @@ func (s *Server) start() (reterr error) {
+ 	s.dialer = &tsdial.Dialer{Logf: tsLogf} // mutated below (before used)
+ 	s.dialer.SetBus(sys.Bus.Get())
+ 	eng, err := wgengine.NewUserspaceEngine(tsLogf, wgengine.Config{
+-		EventBus:      sys.Bus.Get(),
+-		ListenPort:    s.Port,
+-		NetMon:        s.netMon,
+-		Dialer:        s.dialer,
+-		SetSubsystem:  sys.Set,
+-		ControlKnobs:  sys.ControlKnobs(),
+-		HealthTracker: sys.HealthTracker.Get(),
+-		Metrics:       sys.UserMetricsRegistry(),
++		DirectOnlyData: s.DirectOnlyData,
++		EventBus:       sys.Bus.Get(),
++		ListenPort:     s.Port,
++		NetMon:         s.netMon,
++		Dialer:         s.dialer,
++		SetSubsystem:   sys.Set,
++		ControlKnobs:   sys.ControlKnobs(),
++		HealthTracker:  sys.HealthTracker.Get(),
++		Metrics:        sys.UserMetricsRegistry(),
+ 	})
+ 	if err != nil {
+ 		return err
+diff --git a/tsnet/tsnet_test.go b/tsnet/tsnet_test.go
+index f44bacab0..e901fb7f4 100644
+--- a/tsnet/tsnet_test.go
++++ b/tsnet/tsnet_test.go
+@@ -60,6 +60,23 @@
+ 	"tailscale.com/util/must"
+ )
+ 
++func TestDirectOnlyDataIsPerServer(t *testing.T) {
++	controlURL, _ := startControl(t)
++	for _, enabled := range []bool{false, true, false} {
++		s := &Server{Dir: t.TempDir(), ControlURL: controlURL, Logf: logger.Discard, UserLogf: logger.Discard, DirectOnlyData: enabled}
++		if err := s.Start(); err != nil {
++			t.Fatal(err)
++		}
++		conn := s.Sys().MagicSock.Get()
++		if got := reflect.ValueOf(conn).Elem().FieldByName("directOnlyData").Bool(); got != enabled {
++			t.Errorf("DirectOnlyData = %v, want %v", got, enabled)
++		}
++		if err := s.Close(); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
+ // TestListener_Server ensures that the listener type always keeps the Server
+ // method, which is used by some external applications to identify a tsnet.Listener
+ // from other net.Listeners, as well as access the underlying Server.
+diff --git a/wgengine/magicsock/derp.go b/wgengine/magicsock/derp.go
+index 1c5225e22..5db26be35 100644
+--- a/wgengine/magicsock/derp.go
++++ b/wgengine/magicsock/derp.go
+@@ -717,6 +717,9 @@ func (c *Conn) processDERPReadResult(dm derpReadResult, b []byte) (n int, ep *en
+ 		c.handleDiscoMessage(b[:n], srcAddr, false, dm.src, discoRXPathDERP)
+ 		return 0, nil
+ 	}
++	if c.directOnlyData {
++		return 0, nil
++	}
+ 
+ 	var ok bool
+ 	c.mu.Lock()
+diff --git a/wgengine/magicsock/direct_only_data_test.go b/wgengine/magicsock/direct_only_data_test.go
+new file mode 100644
+index 000000000..57f7f80e6
+--- /dev/null
++++ b/wgengine/magicsock/direct_only_data_test.go
+@@ -0,0 +1,296 @@
++// Copyright (c) Tailscale Inc & AUTHORS
++// SPDX-License-Identifier: BSD-3-Clause
++
++package magicsock
++
++import (
++	"context"
++	"errors"
++	"net"
++	"net/netip"
++	"sync"
++	"testing"
++	"time"
++
++	"tailscale.com/disco"
++	"tailscale.com/net/netmon"
++	"tailscale.com/net/packet"
++	"tailscale.com/tailcfg"
++	"tailscale.com/tstime/mono"
++	"tailscale.com/types/key"
++	"tailscale.com/types/nettype"
++	"tailscale.com/util/eventbus"
++	"tailscale.com/util/usermetric"
++)
++
++type recordedWireGuardSend struct {
++	addr string
++	data []byte
++}
++
++type recordingPacketListener struct {
++	mu    sync.Mutex
++	sends []recordedWireGuardSend
++}
++
++func (r *recordingPacketListener) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
++	pc, err := (localhostListener{}).ListenPacket(ctx, network, address)
++	if err != nil {
++		return nil, err
++	}
++	return &recordingPacketConn{PacketConn: pc, recorder: r}, nil
++}
++
++type recordingPacketConn struct {
++	net.PacketConn
++	recorder *recordingPacketListener
++}
++
++func (pc *recordingPacketConn) ReadFromUDPAddrPort(data []byte) (int, netip.AddrPort, error) {
++	return pc.PacketConn.(nettype.PacketConn).ReadFromUDPAddrPort(data)
++}
++
++func (pc *recordingPacketConn) WriteToUDPAddrPort(data []byte, addr netip.AddrPort) (int, error) {
++	pc.recorder.mu.Lock()
++	pc.recorder.sends = append(pc.recorder.sends, recordedWireGuardSend{addr: addr.String(), data: append([]byte(nil), data...)})
++	pc.recorder.mu.Unlock()
++	return len(data), nil
++}
++
++func (pc *recordingPacketConn) WriteTo(data []byte, addr net.Addr) (int, error) {
++	pc.recorder.mu.Lock()
++	pc.recorder.sends = append(pc.recorder.sends, recordedWireGuardSend{addr: addr.String(), data: append([]byte(nil), data...)})
++	pc.recorder.mu.Unlock()
++	return len(data), nil
++}
++
++func (r *recordingPacketListener) count() int {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	return len(r.sends)
++}
++
++func directOnlyTestConn(t *testing.T, directOnly bool) (*Conn, *recordingPacketListener) {
++	t.Helper()
++	bus := eventbus.New()
++	mon, err := netmon.New(bus, t.Logf)
++	if err != nil {
++		t.Fatal(err)
++	}
++	listener := new(recordingPacketListener)
++	c, err := NewConn(Options{
++		DirectOnlyData:         directOnly,
++		DisablePortMapper:      true,
++		Logf:                   t.Logf,
++		NetMon:                 mon,
++		EventBus:               bus,
++		Metrics:                new(usermetric.Registry),
++		TestOnlyPacketListener: nettype.PacketListener(listener),
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		c.mu.Lock()
++		c.activeDerp = nil // the test DERP channel has no client to close
++		c.mu.Unlock()
++		c.Close()
++		mon.Close()
++		bus.Close()
++	})
++	return c, listener
++}
++
++func directOnlyTestEndpoint(c *Conn, best epAddr, derp bool, trusted bool) (*endpoint, chan derpWriteRequest) {
++	nodeKey := key.NewNode().Public()
++	ep := &endpoint{c: c, publicKey: nodeKey, bestAddr: addrQuality{epAddr: best}, heartbeatDisabled: true}
++	if trusted {
++		ep.trustBestAddrUntil = mono.Now().Add(time.Hour)
++	}
++	if !derp {
++		return ep, nil
++	}
++	ep.derpAddr = netip.AddrPortFrom(tailcfg.DerpMagicIPAddr, 1)
++	ch := make(chan derpWriteRequest, 10)
++	now := time.Now()
++	c.mu.Lock()
++	c.derpMap = &tailcfg.DERPMap{Regions: map[int]*tailcfg.DERPRegion{1: {RegionID: 1}}}
++	c.privateKey = key.NewNode()
++	c.activeDerp = map[int]activeDerp{1: {writeCh: ch, lastWrite: &now}}
++	c.mu.Unlock()
++	return ep, ch
++}
++
++func directOnlyPacket() [][]byte {
++	return [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 4, 5, 6}}
++}
++
++func TestDirectOnlyDataOutbound(t *testing.T) {
++	direct := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12345")}
++	relay := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12346")}
++	relay.vni.Set(7)
++	tests := []struct {
++		name       string
++		directOnly bool
++		best       epAddr
++		derp       bool
++		trusted    bool
++		wantUDP    int
++		wantDERP   int
++		wantError  bool
++	}{
++		{"default DERP", false, epAddr{}, true, false, 0, 1, false},
++		{"direct", true, direct, false, true, 1, 0, false},
++		{"direct and configured DERP", true, direct, true, true, 1, 0, false},
++		{"untrusted direct and DERP", true, direct, true, false, 0, 0, true},
++		{"default simultaneous direct and DERP", false, direct, true, false, 1, 1, false},
++		{"default peer relay", false, relay, false, true, 1, 0, false},
++		{"DERP only", true, epAddr{}, true, false, 0, 0, true},
++		{"peer relay only", true, relay, false, true, 0, 0, true},
++		{"peer relay and DERP", true, relay, true, false, 0, 0, true},
++		{"no route", true, epAddr{}, false, false, 0, 0, true},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			c, udp := directOnlyTestConn(t, tt.directOnly)
++			ep, derp := directOnlyTestEndpoint(c, tt.best, tt.derp, tt.trusted)
++			err := c.Send(directOnlyPacket(), ep, 8)
++			if tt.wantError && !errors.Is(err, errNoDirectPath) {
++				t.Fatalf("error = %v; want no direct path", err)
++			}
++			if !tt.wantError && err != nil {
++				t.Fatal(err)
++			}
++			if got := udp.count(); got != tt.wantUDP {
++				t.Errorf("actual UDP writes = %d; want %d", got, tt.wantUDP)
++			}
++			if got := len(derp); got != tt.wantDERP {
++				t.Errorf("actual DERP queue writes = %d; want %d", got, tt.wantDERP)
++			}
++		})
++	}
++}
++
++func TestDirectOnlyDataPathLossAndFallback(t *testing.T) {
++	c, udp := directOnlyTestConn(t, true)
++	direct := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12345")}
++	ep, derp := directOnlyTestEndpoint(c, direct, true, true)
++	if err := c.Send(directOnlyPacket(), ep, 8); err != nil {
++		t.Fatal(err)
++	}
++	ep.mu.Lock()
++	ep.trustBestAddrUntil = 0
++	ep.mu.Unlock()
++	if err := c.Send(directOnlyPacket(), ep, 8); !errors.Is(err, errNoDirectPath) {
++		t.Fatalf("expired path error = %v", err)
++	}
++	if udp.count() != 1 || len(derp) != 0 {
++		t.Fatalf("path loss sent UDP=%d DERP=%d", udp.count(), len(derp))
++	}
++
++	ep.mu.Lock()
++	ep.bestAddr = addrQuality{}
++	ep.derpAddr = netip.AddrPort{}
++	ep.mu.Unlock()
++	c.mu.Lock()
++	c.derpRoute = map[key.NodePublic]derpRoute{ep.publicKey: {regionID: 1}}
++	c.mu.Unlock()
++	if err := c.Send(directOnlyPacket(), ep, 8); !errors.Is(err, errNoDirectPath) {
++		t.Fatalf("fallback DERP error = %v", err)
++	}
++	if len(derp) != 0 {
++		t.Fatal("fallback DERP transmitted WireGuard data")
++	}
++}
++
++func TestDirectOnlyDataLowerSendGuards(t *testing.T) {
++	c, udp := directOnlyTestConn(t, true)
++	_, derp := directOnlyTestEndpoint(c, epAddr{}, true, false)
++	peer := key.NewNode().Public()
++	derpAddr := netip.AddrPortFrom(tailcfg.DerpMagicIPAddr, 1)
++	if ok, err := c.sendAddr(derpAddr, peer, []byte{1}, false, false); ok || !errors.Is(err, errNoDirectPath) {
++		t.Fatalf("direct DERP data call = (%v, %v)", ok, err)
++	}
++	relay := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12346")}
++	relay.vni.Set(7)
++	if ok, err := c.sendUDPBatch(relay, directOnlyPacket(), 8); ok || !errors.Is(err, errNoDirectPath) {
++		t.Fatalf("direct peer-relay data call = (%v, %v)", ok, err)
++	}
++	if len(derp) != 0 || udp.count() != 0 {
++		t.Fatal("lower-level bypass transmitted relay data")
++	}
++}
++
++func TestDirectOnlyDataCookieAndInbound(t *testing.T) {
++	c, udp := directOnlyTestConn(t, true)
++	relay := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12346")}
++	relay.vni.Set(7)
++	for _, src := range []epAddr{relay, {ap: netip.AddrPortFrom(tailcfg.DerpMagicIPAddr, 1)}} {
++		if err := c.Send(directOnlyPacket(), &lazyEndpoint{src: src}, 8); !errors.Is(err, errNoDirectPath) {
++			t.Fatalf("cookie via relay error = %v", err)
++		}
++	}
++	if udp.count() != 0 {
++		t.Fatal("cookie reply bypassed relay guard")
++	}
++	if err := c.Send(directOnlyPacket(), &lazyEndpoint{src: epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12345")}}, 8); err != nil {
++		t.Fatalf("direct cookie reply: %v", err)
++	}
++	if udp.count() != 1 {
++		t.Fatal("direct cookie reply did not use UDP")
++	}
++
++	c.havePrivateKey.Store(true)
++	geneve := make([]byte, packet.GeneveFixedHeaderLength+3)
++	header := packet.GeneveHeader{Protocol: packet.GeneveProtocolWireGuard, VNI: relay.vni}
++	if err := header.Encode(geneve); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, _, ok := c.receiveIP(geneve, relay.ap, &epAddrEndpointCache{}); ok {
++		t.Fatal("inbound peer relay data accepted")
++	}
++	peer := key.NewNode().Public()
++	dm := derpReadResult{regionID: 1, n: 3, src: peer, copyBuf: func(b []byte) int { return copy(b, []byte{4, 5, 6}) }}
++	if n, ep := c.processDERPReadResult(dm, make([]byte, 16)); n != 0 || ep != nil {
++		t.Fatal("inbound DERP data accepted")
++	}
++	defaultConn, _ := directOnlyTestConn(t, false)
++	defaultConn.havePrivateKey.Store(true)
++	if _, _, _, ok := defaultConn.receiveIP(geneve, relay.ap, &epAddrEndpointCache{}); !ok {
++		t.Fatal("default mode unexpectedly rejected inbound peer relay")
++	}
++	defaultEP := &endpoint{c: defaultConn, nodeID: 1, publicKey: peer, isWireguardOnly: true, heartbeatDisabled: true}
++	defaultConn.mu.Lock()
++	defaultConn.peerMap.upsertEndpoint(defaultEP, key.DiscoPublic{})
++	defaultConn.mu.Unlock()
++	dm.copyBuf = func(b []byte) int { return copy(b, []byte{4, 5, 6}) }
++	if n, ep := defaultConn.processDERPReadResult(dm, make([]byte, 16)); n != 3 || ep != defaultEP {
++		t.Fatalf("default inbound DERP result = (%d, %p), want (3, %p)", n, ep, defaultEP)
++	}
++}
++
++func TestDirectOnlyDataDiscoViaDERP(t *testing.T) {
++	c, udp := directOnlyTestConn(t, true)
++	ep, derp := directOnlyTestEndpoint(c, epAddr{}, true, false)
++	ep.nodeID = 1
++	discoKey := key.NewDisco().Public()
++	ep.disco.Store(&endpointDisco{key: discoKey, short: discoKey.ShortString()})
++	c.mu.Lock()
++	c.peerMap.upsertEndpoint(ep, key.DiscoPublic{})
++	c.mu.Unlock()
++	addr := netip.AddrPortFrom(tailcfg.DerpMagicIPAddr, 1)
++	if ok, err := c.sendDiscoMessage(epAddr{ap: addr}, ep.publicKey, discoKey, &disco.Ping{}, discoVerboseLog); !ok || err != nil {
++		t.Fatalf("disco send = %v, %v", ok, err)
++	}
++	if len(derp) != 1 || !(<-derp).isDisco {
++		t.Fatal("DERP disco was not queued as discovery")
++	}
++	peerRelay := epAddr{ap: netip.MustParseAddrPort("127.0.0.1:12346")}
++	peerRelay.vni.Set(7)
++	if ok, err := c.sendDiscoMessage(peerRelay, ep.publicKey, discoKey, &disco.Ping{}, discoVerboseLog); !ok || err != nil {
++		t.Fatalf("peer relay discovery = %v, %v", ok, err)
++	}
++	if udp.count() != 1 {
++		t.Fatal("peer relay discovery did not reach UDP send path")
++	}
++}
+diff --git a/wgengine/magicsock/endpoint.go b/wgengine/magicsock/endpoint.go
+index eda589e14..74e2ab717 100644
+--- a/wgengine/magicsock/endpoint.go
++++ b/wgengine/magicsock/endpoint.go
+@@ -1029,9 +1029,10 @@ func (de *endpoint) discoPing(res *ipnstate.PingResult, size int, cb func(*ipnst
+ }
+ 
+ var (
+-	errExpired     = errors.New("peer's node key has expired")
+-	errNoUDPOrDERP = errors.New("no UDP or DERP addr")
+-	errPingTooBig  = errors.New("ping size too big")
++	errExpired      = errors.New("peer's node key has expired")
++	errNoUDPOrDERP  = errors.New("no UDP or DERP addr")
++	errNoDirectPath = errors.New("no trusted direct UDP path")
++	errPingTooBig   = errors.New("ping size too big")
+ )
+ 
+ func (de *endpoint) send(buffs [][]byte, offset int) error {
+@@ -1056,7 +1057,14 @@ func (de *endpoint) send(buffs [][]byte, offset int) error {
+ 	}
+ 	de.noteTxActivityExtTriggerLocked(now)
+ 	de.lastSendAny = now
++	trustedDirect := udpAddr.isDirect() && (de.isWireguardOnly || !now.After(de.trustBestAddrUntil))
+ 	de.mu.Unlock()
++	if de.c.directOnlyData {
++		if !trustedDirect {
++			return errNoDirectPath
++		}
++		derpAddr = netip.AddrPort{}
++	}
+ 
+ 	if !udpAddr.ap.IsValid() && !derpAddr.IsValid() {
+ 		// Make a last ditch effort to see if we have a DERP route for them. If
+diff --git a/wgengine/magicsock/magicsock.go b/wgengine/magicsock/magicsock.go
+index 8fbd07013..3b4c254a7 100644
+--- a/wgengine/magicsock/magicsock.go
++++ b/wgengine/magicsock/magicsock.go
+@@ -156,6 +156,7 @@ type Conn struct {
+ 	// This block mirrors the contents and field order of the Options
+ 	// struct. Initialized once at construction, then constant.
+ 
++	directOnlyData         bool // WireGuard packets require verified direct UDP
+ 	eventBus               *eventbus.Bus
+ 	eventClient            *eventbus.Client
+ 	logf                   logger.Logf
+@@ -432,6 +433,10 @@ func (c *Conn) dlogf(format string, a ...any) {
+ 
+ // Options contains options for Listen.
+ type Options struct {
++	// DirectOnlyData permits WireGuard packets only over verified direct UDP.
++	// Discovery signaling, including DERP-carried disco, is unaffected.
++	DirectOnlyData bool
++
+ 	// EventBus, if non-nil, is used for event publication and subscription by
+ 	// each Conn created from these Options. It must not be nil outside of
+ 	// tests.
+@@ -683,6 +688,7 @@ func NewConn(opts Options) (*Conn, error) {
+ 	c.eventBus = opts.EventBus
+ 	c.port.Store(uint32(opts.Port))
+ 	c.controlKnobs = opts.ControlKnobs
++	c.directOnlyData = opts.DirectOnlyData
+ 	c.epFunc = opts.endpointsFunc()
+ 	c.derpActiveFunc = opts.derpActiveFunc()
+ 	c.idleFunc = opts.IdleFunc
+@@ -1502,11 +1508,17 @@ func (c *Conn) Send(buffs [][]byte, ep conn.Endpoint, offset int) (err error) {
+ 		// A [*lazyEndpoint] may end up on this TX codepath when wireguard-go is
+ 		// deemed "under handshake load" and ends up transmitting a cookie reply
+ 		// using the received [conn.Endpoint] in [device.SendHandshakeCookie].
++		if c.directOnlyData && !ep.src.isDirect() {
++			return errNoDirectPath
++		}
+ 		if ep.src.ap.Addr().Is6() {
+ 			return c.pconn6.WriteWireGuardBatchTo(buffs, ep.src, offset)
+ 		}
+ 		return c.pconn4.WriteWireGuardBatchTo(buffs, ep.src, offset)
+ 	}
++	if c.directOnlyData {
++		return errNoDirectPath
++	}
+ 	return nil
+ }
+ 
+@@ -1519,6 +1531,9 @@ func (c *Conn) Send(buffs [][]byte, ep conn.Endpoint, offset int) (err error) {
+ var errUnsupportedConnType = errors.New("unsupported connection type")
+ 
+ func (c *Conn) sendUDPBatch(addr epAddr, buffs [][]byte, offset int) (sent bool, err error) {
++	if c.directOnlyData && !addr.isDirect() {
++		return false, errNoDirectPath
++	}
+ 	isIPv6 := false
+ 	switch {
+ 	case addr.ap.Addr().Is4():
+@@ -1653,6 +1668,9 @@ func (c *Conn) sendUDPStd(addr netip.AddrPort, b []byte) (sent bool, err error)
+ // IPv6 address when the local machine doesn't have IPv6 support
+ // returns (false, nil); it's not an error, but nothing was sent.
+ func (c *Conn) sendAddr(addr netip.AddrPort, pubKey key.NodePublic, b []byte, isDisco bool, isGeneveEncap bool) (sent bool, err error) {
++	if c.directOnlyData && !isDisco && (addr.Addr() == tailcfg.DerpMagicIPAddr || isGeneveEncap) {
++		return false, errNoDirectPath
++	}
+ 	if addr.Addr() != tailcfg.DerpMagicIPAddr {
+ 		return c.sendUDP(addr, b, isDisco, isGeneveEncap)
+ 	}
+@@ -1854,6 +1872,9 @@ func (c *Conn) receiveIP(b []byte, ipp netip.AddrPort, cache *epAddrEndpointCach
+ 		// Fall through for all other packet types as they are assumed to
+ 		// be potentially WireGuard.
+ 	}
++	if c.directOnlyData && src.vni.IsSet() {
++		return nil, 0, false, false
++	}
+ 
+ 	if !c.havePrivateKey.Load() {
+ 		// If we have no private key, we're logged out or
+diff --git a/wgengine/userspace.go b/wgengine/userspace.go
+index 875011a9c..b5694f8ff 100644
+--- a/wgengine/userspace.go
++++ b/wgengine/userspace.go
+@@ -176,6 +176,9 @@ type BIRDClient interface {
+ 
+ // Config is the engine configuration.
+ type Config struct {
++	// DirectOnlyData permits WireGuard data only over verified direct UDP.
++	DirectOnlyData bool
++
+ 	// Tun is the device used by the Engine to exchange packets with
+ 	// the OS.
+ 	// If nil, a fake Device that does nothing is used.
+@@ -259,6 +262,8 @@ func NewFakeUserspaceEngine(logf logger.Logf, opts ...any) (Engine, error) {
+ 	}
+ 	for _, o := range opts {
+ 		switch v := o.(type) {
++		case bool:
++			conf.DirectOnlyData = v
+ 		case uint16:
+ 			conf.ListenPort = v
+ 		case int:
+@@ -402,6 +407,7 @@ func NewUserspaceEngine(logf logger.Logf, conf Config) (_ Engine, reterr error)
+ 		e.RequestStatus()
+ 	}
+ 	magicsockOpts := magicsock.Options{
++		DirectOnlyData: conf.DirectOnlyData,
+ 		EventBus:       e.eventBus,
+ 		Logf:           logf,
+ 		Port:           conf.ListenPort,
+diff --git a/wgengine/userspace_test.go b/wgengine/userspace_test.go
+index 0a1d2924d..73fbb78da 100644
+--- a/wgengine/userspace_test.go
++++ b/wgengine/userspace_test.go
+@@ -31,6 +31,21 @@
+ 	"tailscale.com/wgengine/wgcfg"
+ )
+ 
++func TestDirectOnlyDataReachesMagicConn(t *testing.T) {
++	for _, enabled := range []bool{false, true} {
++		bus := eventbustest.NewBus(t)
++		e, err := NewFakeUserspaceEngine(t.Logf, enabled, health.NewTracker(bus), new(usermetric.Registry), bus)
++		if err != nil {
++			t.Fatal(err)
++		}
++		conn := e.(*userspaceEngine).magicConn
++		if got := reflect.ValueOf(conn).Elem().FieldByName("directOnlyData").Bool(); got != enabled {
++			t.Errorf("DirectOnlyData = %v, want %v", got, enabled)
++		}
++		e.Close()
++	}
++}
++
+ func TestNoteReceiveActivity(t *testing.T) {
+ 	now := mono.Time(123456)
+ 	var logBuf tstest.MemLogger

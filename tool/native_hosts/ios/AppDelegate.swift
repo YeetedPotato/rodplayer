@@ -1,6 +1,8 @@
 import AVFoundation
+import Foundation
 import Flutter
 import MobileVLCKit
+import TailscaleKit
 import UIKit
 import VideoToolbox
 
@@ -9,11 +11,14 @@ import VideoToolbox
   private var events: FlutterEventSink?
   private let applePlayback = ApplePlaybackManager()
   private let compatibilityPlayback = AppleCompatibilityPlaybackManager()
+  private let privateNetwork = PrivateNetworkHost()
+  private let tailscaleKitLinkProof: TailscaleNode.Type = TailscaleNode.self
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    _ = tailscaleKitLinkProof
     let controller = window?.rootViewController as! FlutterViewController
     FlutterMethodChannel(name: "rodplayer/playback_capabilities", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler { call, result in
@@ -27,17 +32,27 @@ import VideoToolbox
       }
     FlutterEventChannel(name: "rodplayer/playback_capability_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(self)
+    FlutterMethodChannel(name: "rodplayer/private_network", binaryMessenger: controller.binaryMessenger)
+      .setMethodCallHandler(privateNetwork.handle)
+    FlutterEventChannel(name: "rodplayer/private_network_events", binaryMessenger: controller.binaryMessenger)
+      .setStreamHandler(privateNetwork)
     FlutterMethodChannel(name: "rodplayer/apple_playback", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler(applePlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_playback_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(applePlayback)
-    registrar(forPlugin: "RodPlayerApplePlayback")
-      .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
     FlutterMethodChannel(name: "rodplayer/apple_compatibility_playback", binaryMessenger: controller.binaryMessenger)
       .setMethodCallHandler(compatibilityPlayback.handle)
     FlutterEventChannel(name: "rodplayer/apple_compatibility_playback_events", binaryMessenger: controller.binaryMessenger)
       .setStreamHandler(compatibilityPlayback)
-    registrar(forPlugin: "RodPlayerAppleCompatibilityPlayback")
+    guard
+      let applePlaybackRegistrar = registrar(forPlugin: "RodPlayerApplePlayback"),
+      let compatibilityPlaybackRegistrar = registrar(forPlugin: "RodPlayerAppleCompatibilityPlayback")
+    else {
+      return false
+    }
+    applePlaybackRegistrar
+      .register(ApplePlaybackViewFactory(manager: applePlayback), withId: "rodplayer/apple_playback_view")
+    compatibilityPlaybackRegistrar
       .register(AppleCompatibilityPlaybackViewFactory(manager: compatibilityPlayback), withId: "rodplayer/apple_compatibility_playback_view")
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -101,6 +116,666 @@ import VideoToolbox
       "maxChannels": route?.channels?.count as Any,
       "sampleRates": [Int(session.sampleRate)].filter { $0 > 0 },
     ]
+  }
+}
+
+private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
+  private var eventSink: FlutterEventSink?
+  private let stateStore: ApplePrivateNetworkStateStore?
+  private let nodeOwner: ApplePrivateNetworkNodeOwner?
+  private var cachedStatus: ApplePrivateNetworkStatus
+
+  override init() {
+    do {
+      let stateStore = try ApplePrivateNetworkStateStore()
+      try stateStore.prepare()
+      self.stateStore = stateStore
+      nodeOwner = ApplePrivateNetworkNodeOwner(stateStore: stateStore)
+      cachedStatus = .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    } catch {
+      stateStore = nil
+      nodeOwner = nil
+      cachedStatus = .stopped(hasPersistedIdentity: false)
+    }
+    super.init()
+    if let nodeOwner {
+      Task { [weak self, nodeOwner] in
+        await nodeOwner.setStatusObserver { [weak self] status in
+          Task { @MainActor [weak self] in self?.receiveStatus(status) }
+        }
+      }
+    }
+  }
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "ping":
+      result(true)
+    case "status":
+      status(result: result)
+    case "stop":
+      stop(result: result)
+    case "reset":
+      reset(result: result)
+    case "bootstrap":
+      bootstrap(call.arguments, result: result)
+    case "resume":
+      resume(result: result)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    self.eventSink = eventSink
+    guard stateStore != nil else {
+      eventSink(Self.operationFailed())
+      return nil
+    }
+    emitStatus()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func emitStatus() {
+    guard stateStore != nil else {
+      eventSink?(Self.operationFailed())
+      return
+    }
+    eventSink?(cachedStatus.payload)
+  }
+
+  private func receiveStatus(_ status: ApplePrivateNetworkStatus) {
+    guard cachedStatus != status else { return }
+    cachedStatus = status
+    eventSink?(status.payload)
+  }
+
+  private func status(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      let status = await nodeOwner.currentStatus()
+      self?.receiveStatus(status)
+      result(status.payload)
+    }
+  }
+
+  private func stop(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      do {
+        try await nodeOwner.stop()
+        self?.receiveStatus(await nodeOwner.currentStatus())
+        result(nil)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private func reset(result: @escaping FlutterResult) {
+    guard let nodeOwner else {
+      result(Self.operationFailed())
+      return
+    }
+    Task { @MainActor [weak self] in
+      do {
+        try await nodeOwner.reset()
+        self?.receiveStatus(await nodeOwner.currentStatus())
+        result(nil)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private func bootstrap(_ arguments: Any?, result: @escaping FlutterResult) {
+    Task { @MainActor [weak self] in
+      guard let self, self.stateStore != nil, let nodeOwner = self.nodeOwner else {
+        result(Self.operationFailed())
+        return
+      }
+      do {
+        let bootstrap = try ApplePrivateNetworkBootstrap(arguments: arguments)
+        let metadata = ApplePrivateNetworkMetadata.from(bootstrap: bootstrap)
+        let status = try await nodeOwner.bootstrap(metadata: metadata, authKey: bootstrap.authKey)
+        receiveStatus(status)
+        result(status.payload)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private func resume(result: @escaping FlutterResult) {
+    Task { @MainActor [weak self] in
+      guard let self, self.stateStore != nil, let nodeOwner = self.nodeOwner else {
+        result(Self.operationFailed())
+        return
+      }
+      do {
+        let status = try await nodeOwner.resume()
+        receiveStatus(status)
+        result(status.payload)
+      } catch ApplePrivateNetworkNodeOwnerError.noIdentity {
+        let status = await nodeOwner.currentStatus()
+        receiveStatus(status)
+        result(status.payload)
+      } catch {
+        result(Self.operationFailed())
+      }
+    }
+  }
+
+  private static func operationFailed() -> FlutterError {
+    FlutterError(code: "private_network_operation_failed", message: nil, details: nil)
+  }
+
+}
+
+private struct ApplePrivateNetworkStatus: Equatable, Sendable {
+  let state: String
+  let path: String
+  let hasPersistedIdentity: Bool
+  let reason: String
+
+  static func stopped(hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "stopped", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: "none")
+  }
+
+  static func starting(path: String, hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "starting", path: path, hasPersistedIdentity: hasPersistedIdentity, reason: "none")
+  }
+
+  static func unavailable(reason: String, hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "unavailable", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: reason)
+  }
+
+  var payload: [String: Any] {
+    [
+      "state": state,
+      "path": path,
+      "hasPersistedIdentity": hasPersistedIdentity,
+      "reason": reason,
+      "gatewayUrl": NSNull(),
+    ]
+  }
+}
+
+private struct ApplePrivateNetworkStateStore: Sendable {
+  let privateNetworkRoot: URL
+  let nodeStateDirectory: URL
+  let tailscaledState: URL
+  let metadataFile: URL
+
+  init(fileManager: FileManager = .default) throws {
+    let applicationSupport = try fileManager.url(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: true
+    )
+    privateNetworkRoot = applicationSupport
+      .appendingPathComponent("RodPlayer", isDirectory: true)
+      .appendingPathComponent("PrivateNetwork", isDirectory: true)
+    nodeStateDirectory = privateNetworkRoot.appendingPathComponent("node", isDirectory: true)
+    tailscaledState = nodeStateDirectory.appendingPathComponent("tailscaled.state", isDirectory: false)
+    metadataFile = privateNetworkRoot.appendingPathComponent("metadata.json", isDirectory: false)
+  }
+
+  func prepare(fileManager: FileManager = .default) throws {
+    try fileManager.createDirectory(at: nodeStateDirectory, withIntermediateDirectories: true)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    var root = privateNetworkRoot
+    try root.setResourceValues(values)
+  }
+
+  var hasPersistedIdentity: Bool {
+    FileManager.default.fileExists(atPath: tailscaledState.path)
+  }
+
+  func write(metadata: ApplePrivateNetworkMetadata) throws {
+    try JSONEncoder().encode(metadata).write(to: metadataFile, options: .atomic)
+  }
+
+  func loadMetadata() throws -> ApplePrivateNetworkMetadata {
+    try ApplePrivateNetworkMetadata.decodeAndValidate(from: Data(contentsOf: metadataFile))
+  }
+
+  func waitForPersistedIdentity() async throws -> Bool {
+    if hasPersistedIdentity { return true }
+    for _ in 0 ..< 20 {
+      try await Task.sleep(nanoseconds: 50_000_000)
+      if hasPersistedIdentity { return true }
+    }
+    return false
+  }
+
+  func reset(fileManager: FileManager = .default) throws {
+    guard fileManager.fileExists(atPath: privateNetworkRoot.path) else { return }
+    try fileManager.removeItem(at: privateNetworkRoot)
+  }
+}
+
+private protocol ApplePrivateNetworkNode: AnyObject, Sendable {
+  func up() async throws
+  func close() async throws
+  func statusJSON() async throws -> Data
+}
+
+private protocol ApplePrivateNetworkNodeFactory: Sendable {
+  func make(config: TailscaleKit.Configuration) throws -> any ApplePrivateNetworkNode
+}
+
+private enum ApplePrivateNetworkNodeOwnerError: Error {
+  case nodeAlreadyActive
+  case existingIdentity
+  case noIdentity
+  case startFailed
+}
+
+private actor ApplePrivateNetworkNodeOwner {
+  private let stateStore: ApplePrivateNetworkStateStore
+  private let factory: any ApplePrivateNetworkNodeFactory
+  private var activeNode: (any ApplePrivateNetworkNode)?
+  private var activeMetadata: ApplePrivateNetworkMetadata?
+  private var cachedStatus: ApplePrivateNetworkStatus
+  private var statusObserver: (@Sendable (ApplePrivateNetworkStatus) -> Void)?
+  private var monitorTask: Task<Void, Never>?
+  private var lifecycleLocked = false
+  private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(
+    stateStore: ApplePrivateNetworkStateStore,
+    factory: any ApplePrivateNetworkNodeFactory = TailscaleKitNodeFactory()
+  ) {
+    self.stateStore = stateStore
+    self.factory = factory
+    cachedStatus = .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
+  }
+
+  func setStatusObserver(_ observer: @escaping @Sendable (ApplePrivateNetworkStatus) -> Void) {
+    statusObserver = observer
+    observer(cachedStatus)
+  }
+
+  func currentStatus() -> ApplePrivateNetworkStatus { cachedStatus }
+
+  func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws -> ApplePrivateNetworkStatus {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    guard activeNode == nil else {
+      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
+    }
+    guard !stateStore.hasPersistedIdentity else {
+      throw ApplePrivateNetworkNodeOwnerError.existingIdentity
+    }
+    try stateStore.prepare()
+    try stateStore.write(metadata: metadata)
+    try await startLocked(config: configuration(metadata: metadata, authKey: authKey))
+    guard try await stateStore.waitForPersistedIdentity() else {
+      try await stopLocked()
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+    activeMetadata = metadata
+    return await startMonitorLocked()
+  }
+
+  func resume() async throws -> ApplePrivateNetworkStatus {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    guard activeNode == nil else {
+      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
+    }
+    guard stateStore.hasPersistedIdentity else {
+      publish(.unavailable(reason: "no_identity", hasPersistedIdentity: false))
+      throw ApplePrivateNetworkNodeOwnerError.noIdentity
+    }
+    try stateStore.prepare()
+    let metadata = try stateStore.loadMetadata()
+    try await startLocked(config: configuration(metadata: metadata, authKey: nil))
+    activeMetadata = metadata
+    return await startMonitorLocked()
+  }
+
+  private func startLocked(config: TailscaleKit.Configuration) async throws {
+    let node: any ApplePrivateNetworkNode
+    do {
+      node = try factory.make(config: config)
+    } catch {
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+    activeNode = node
+    do {
+      try await node.up()
+    } catch {
+      do {
+        try await node.close()
+        activeNode = nil
+      } catch {
+        // Retain ownership when cleanup fails; reset must not delete its state.
+      }
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
+  }
+
+  private func configuration(
+    metadata: ApplePrivateNetworkMetadata,
+    authKey: String?
+  ) -> TailscaleKit.Configuration {
+    TailscaleKit.Configuration(
+      hostName: metadata.nodeHostname,
+      path: stateStore.nodeStateDirectory.path,
+      authKey: authKey,
+      controlURL: metadata.controlUrl,
+      ephemeral: false,
+      directOnlyData: true
+    )
+  }
+
+  func stop() async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    await stopMonitorLocked()
+    do {
+      try await stopLocked()
+    } catch {
+      publish(.unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity))
+      throw error
+    }
+    publish(.stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity))
+  }
+
+  func reset() async throws {
+    await acquireLifecycle()
+    defer { releaseLifecycle() }
+    await stopMonitorLocked()
+    do {
+      try await stopLocked()
+    } catch {
+      publish(.unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity))
+      throw error
+    }
+    try stateStore.reset()
+    publish(.stopped(hasPersistedIdentity: false))
+  }
+
+  private func stopLocked() async throws {
+    guard let activeNode else { return }
+    try await activeNode.close()
+    self.activeNode = nil
+    activeMetadata = nil
+  }
+
+  private func startMonitorLocked() async -> ApplePrivateNetworkStatus {
+    await stopMonitorLocked()
+    let status = await sampleStatus()
+    publish(status)
+    monitorTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(nanoseconds: 1_000_000_000)
+        } catch {
+          return
+        }
+        guard !Task.isCancelled, let self else { return }
+        await self.pollStatus()
+      }
+    }
+    return status
+  }
+
+  private func stopMonitorLocked() async {
+    let task = monitorTask
+    monitorTask = nil
+    task?.cancel()
+    await task?.value
+  }
+
+  private func pollStatus() async {
+    guard monitorTask != nil else { return }
+    publish(await sampleStatus())
+  }
+
+  private func sampleStatus() async -> ApplePrivateNetworkStatus {
+    guard let activeNode, let metadata = activeMetadata else {
+      return .stopped(hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    }
+    do {
+      let backend = try JSONDecoder().decode(AppleTsnetStatus.self, from: await activeNode.statusJSON())
+      guard backend.backendState == "Running" else {
+        return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      let homePeers = backend.peer.values.filter { $0.tailscaleIPs.contains(metadata.homeIpv4) }
+      guard
+        homePeers.count == 1,
+        let peer = homePeers.first,
+        peer.online,
+        peer.peerRelay?.isEmpty != false
+      else {
+        return .unavailable(reason: "direct_path_unavailable", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      guard let currentAddress = peer.currentAddress, !currentAddress.isEmpty else {
+        return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      return .starting(path: "direct", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    } catch {
+      return .unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+    }
+  }
+
+  private func publish(_ status: ApplePrivateNetworkStatus) {
+    guard cachedStatus != status else { return }
+    cachedStatus = status
+    statusObserver?(status)
+  }
+
+  private func acquireLifecycle() async {
+    guard lifecycleLocked else {
+      lifecycleLocked = true
+      return
+    }
+    await withCheckedContinuation { lifecycleWaiters.append($0) }
+  }
+
+  private func releaseLifecycle() {
+    guard !lifecycleWaiters.isEmpty else {
+      lifecycleLocked = false
+      return
+    }
+    lifecycleWaiters.removeFirst().resume()
+  }
+}
+
+private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked Sendable {
+  private let node: TailscaleNode
+
+  init(node: TailscaleNode) {
+    self.node = node
+  }
+
+  func up() async throws {
+    try await node.up()
+  }
+
+  func close() async throws {
+    try await node.close()
+  }
+
+  func statusJSON() async throws -> Data {
+    try await node.statusJSON()
+  }
+}
+
+private struct AppleTsnetStatus: Decodable {
+  let backendState: String
+  let peer: [String: AppleTsnetPeer]
+
+  enum CodingKeys: String, CodingKey {
+    case backendState = "BackendState"
+    case peer = "Peer"
+  }
+}
+
+private struct AppleTsnetPeer: Decodable {
+  let tailscaleIPs: [String]
+  let currentAddress: String?
+  let peerRelay: String?
+  let online: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case tailscaleIPs = "TailscaleIPs"
+    case currentAddress = "CurAddr"
+    case peerRelay = "PeerRelay"
+    case online = "Online"
+  }
+}
+
+private struct RodPlayerTailscaleLogSink: TailscaleKit.LogSink {
+  let logFileHandle: Int32? = -1
+
+  func log(_ message: String) {}
+}
+
+private struct TailscaleKitNodeFactory: ApplePrivateNetworkNodeFactory {
+  func make(config: TailscaleKit.Configuration) throws -> any ApplePrivateNetworkNode {
+    TailscaleKitNodeAdapter(
+      node: try TailscaleNode(config: config, logger: RodPlayerTailscaleLogSink())
+    )
+  }
+}
+
+private struct ApplePrivateNetworkBootstrap: Sendable {
+  let version: Int
+  let controlUrl: String
+  let authKey: String
+  let homeIpv4: String
+  let homePort: Int
+
+  init(arguments: Any?) throws {
+    guard
+      let values = arguments as? [String: Any],
+      let version = values["version"] as? Int,
+      version == 1,
+      let controlUrl = values["controlUrl"] as? String,
+      let authKey = values["authKey"] as? String,
+      let homeIpv4 = values["homeIpv4"] as? String,
+      let homePort = values["homePort"] as? Int
+    else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+    let metadata = ApplePrivateNetworkMetadata(
+      version: version,
+      controlUrl: controlUrl,
+      homeIpv4: homeIpv4,
+      homePort: homePort,
+      nodeHostname: "rodplayer-validation"
+    )
+    try metadata.validated()
+    guard ApplePrivateNetworkValidation.isAuthKey(authKey) else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+    self.version = version
+    self.controlUrl = controlUrl
+    self.authKey = authKey
+    self.homeIpv4 = homeIpv4
+    self.homePort = homePort
+  }
+}
+
+private struct ApplePrivateNetworkMetadata: Codable, Sendable {
+  let version: Int
+  let controlUrl: String
+  let homeIpv4: String
+  let homePort: Int
+  let nodeHostname: String
+
+  static func from(bootstrap: ApplePrivateNetworkBootstrap) -> ApplePrivateNetworkMetadata {
+    let suffix = UUID().uuidString
+      .replacingOccurrences(of: "-", with: "")
+      .lowercased()
+      .prefix(16)
+    return ApplePrivateNetworkMetadata(
+      version: bootstrap.version,
+      controlUrl: bootstrap.controlUrl,
+      homeIpv4: bootstrap.homeIpv4,
+      homePort: bootstrap.homePort,
+      nodeHostname: "rodplayer-\(suffix)"
+    )
+  }
+
+  static func decodeAndValidate(from data: Data) throws -> ApplePrivateNetworkMetadata {
+    let metadata = try JSONDecoder().decode(ApplePrivateNetworkMetadata.self, from: data)
+    try metadata.validated()
+    return metadata
+  }
+
+  func validated() throws {
+    guard
+      version == 1,
+      ApplePrivateNetworkValidation.isControlUrl(controlUrl),
+      ApplePrivateNetworkValidation.isIpv4(homeIpv4),
+      (1 ... 65_535).contains(homePort),
+      ApplePrivateNetworkValidation.isHostname(nodeHostname)
+    else {
+      throw ApplePrivateNetworkMetadataError.invalid
+    }
+  }
+}
+
+private enum ApplePrivateNetworkMetadataError: Error {
+  case invalid
+}
+
+private enum ApplePrivateNetworkValidation {
+  static func isControlUrl(_ value: String) -> Bool {
+    guard
+      let components = URLComponents(string: value),
+      components.scheme?.lowercased() == "https",
+      components.host?.isEmpty == false,
+      components.user == nil,
+      components.password == nil,
+      components.query == nil,
+      components.fragment == nil,
+      components.path.isEmpty || components.path == "/"
+    else {
+      return false
+    }
+    return true
+  }
+
+  static func isAuthKey(_ value: String) -> Bool {
+    value.range(
+      of: "^hskey-auth-[A-Za-z0-9_-]{12}-[A-Za-z0-9_-]{64}$",
+      options: .regularExpression
+    ) != nil
+  }
+
+  static func isIpv4(_ value: String) -> Bool {
+    let components = value.split(separator: ".", omittingEmptySubsequences: false)
+    guard components.count == 4 else { return false }
+    return components.allSatisfy { component in
+      guard let number = Int(component), (0 ... 255).contains(number) else { return false }
+      return String(number) == component
+    }
+  }
+
+  static func isHostname(_ value: String) -> Bool {
+    value.range(
+      of: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      options: .regularExpression
+    ) != nil
   }
 }
 

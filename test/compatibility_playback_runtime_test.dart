@@ -109,10 +109,11 @@ void main() {
   });
 
   test('native source templates register compatibility dependency and teardown', () {
-    final patcher = File('tool/apply_native_hosts.py').readAsStringSync();
-    final android = File('tool/native_hosts/android/MainActivity.kt').readAsStringSync();
-    final ios = File('tool/native_hosts/ios/AppDelegate.swift').readAsStringSync();
-    final macos = File('tool/native_hosts/macos/MainFlutterWindow.swift').readAsStringSync();
+    final patcher = _readText('tool/apply_native_hosts.py');
+    final workflow = _readText('.github/workflows/build-multiplatform.yml');
+    final android = _readText('tool/native_hosts/android/MainActivity.kt');
+    final ios = _readText('tool/native_hosts/ios/AppDelegate.swift');
+    final macos = _readText('tool/native_hosts/macos/MainFlutterWindow.swift');
 
     expect(patcher, contains('MobileVLCKit'));
     expect(patcher, contains('dev.jdtech.mpv:libmpv:1.0.0'));
@@ -127,6 +128,12 @@ void main() {
     expect(ios, contains('VLCMediaPlayer'));
     expect(macos, contains('rodplayer/apple_compatibility_playback'));
     expect(macos, contains('VLCKit'));
+    expect(patcher, contains('rodplayer_patch_vlckit_coregraphics'));
+    expect(ios, contains('let applePlaybackRegistrar = registrar(forPlugin:'));
+    expect(ios, contains('let compatibilityPlaybackRegistrar = registrar(forPlugin:'));
+    expect(ios, contains('else {\n      return false\n    }'));
+    expect(workflow, contains(r'status=${PIPESTATUS[0]}'));
+    expect(workflow, contains(r'test -x "$app/Contents/MacOS/rodplayer"'));
   });
 
   test('native template handshake does not create playback context', () {
@@ -136,6 +143,9 @@ void main() {
     expect(android, isNot(contains('"ping" -> result.success(runCatching { MPVLib.create(context)')));
   });
 }
+
+String _readText(String path) =>
+    File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 PlaybackPlan _plan({required String engineId, Uri? uri, PlayMethod method = PlayMethod.directPlay}) => PlaybackPlan(
       itemId: 'item',

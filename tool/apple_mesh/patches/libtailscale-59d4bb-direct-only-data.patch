@@ -1,0 +1,255 @@
+diff --git a/swift/TailscaleKit/TailscaleKit.h b/swift/TailscaleKit/TailscaleKit.h
+index f2c1220..893d8da 100644
+--- a/swift/TailscaleKit/TailscaleKit.h
++++ b/swift/TailscaleKit/TailscaleKit.h
+@@ -74,6 +74,8 @@ extern int tailscale_set_hostname(tailscale sd, const char* hostname);
+ extern int tailscale_set_authkey(tailscale sd, const char* authkey);
+ extern int tailscale_set_control_url(tailscale sd, const char* control_url);
+ extern int tailscale_set_ephemeral(tailscale sd, int ephemeral);
++// WireGuard data requires verified direct UDP when enabled. Rejects late calls with EBUSY.
++extern int tailscale_set_direct_only_data(tailscale sd, int enabled);
+ 
+ // tailscale_set_logfd instructs the tailscale instance to write logs to fd.
+ //
+diff --git a/swift/TailscaleKit/TailscaleNode.swift b/swift/TailscaleKit/TailscaleNode.swift
+index c1cc9a0..2c76412 100644
+--- a/swift/TailscaleKit/TailscaleNode.swift
++++ b/swift/TailscaleKit/TailscaleNode.swift
+@@ -13,18 +13,21 @@ public struct Configuration: Sendable {
+     public let authKey: String?    ///< An auth key.  Leave empty to use web auth
+     public let controlURL: String  ///< URL for Tailscale control
+     public let ephemeral: Bool
++    public let directOnlyData: Bool
+ 
+     public init(hostName: String,
+                 path: String,
+                 authKey: String?,
+                 controlURL: String,
+-                ephemeral: Bool = false)
++                ephemeral: Bool = false,
++                directOnlyData: Bool = false)
+     {
+         self.hostName = hostName
+         self.path = path
+         self.authKey = authKey
+         self.controlURL = controlURL
+         self.ephemeral = ephemeral
++        self.directOnlyData = directOnlyData
+     }
+ 
+ }
+@@ -83,6 +86,11 @@ public actor TailscaleNode {
+         tailscale_set_control_url(tailscale, config.controlURL)
+         tailscale_set_ephemeral(tailscale, config.ephemeral ? 1 : 0)
+ 
++        let directOnlyResult = tailscale_set_direct_only_data(tailscale, config.directOnlyData ? 1 : 0)
++        guard directOnlyResult == 0 else {
++            throw TailscaleError.fromPosixErrCode(directOnlyResult, tailscale.getErrorMessage())
++        }
++
+         let res = tailscale_start(tailscale)
+ 
+         guard res == 0 else {
+diff --git a/tailscale.c b/tailscale.c
+index 420d67e..531e660 100644
+--- a/tailscale.c
++++ b/tailscale.c
+@@ -18,6 +18,7 @@ extern int TsnetSetHostname(int sd, char* str);
+ extern int TsnetSetAuthKey(int sd, char* str);
+ extern int TsnetSetControlURL(int sd, char* str);
+ extern int TsnetSetEphemeral(int sd, int ephemeral);
++extern int TsnetSetDirectOnlyData(int sd, int enabled);
+ extern int TsnetSetLogFD(int sd, int fd);
+ extern int TsnetGetIps(int sd, char *buf, size_t buflen);
+ extern int TsnetGetRemoteAddr(int listener, int conn, char *buf, size_t buflen);
+@@ -78,6 +79,9 @@ int tailscale_set_control_url(tailscale sd, const char* control_url) {
+ int tailscale_set_ephemeral(tailscale sd, int ephemeral) {
+ 	return TsnetSetEphemeral(sd, ephemeral);
+ }
++int tailscale_set_direct_only_data(tailscale sd, int enabled) {
++	return TsnetSetDirectOnlyData(sd, enabled);
++}
+ int tailscale_set_logfd(tailscale sd, int fd) {
+ 	return TsnetSetLogFD(sd, fd);
+ }
+diff --git a/tailscale.go b/tailscale.go
+index 316efdd..6a5cf07 100644
+--- a/tailscale.go
++++ b/tailscale.go
+@@ -39,9 +39,27 @@ var servers struct {
+ }
+ 
+ type server struct {
+-	s       *tsnet.Server
+-	lastErr string
+-	started bool
++	s            *tsnet.Server
++	lastErr      string
++	started      bool
++	configMu     sync.Mutex
++	configFrozen bool
++}
++
++func (s *server) freezeConfig() {
++	s.configMu.Lock()
++	s.configFrozen = true
++	s.configMu.Unlock()
++}
++
++func (s *server) setDirectOnlyData(enabled bool) bool {
++	s.configMu.Lock()
++	defer s.configMu.Unlock()
++	if s.configFrozen {
++		return false
++	}
++	s.s.DirectOnlyData = enabled
++	return true
+ }
+ 
+ func getServer(sd C.int) *server {
+@@ -110,6 +128,7 @@ func TsnetStart(sd C.int) C.int {
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 	err := s.s.Start()
+ 	if err == nil {
+ 		s.started = true
+@@ -123,6 +142,7 @@ func TsnetUp(sd C.int) C.int {
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 	_, err := s.s.Up(context.Background()) // cancellation is via TsnetClose
+ 	if err == nil {
+ 		s.started = true
+@@ -219,6 +239,7 @@ func TsnetListen(sd C.int, network, addr *C.char, listenerOut *C.int) C.int {
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 
+ 	ln, err := s.s.Listen(C.GoString(network), C.GoString(addr))
+ 	if err != nil {
+@@ -447,6 +468,7 @@ func TsnetDial(sd C.int, network, addr *C.char, connOut *C.int) C.int {
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 	netConn, err := s.s.Dial(context.Background(), C.GoString(network), C.GoString(addr))
+ 	if err != nil {
+ 		return s.recErr(err)
+@@ -512,6 +534,18 @@ func TsnetSetEphemeral(sd C.int, e int) C.int {
+ 	return 0
+ }
+ 
++//export TsnetSetDirectOnlyData
++func TsnetSetDirectOnlyData(sd C.int, enabled C.int) C.int {
++	s := getServer(sd)
++	if s == nil {
++		return C.EBADF
++	}
++	if !s.setDirectOnlyData(enabled != 0) {
++		return C.EBUSY
++	}
++	return 0
++}
++
+ //export TsnetSetLogFD
+ func TsnetSetLogFD(sd, fd C.int) C.int {
+ 	s := getServer(sd)
+@@ -552,6 +586,7 @@ func TsnetLoopback(sd C.int, addrOut *C.char, addrLen C.size_t, proxyOut *C.char
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 	addr, proxyCred, localAPICred, err := s.s.Loopback()
+ 	if err != nil {
+ 		return s.recErr(err)
+@@ -593,6 +628,7 @@ func TsnetStatusJSON(sd C.int, jsonOut **C.char) C.int {
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 	// LocalClient rides tsnet's in-memory LocalAPI listener — unlike
+ 	// Loopback()'s TCP listener it cannot be reclaimed by the OS while
+ 	// the process is suspended (iOS), so status reads keep working on
+@@ -621,6 +657,7 @@ func TsnetEnableFunnelToLocalhostPlaintextHttp1(sd C.int, localhostPort C.int) C
+ 	if s == nil {
+ 		return C.EBADF
+ 	}
++	s.freezeConfig()
+ 
+ 	ctx := context.Background()
+ 	lc, err := s.s.LocalClient()
+diff --git a/tailscale.h b/tailscale.h
+index 9bc8e7c..4be8c76 100644
+--- a/tailscale.h
++++ b/tailscale.h
+@@ -67,6 +67,8 @@ extern int tailscale_set_hostname(tailscale sd, const char* hostname);
+ extern int tailscale_set_authkey(tailscale sd, const char* authkey);
+ extern int tailscale_set_control_url(tailscale sd, const char* control_url);
+ extern int tailscale_set_ephemeral(tailscale sd, int ephemeral);
++// WireGuard data requires verified direct UDP when enabled. Rejects late calls with EBUSY.
++extern int tailscale_set_direct_only_data(tailscale sd, int enabled);
+ 
+ // tailscale_set_logfd instructs the tailscale instance to write logs to fd.
+ //
+diff --git a/tailscale_test.go b/tailscale_test.go
+index e79fed9..1022336 100644
+--- a/tailscale_test.go
++++ b/tailscale_test.go
+@@ -5,8 +5,27 @@ import (
+ 	"time"
+ 
+ 	"github.com/tailscale/libtailscale/tsnetctest"
++	"tailscale.com/tsnet"
+ )
+ 
++func TestDirectOnlyDataConfiguration(t *testing.T) {
++	first := &server{s: &tsnet.Server{}}
++	second := &server{s: &tsnet.Server{}}
++	if first.s.DirectOnlyData || second.s.DirectOnlyData {
++		t.Fatal("default must be disabled")
++	}
++	if !first.setDirectOnlyData(true) || !first.s.DirectOnlyData || second.s.DirectOnlyData {
++		t.Fatal("configuration must be per server")
++	}
++	first.freezeConfig()
++	if first.setDirectOnlyData(false) || !first.s.DirectOnlyData {
++		t.Fatal("late setter must reject without mutating the server")
++	}
++	if !second.setDirectOnlyData(false) || second.s.DirectOnlyData {
++		t.Fatal("other server must remain configurable")
++	}
++}
++
+ func TestConn(t *testing.T) {
+ 	tsnetctest.RunTestConn(t)
+ 
+diff --git a/tsnetctest/tsnetctest.go b/tsnetctest/tsnetctest.go
+index a2d17df..501c41d 100644
+--- a/tsnetctest/tsnetctest.go
++++ b/tsnetctest/tsnetctest.go
+@@ -52,9 +52,21 @@ int test_conn() {
+ 	if ((ret = tailscale_set_logfd(s1, -1)) != 0) {
+ 		return set_err(s1, '2');
+ 	}
++	if ((ret = tailscale_set_direct_only_data(s1, 0)) != 0) {
++		return set_err(s1, 'd');
++	}
+ 	if ((ret = tailscale_up(s1)) != 0) {
+ 		return set_err(s1, '3');
+ 	}
++	if (tailscale_set_direct_only_data(s1, 1) != EBUSY) {
++		snprintf(err, errlen, "late direct-only setter did not return EBUSY");
++		return 1;
++	}
++	tailscale unused = tailscale_new();
++	if (tailscale_set_direct_only_data(unused, 1) != 0 || tailscale_close(unused) != 0) {
++		snprintf(err, errlen, "new independent node rejected direct-only configuration");
++		return 1;
++	}
+ 
+ 	s2 = tailscale_new();
+ 	if ((ret = tailscale_set_control_url(s2, control_url)) != 0) {
