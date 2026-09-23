@@ -479,7 +479,8 @@ private actor ApplePrivateNetworkNodeOwner {
       path: stateStore.nodeStateDirectory.path,
       authKey: authKey,
       controlURL: metadata.controlUrl,
-      ephemeral: false
+      ephemeral: false,
+      directOnlyData: true
     )
   }
 

@@ -15,7 +15,12 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 PIN = json.loads(Path(__file__).with_name("libtailscale_pin.json").read_text())
 BUILD_ROOT = ROOT / "build" / "apple_mesh"
-SOURCE = BUILD_ROOT / "source" / "libtailscale"
+BUILD_SOURCE = BUILD_ROOT / "build_source"
+SOURCE = BUILD_SOURCE / "libtailscale"
+TAILSCALE_SOURCE = BUILD_SOURCE / "tailscale"
+TAILSCALE_COMMIT = "d885b34776cd2e96f1f368a4d31729e37ff8b59b"
+TAILSCALE_REPOSITORY = "https://github.com/tailscale/tailscale.git"
+PATCHES = Path(__file__).with_name("patches")
 
 
 def query(*args: str, cwd: Path | None = None) -> str:
@@ -51,21 +56,53 @@ def verify_toolchain(xcode_major: int) -> None:
         raise SystemExit(f"Xcode {xcode_major} is required; found: {xcode_version}")
 
 
+def verify_clean_checkout(source: Path, commit: str) -> None:
+    if not (source / ".git").is_dir():
+        raise SystemExit(f"Refusing non-Git build source: {source}")
+    revision = query("git", "rev-parse", "HEAD", cwd=source)
+    if revision != commit:
+        raise SystemExit(f"Pinned revision mismatch: expected {commit}, got {revision}")
+    if query("git", "status", "--porcelain", cwd=source):
+        raise SystemExit(f"Build source is dirty; use a fresh build-managed checkout: {source}")
+
+
+def checkout_pinned(source: Path, repository: str, commit: str) -> None:
+    source.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        execute("git", "clone", "--filter=blob:none", "--no-checkout", repository, str(source))
+        execute("git", "fetch", "--depth", "1", "origin", commit, cwd=source)
+        execute("git", "checkout", "--detach", "FETCH_HEAD", cwd=source)
+    verify_clean_checkout(source, commit)
+
+
 def checkout_source() -> None:
-    SOURCE.parent.mkdir(parents=True, exist_ok=True)
-    if SOURCE.exists():
-        if not (SOURCE / ".git").is_dir():
-            raise SystemExit(f"Refusing to reuse non-Git source directory: {SOURCE}")
-    else:
-        execute("git", "clone", "--no-checkout", PIN["repository"], str(SOURCE))
-    execute("git", "fetch", "--depth", "1", "origin", PIN["commit"], cwd=SOURCE)
-    execute("git", "checkout", "--detach", "FETCH_HEAD", cwd=SOURCE)
-    revision = query("git", "rev-parse", "HEAD", cwd=SOURCE)
-    if revision != PIN["commit"]:
-        raise SystemExit(f"Pinned revision mismatch: expected {PIN['commit']}, got {revision}")
+    checkout_pinned(SOURCE, PIN["repository"], PIN["commit"])
+    checkout_pinned(TAILSCALE_SOURCE, TAILSCALE_REPOSITORY, TAILSCALE_COMMIT)
     go_mod = (SOURCE / "go.mod").read_text()
     if f"go {PIN['goVersion']}" not in go_mod or f"tailscale.com v{PIN['tailscaleVersion']}" not in go_mod:
         raise SystemExit("Pinned libtailscale dependency versions do not match metadata.")
+    if "module tailscale.com" not in (TAILSCALE_SOURCE / "go.mod").read_text():
+        raise SystemExit("Pinned Tailscale module name differs.")
+
+
+def apply_direct_only_patches() -> None:
+    for source, patch in (
+        (TAILSCALE_SOURCE, PATCHES / "tailscale-v1.94.1-direct-only-data.patch"),
+        (SOURCE, PATCHES / "libtailscale-59d4bb-direct-only-data.patch"),
+    ):
+        if not patch.is_file():
+            raise SystemExit(f"Missing pinned direct-only patch: {patch}")
+        execute("git", "apply", "--check", "--whitespace=error", str(patch), cwd=source)
+        execute("git", "apply", "--whitespace=error", str(patch), cwd=source)
+
+
+def build_workspace_environment() -> dict[str, str]:
+    workspace = BUILD_SOURCE / "go.work"
+    workspace.write_text(
+        f"go {PIN['goVersion']}\n\nuse ./libtailscale\n\n"
+        f"replace tailscale.com v{PIN['tailscaleVersion']} => ./tailscale\n"
+    )
+    return {"GOWORK": str(workspace.resolve()), "GOTOOLCHAIN": "local"}
 
 
 def _replace_exact(
@@ -161,9 +198,10 @@ def create_local_pod(target: str) -> None:
     shutil.copyfile(template, pod_root / template.name)
 
 
-def build_macos_framework(architecture: str, derived_data: Path) -> Path:
+def build_macos_framework(architecture: str, derived_data: Path, build_env: dict[str, str]) -> Path:
     go_architecture = {"arm64": "arm64", "x86_64": "amd64"}[architecture]
     environment = {
+        **build_env,
         "GOARCH": go_architecture,
         "CGO_CFLAGS": f"-arch {architecture}",
         "CGO_LDFLAGS": f"-arch {architecture}",
@@ -185,6 +223,7 @@ def build_macos_framework(architecture: str, derived_data: Path) -> Path:
         "MACOSX_DEPLOYMENT_TARGET=15.0",
         "CODE_SIGNING_ALLOWED=NO",
         cwd=SOURCE / "swift",
+        environment=environment,
     )
     framework = derived_data / "Build" / "Products" / "Release" / "TailscaleKit.framework"
     if not framework.is_dir():
@@ -253,10 +292,10 @@ def merge_macos_frameworks(arm64: Path, x86_64: Path) -> None:
         raise SystemExit("macOS TailscaleKit framework symlink structure changed during universal merge.")
 
 
-def build_macos_universal_framework() -> None:
+def build_macos_universal_framework(build_env: dict[str, str]) -> None:
     swift_build = SOURCE / "swift" / "build"
-    arm64 = build_macos_framework("arm64", swift_build)
-    x86_64 = build_macos_framework("x86_64", SOURCE / "swift" / "build-x86_64")
+    arm64 = build_macos_framework("arm64", swift_build, build_env)
+    x86_64 = build_macos_framework("x86_64", SOURCE / "swift" / "build-x86_64", build_env)
     merge_macos_frameworks(arm64, x86_64)
 
 
@@ -268,11 +307,13 @@ def main() -> None:
     require_darwin()
     verify_toolchain(args.xcode_major)
     checkout_source()
+    apply_direct_only_patches()
     patch_pinned_source()
+    build_env = build_workspace_environment()
     if args.platform == "macos":
-        build_macos_universal_framework()
+        build_macos_universal_framework(build_env)
     else:
-        execute("make", args.platform, cwd=SOURCE / "swift")
+        execute("make", args.platform, cwd=SOURCE / "swift", environment=build_env)
     create_local_pod(args.platform)
 
 

@@ -1,3 +1,70 @@
+diff --git a/tsnet/tsnet.go b/tsnet/tsnet.go
+index 6c840c335..715565130 100644
+--- a/tsnet/tsnet.go
++++ b/tsnet/tsnet.go
+@@ -70,6 +70,10 @@
+ //
+ // Its exported fields may be changed until the first method call.
+ type Server struct {
++	// DirectOnlyData permits WireGuard data only over verified direct UDP.
++	// Set before Start; discovery signaling remains available.
++	DirectOnlyData bool
++
+ 	// Dir specifies the name of the directory to use for
+ 	// state. If empty, a directory is selected automatically
+ 	// under os.UserConfigDir (https://golang.org/pkg/os/#UserConfigDir).
+@@ -659,14 +663,15 @@ func (s *Server) start() (reterr error) {
+ 	s.dialer = &tsdial.Dialer{Logf: tsLogf} // mutated below (before used)
+ 	s.dialer.SetBus(sys.Bus.Get())
+ 	eng, err := wgengine.NewUserspaceEngine(tsLogf, wgengine.Config{
+-		EventBus:      sys.Bus.Get(),
+-		ListenPort:    s.Port,
+-		NetMon:        s.netMon,
+-		Dialer:        s.dialer,
+-		SetSubsystem:  sys.Set,
+-		ControlKnobs:  sys.ControlKnobs(),
+-		HealthTracker: sys.HealthTracker.Get(),
+-		Metrics:       sys.UserMetricsRegistry(),
++		DirectOnlyData: s.DirectOnlyData,
++		EventBus:       sys.Bus.Get(),
++		ListenPort:     s.Port,
++		NetMon:         s.netMon,
++		Dialer:         s.dialer,
++		SetSubsystem:   sys.Set,
++		ControlKnobs:   sys.ControlKnobs(),
++		HealthTracker:  sys.HealthTracker.Get(),
++		Metrics:        sys.UserMetricsRegistry(),
+ 	})
+ 	if err != nil {
+ 		return err
+diff --git a/tsnet/tsnet_test.go b/tsnet/tsnet_test.go
+index f44bacab0..e901fb7f4 100644
+--- a/tsnet/tsnet_test.go
++++ b/tsnet/tsnet_test.go
+@@ -60,6 +60,23 @@
+ 	"tailscale.com/util/must"
+ )
+ 
++func TestDirectOnlyDataIsPerServer(t *testing.T) {
++	controlURL, _ := startControl(t)
++	for _, enabled := range []bool{false, true, false} {
++		s := &Server{Dir: t.TempDir(), ControlURL: controlURL, Logf: logger.Discard, UserLogf: logger.Discard, DirectOnlyData: enabled}
++		if err := s.Start(); err != nil {
++			t.Fatal(err)
++		}
++		conn := s.Sys().MagicSock.Get()
++		if got := reflect.ValueOf(conn).Elem().FieldByName("directOnlyData").Bool(); got != enabled {
++			t.Errorf("DirectOnlyData = %v, want %v", got, enabled)
++		}
++		if err := s.Close(); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
+ // TestListener_Server ensures that the listener type always keeps the Server
+ // method, which is used by some external applications to identify a tsnet.Listener
+ // from other net.Listeners, as well as access the underlying Server.
 diff --git a/wgengine/magicsock/derp.go b/wgengine/magicsock/derp.go
 index 1c5225e22..5db26be35 100644
 --- a/wgengine/magicsock/derp.go
@@ -426,3 +493,60 @@ index 8fbd07013..3b4c254a7 100644
  
  	if !c.havePrivateKey.Load() {
  		// If we have no private key, we're logged out or
+diff --git a/wgengine/userspace.go b/wgengine/userspace.go
+index 875011a9c..b5694f8ff 100644
+--- a/wgengine/userspace.go
++++ b/wgengine/userspace.go
+@@ -176,6 +176,9 @@ type BIRDClient interface {
+ 
+ // Config is the engine configuration.
+ type Config struct {
++	// DirectOnlyData permits WireGuard data only over verified direct UDP.
++	DirectOnlyData bool
++
+ 	// Tun is the device used by the Engine to exchange packets with
+ 	// the OS.
+ 	// If nil, a fake Device that does nothing is used.
+@@ -259,6 +262,8 @@ func NewFakeUserspaceEngine(logf logger.Logf, opts ...any) (Engine, error) {
+ 	}
+ 	for _, o := range opts {
+ 		switch v := o.(type) {
++		case bool:
++			conf.DirectOnlyData = v
+ 		case uint16:
+ 			conf.ListenPort = v
+ 		case int:
+@@ -402,6 +407,7 @@ func NewUserspaceEngine(logf logger.Logf, conf Config) (_ Engine, reterr error)
+ 		e.RequestStatus()
+ 	}
+ 	magicsockOpts := magicsock.Options{
++		DirectOnlyData: conf.DirectOnlyData,
+ 		EventBus:       e.eventBus,
+ 		Logf:           logf,
+ 		Port:           conf.ListenPort,
+diff --git a/wgengine/userspace_test.go b/wgengine/userspace_test.go
+index 0a1d2924d..73fbb78da 100644
+--- a/wgengine/userspace_test.go
++++ b/wgengine/userspace_test.go
+@@ -31,6 +31,21 @@
+ 	"tailscale.com/wgengine/wgcfg"
+ )
+ 
++func TestDirectOnlyDataReachesMagicConn(t *testing.T) {
++	for _, enabled := range []bool{false, true} {
++		bus := eventbustest.NewBus(t)
++		e, err := NewFakeUserspaceEngine(t.Logf, enabled, health.NewTracker(bus), new(usermetric.Registry), bus)
++		if err != nil {
++			t.Fatal(err)
++		}
++		conn := e.(*userspaceEngine).magicConn
++		if got := reflect.ValueOf(conn).Elem().FieldByName("directOnlyData").Bool(); got != enabled {
++			t.Errorf("DirectOnlyData = %v, want %v", got, enabled)
++		}
++		e.Close()
++	}
++}
++
+ func TestNoteReceiveActivity(t *testing.T) {
+ 	now := mono.Time(123456)
+ 	var logBuf tstest.MemLogger
