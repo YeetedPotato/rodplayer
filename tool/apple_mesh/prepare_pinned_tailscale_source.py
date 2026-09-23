@@ -14,7 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PIN = json.loads(Path(__file__).with_name("libtailscale_pin.json").read_text())
-BUILD_ROOT = ROOT / "build" / "apple_mesh"
+BUILD_ROOT = ROOT / "build" / "apple_mesh" / "direct_only_proof"
 SOURCE = BUILD_ROOT / "source"
 TAILSCALE_REPO = "https://github.com/tailscale/tailscale.git"
 TAILSCALE_COMMIT = "d885b34776cd2e96f1f368a4d31729e37ff8b59b"

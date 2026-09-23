@@ -7,11 +7,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from prepare_pinned_tailscale_source import PIN, TAILSCALE_COMMIT, verify_checkout
+import build_tailscalekit
+from prepare_pinned_tailscale_source import BUILD_ROOT, PIN, SOURCE, TAILSCALE_COMMIT, verify_checkout
 from run_direct_only_go_proof import verify_go, verify_patch_source
 
 
 class PinnedSourceTests(unittest.TestCase):
+    def test_proof_workspace_cannot_parent_production_builder(self) -> None:
+        self.assertEqual(BUILD_ROOT.name, "direct_only_proof")
+        self.assertEqual(SOURCE, BUILD_ROOT / "source")
+        self.assertNotIn(SOURCE / "go.work", build_tailscalekit.SOURCE.parents)
+        self.assertNotIn(SOURCE, build_tailscalekit.SOURCE.parents)
+
     def test_exact_pins(self) -> None:
         self.assertEqual(PIN["commit"], "59d4bb82744915815178e0f0776d60026a397ee7")
         self.assertEqual(PIN["goVersion"], "1.25.5")
