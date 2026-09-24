@@ -4,8 +4,65 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
 
+final _claim = PrivateNetworkIdentityClaim(
+  profileId: 'profile-one',
+  controlUrl: Uri.parse('https://control.example.test'),
+  homeIpv4: '100.64.0.1',
+  homePort: 3000,
+);
+
 void main() {
   group('PrivateNetworkSessionController', () {
+    test('cached ready gateway is withheld until profile ownership verifies',
+        () async {
+      final pending = Completer<PrivateNetworkStatus>();
+      final resumeStarted = Completer<void>();
+      final ready = PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      });
+      final runtime = _FakeRuntime(
+          statusValue: ready,
+          resumeFuture: pending.future,
+          resumeStarted: resumeStarted);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      final start = controller.start();
+      await resumeStarted.future;
+      expect(controller.status.value, isNull);
+      expect(runtime.resumeCalls, 1);
+      pending.complete(ready);
+      await start;
+      expect(controller.status.value?.canProxy, isTrue);
+      await controller.close();
+    });
+
+    test('no-identity response cannot authorize a later unrelated gateway',
+        () async {
+      final stopped =
+          _status(state: PrivateNetworkState.stopped, hasIdentity: true);
+      final noIdentity = _status(
+          state: PrivateNetworkState.unavailable,
+          reason: PrivateNetworkUnavailableReason.noIdentity,
+          hasIdentity: false);
+      final runtime =
+          _FakeRuntime(statusValue: stopped, resumeValue: noIdentity);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      await controller.start();
+      expect(controller.status.value, same(noIdentity));
+      runtime.events.add(PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      }));
+      expect(controller.status.value?.canProxy, isFalse);
+      await controller.close();
+    });
+
     test('resumes one persisted stopped identity once', () async {
       final runtime = _FakeRuntime(
         statusValue: _status(
@@ -17,7 +74,7 @@ void main() {
           hasIdentity: true,
         ),
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       await controller.start();
       expect(controller.status.value?.state, PrivateNetworkState.starting);
@@ -39,7 +96,7 @@ void main() {
           hasIdentity: false,
         ),
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       await controller.start();
 
@@ -61,7 +118,7 @@ void main() {
           resumeError: StateError('resume'),
         ),
       ]) {
-        final controller = PrivateNetworkSessionController(runtime);
+        final controller = PrivateNetworkSessionController(runtime, _claim);
 
         await controller.start();
 
@@ -78,7 +135,7 @@ void main() {
         hasIdentity: true,
       );
       final runtime = _FakeRuntime(statusValue: direct);
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       await controller.start();
 
@@ -93,8 +150,13 @@ void main() {
       final runtime = _FakeRuntime(
         statusFuture: status.future,
         statusStarted: statusStarted,
+        resumeValue: _status(
+          state: PrivateNetworkState.unavailable,
+          reason: PrivateNetworkUnavailableReason.directPathUnavailable,
+          hasIdentity: true,
+        ),
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       final start = controller.start();
       await statusStarted.future;
@@ -117,7 +179,7 @@ void main() {
         controller.status.value?.unavailableReason,
         PrivateNetworkUnavailableReason.directPathUnavailable,
       );
-      expect(runtime.resumeCalls, 0);
+      expect(runtime.resumeCalls, 1);
       await controller.close();
     });
 
@@ -133,7 +195,7 @@ void main() {
           hasIdentity: true,
         ),
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       final start = controller.start();
       await statusStarted.future;
@@ -155,15 +217,19 @@ void main() {
       await controller.close();
     });
 
-    test('cached starting event prevents resume from a stale stopped result',
+    test('cached starting event still requires ownership verification',
         () async {
       final status = Completer<PrivateNetworkStatus>();
       final statusStarted = Completer<void>();
       final runtime = _FakeRuntime(
         statusFuture: status.future,
         statusStarted: statusStarted,
+        resumeValue: _status(
+          state: PrivateNetworkState.starting,
+          hasIdentity: true,
+        ),
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       final start = controller.start();
       await statusStarted.future;
@@ -177,12 +243,12 @@ void main() {
       ));
       await start;
 
-      expect(runtime.resumeCalls, 0);
+      expect(runtime.resumeCalls, 1);
       expect(controller.status.value?.state, PrivateNetworkState.starting);
       await controller.close();
     });
 
-    test('latest of multiple events controls the resume decision', () async {
+    test('latest of multiple events survives ownership verification', () async {
       for (final latest in <PrivateNetworkState>[
         PrivateNetworkState.stopped,
         PrivateNetworkState.starting,
@@ -197,7 +263,7 @@ void main() {
             hasIdentity: true,
           ),
         );
-        final controller = PrivateNetworkSessionController(runtime);
+        final controller = PrivateNetworkSessionController(runtime, _claim);
 
         final start = controller.start();
         await statusStarted.future;
@@ -215,9 +281,9 @@ void main() {
         ));
         await start;
 
-        expect(
-            runtime.resumeCalls, latest == PrivateNetworkState.stopped ? 1 : 0);
+        expect(runtime.resumeCalls, 1);
         expect(controller.status.value?.hasPersistedIdentity, isTrue);
+        expect(controller.status.value?.state, PrivateNetworkState.starting);
         await controller.close();
       }
     });
@@ -229,7 +295,8 @@ void main() {
         statusFuture: pendingStatus.future,
         statusStarted: statusStarted,
       );
-      final statusController = PrivateNetworkSessionController(statusRuntime);
+      final statusController =
+          PrivateNetworkSessionController(statusRuntime, _claim);
       final statusStart = statusController.start();
       await statusStarted.future;
       await statusController.close();
@@ -250,7 +317,8 @@ void main() {
         resumeFuture: pendingResume.future,
         resumeStarted: resumeStarted,
       );
-      final resumeController = PrivateNetworkSessionController(resumeRuntime);
+      final resumeController =
+          PrivateNetworkSessionController(resumeRuntime, _claim);
       final resumeStart = resumeController.start();
       await resumeStarted.future;
       await resumeController.close();
@@ -273,7 +341,7 @@ void main() {
         resumeFuture: resume.future,
         resumeStarted: resumeStarted,
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       final start = controller.start();
       await resumeStarted.future;
@@ -310,7 +378,7 @@ void main() {
         ),
         onCancel: () => cancelled = true,
       );
-      final controller = PrivateNetworkSessionController(runtime);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
 
       await controller.start();
       await controller.close();
@@ -379,7 +447,8 @@ class _FakeRuntime implements PrivateNetworkRuntime {
   Future<void> reset() async => resetCalls++;
 
   @override
-  Future<PrivateNetworkStatus> resume() async {
+  Future<PrivateNetworkStatus> resume(PrivateNetworkIdentityClaim claim) async {
+    expect(claim.profileId, _claim.profileId);
     resumeCalls++;
     resumeStarted?.complete();
     if (resumeError != null) throw resumeError!;

@@ -9,6 +9,13 @@ const _authKey = 'hskey-auth-ABCDEFGHIJKL-'
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
     '0123456789_-';
 
+final _claim = PrivateNetworkIdentityClaim(
+  profileId: 'invite:one',
+  controlUrl: Uri.parse('https://mesh.rodserver.top'),
+  homeIpv4: '100.64.0.1',
+  homePort: 3000,
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -347,6 +354,7 @@ void main() {
 
         final bootstrap = PrivateNetworkBootstrap.fromEnrollment(
           enrollment,
+          profileId: 'invite:one',
         );
 
         expect(bootstrap.authKey, _authKey);
@@ -373,6 +381,40 @@ void main() {
         channel,
         null,
       );
+    });
+
+    test('resume sends explicit owner and exact retained configuration',
+        () async {
+      MethodCall? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        captured = call;
+        return <String, Object?>{
+          'state': 'starting',
+          'path': 'none',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': null,
+        };
+      });
+      final runtime = MethodChannelPrivateNetworkRuntime(
+          channel: channel, platformSupported: true);
+      final status = await runtime.resume(PrivateNetworkIdentityClaim(
+        profileId: _claim.profileId,
+        controlUrl: _claim.controlUrl,
+        homeIpv4: _claim.homeIpv4,
+        homePort: _claim.homePort,
+        allowLegacyClaim: true,
+      ));
+      expect(captured?.method, 'resume');
+      expect(Map<String, Object?>.from(captured?.arguments as Map), {
+        'profileId': 'invite:one',
+        'controlUrl': 'https://mesh.rodserver.top',
+        'homeIpv4': '100.64.0.1',
+        'homePort': 3000,
+        'allowLegacyClaim': true,
+      });
+      expect(status.canProxy, isFalse);
     });
 
     test(
@@ -403,6 +445,7 @@ void main() {
 
         final status = await runtime.bootstrap(
           PrivateNetworkBootstrap(
+            profileId: 'invite:one',
             version: 1,
             controlUrl: Uri.parse(
               'https://mesh.rodserver.top',
@@ -422,6 +465,7 @@ void main() {
         expect(
           arguments,
           <String, Object?>{
+            'profileId': 'invite:one',
             'version': 1,
             'controlUrl': 'https://mesh.rodserver.top',
             'authKey': _authKey,
@@ -454,7 +498,7 @@ void main() {
         );
 
         try {
-          await runtime.resume();
+          await runtime.resume(_claim);
           fail('expected private-network failure');
         } on PrivateNetworkException catch (error) {
           expect(

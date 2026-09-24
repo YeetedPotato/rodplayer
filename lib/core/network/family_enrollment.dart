@@ -67,14 +67,25 @@ class FamilyEnrollmentResult {
 class FamilyEnrollmentClient {
   FamilyEnrollmentClient({
     http.Client? client,
-    Uri? endpoint,
+    required Uri endpoint,
     this.timeout = const Duration(seconds: 15),
-  })  : _client = client ?? http.Client(),
-        _ownsClient = client == null,
-        endpoint = endpoint ??
-            Uri.parse(
-              'https://stream.rodserver.top/v1/enroll',
-            );
+  })  : endpoint = _validatedEndpoint(endpoint),
+        _client = client ?? http.Client(),
+        _ownsClient = client == null;
+
+  static Uri _validatedEndpoint(Uri endpoint) {
+    if (endpoint.scheme != 'https' ||
+        endpoint.host.isEmpty ||
+        endpoint.userInfo.isNotEmpty ||
+        (endpoint.hasPort && (endpoint.port < 1 || endpoint.port > 65535)) ||
+        endpoint.hasQuery ||
+        endpoint.hasFragment ||
+        endpoint.path.isEmpty) {
+      throw ArgumentError.value(
+          endpoint, 'endpoint', 'Expected an HTTPS enrollment endpoint');
+    }
+    return endpoint;
+  }
 
   final http.Client _client;
   final bool _ownsClient;

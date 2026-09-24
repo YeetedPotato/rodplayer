@@ -45,11 +45,11 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("private func acquireLifecycle() async", owner)
             self.assertIn("private func releaseLifecycle()", owner)
             self.assertIn("func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws", owner)
-            self.assertIn("func resume() async throws", owner)
+            self.assertIn("func resume(claim: ApplePrivateNetworkIdentityClaim) async throws", owner)
             self.assertIn("private func startLocked(config: TailscaleKit.Configuration) async throws", owner)
             for method, next_marker in (
-                ("func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws", "func resume()"),
-                ("func resume() async throws", "private func startLocked(config:"),
+                ("func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws", "func resume(claim:"),
+                ("func resume(claim: ApplePrivateNetworkIdentityClaim) async throws", "private func startLocked(config:"),
                 ("func stop() async throws", "func reset()"),
                 ("func reset() async throws", "private func stopLocked()"),
             ):
@@ -60,7 +60,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("private enum ApplePrivateNetworkNodeOwnerError: Error", source)
             self.assertIn("case nodeAlreadyActive", source)
             self.assertIn("case startFailed", source)
-            bootstrap = owner[owner.index("func bootstrap(metadata"):owner.index("func resume()")]
+            bootstrap = owner[owner.index("func bootstrap(metadata"):owner.index("func resume(claim:")]
             self.assertLess(bootstrap.index("guard !stateStore.hasPersistedIdentity"), bootstrap.index("try stateStore.write(metadata: metadata)"))
             self.assertLess(bootstrap.index("try stateStore.write(metadata: metadata)"), bootstrap.index("try await startLocked"))
             self.assertLess(owner.index("guard activeNode == nil"), owner.index("activeNode = node"))
@@ -102,7 +102,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             bootstrap = source[source.index('case "bootstrap":'):source.index('case "resume":')]
             resume = source[source.index('case "resume":'):source.index("default:", source.index('case "resume":'))]
             self.assertIn("bootstrap(call.arguments, result: result)", bootstrap)
-            self.assertIn("resume(result: result)", resume)
+            self.assertIn("resume(call.arguments, result: result)", resume)
             self.assertIn("private struct ApplePrivateNetworkMetadata: Codable, Sendable", source)
             metadata = source[source.index("private struct ApplePrivateNetworkMetadata"):source.index("private enum ApplePrivateNetworkMetadataError")]
             for field in ("version", "controlUrl", "homeIpv4", "homePort", "nodeHostname"):
@@ -123,7 +123,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertNotIn("write(metadata", host_bootstrap)
             self.assertNotIn("nodeOwner.start", host_bootstrap)
             self.assertIn("try await nodeOwner.bootstrap", host_bootstrap)
-            self.assertIn("try await nodeOwner.resume()", host_resume)
+            self.assertIn("try await nodeOwner.resume(claim: claim)", host_resume)
             self.assertIn("guard stateStore.hasPersistedIdentity else", source)
             self.assertIn('reason: "no_identity"', source)
             self.assertIn('static func ready(gatewayUrl: String)', source)
@@ -205,7 +205,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
         for path in HOSTS:
             source = private_network_source(path)
             owner = source[source.index("actor ApplePrivateNetworkNodeOwner"):]
-            resume = owner[owner.index("func resume() async throws"):owner.index("private func startLocked")]
+            resume = owner[owner.index("func resume(claim: ApplePrivateNetworkIdentityClaim) async throws"):owner.index("private func startLocked")]
             self.assertLess(
                 resume.index('publish(.unavailable(reason: "no_identity"'),
                 resume.index("throw ApplePrivateNetworkNodeOwnerError.noIdentity"),
@@ -219,7 +219,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
                 observer.index("observer(cachedStatus)"),
             )
             host_resume = source[
-                source.index("private func resume(result:"):
+                source.index("private func resume(_ arguments:"):
                 source.index("private static func operationFailed")
             ]
             no_identity = host_resume[
@@ -384,6 +384,42 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             private_network_source(HOSTS[0]),
             private_network_source(HOSTS[1]),
         )
+
+    def test_retained_identity_is_bound_before_node_start(self) -> None:
+        for path in HOSTS:
+            source = private_network_source(path)
+            owner = source[source.index("actor ApplePrivateNetworkNodeOwner"):]
+            resume = owner[owner.index("func resume(claim:"):owner.index("private func startGatewayLocked")]
+            self.assertLess(resume.index("let metadata = try retained.claimed(by: claim)"),
+                            resume.index("try await startLocked"))
+            self.assertIn("_ = try activeMetadata.claimed(by: claim)", resume)
+            self.assertIn("if retained.version == 1 { try stateStore.write(metadata: metadata) }", resume)
+            metadata = source[source.index("private struct ApplePrivateNetworkMetadata: Codab"):
+                              source.index("private enum ApplePrivateNetworkMetadataError")]
+            self.assertIn("let profileId: String?", metadata)
+            self.assertIn("version == 1 && profileId == nil", metadata)
+            self.assertIn("version == 2 && profileId.map(ApplePrivateNetworkValidation.isProfileId) == true", metadata)
+            claim = metadata[metadata.index("func claimed(by claim:"):]
+            self.assertIn("ApplePrivateNetworkValidation.sameControlEndpoint(controlUrl, claim.controlUrl)", claim)
+            self.assertNotIn("controlUrl == claim.controlUrl", claim)
+            validation = source[source.index("private enum ApplePrivateNetworkValidation"):]
+            comparison = validation[validation.index("static func sameControlEndpoint"):
+                                    validation.index("static func isProfileId")]
+            self.assertIn("isControlUrl(left), isControlUrl(right)", comparison)
+            self.assertIn("lhsHost.caseInsensitiveCompare(rhsHost) == .orderedSame", comparison)
+            self.assertIn("(lhs.port ?? 443) == (rhs.port ?? 443)", comparison)
+            self.assertIn("components.path.isEmpty || components.path == \"/\"", validation)
+            for field in ("homeIpv4", "homePort"):
+                self.assertIn(f"{field} == claim.{field}", claim)
+            self.assertIn("profileId == claim.profileId : claim.allowLegacyClaim", claim)
+            self.assertIn("if version == 2 { return self }", claim)
+            self.assertIn("nodeHostname: nodeHostname", claim)
+            self.assertNotIn("stateStore.reset()", resume)
+            host_resume = source[source.index("private func resume(_ arguments:"):
+                                 source.index("private static func operationFailed")]
+            self.assertLess(host_resume.index("ApplePrivateNetworkIdentityClaim(arguments:"),
+                            host_resume.index("nodeOwner.resume(claim:"))
+            self.assertNotIn("authKey", metadata)
 
 
 if __name__ == "__main__":

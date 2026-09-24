@@ -161,7 +161,7 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     case "bootstrap":
       bootstrap(call.arguments, result: result)
     case "resume":
-      resume(result: result)
+      resume(call.arguments, result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -258,14 +258,15 @@ private final class PrivateNetworkHost: NSObject, FlutterStreamHandler {
     }
   }
 
-  private func resume(result: @escaping FlutterResult) {
+  private func resume(_ arguments: Any?, result: @escaping FlutterResult) {
     Task { @MainActor [weak self] in
       guard let self, self.stateStore != nil, let nodeOwner = self.nodeOwner else {
         result(Self.operationFailed())
         return
       }
       do {
-        let status = try await nodeOwner.resume()
+        let claim = try ApplePrivateNetworkIdentityClaim(arguments: arguments)
+        let status = try await nodeOwner.resume(claim: claim)
         receiveStatus(status)
         result(status.payload)
       } catch ApplePrivateNetworkNodeOwnerError.noIdentity {
@@ -461,18 +462,22 @@ private actor ApplePrivateNetworkNodeOwner {
     return await startMonitorLocked()
   }
 
-  func resume() async throws -> ApplePrivateNetworkStatus {
+  func resume(claim: ApplePrivateNetworkIdentityClaim) async throws -> ApplePrivateNetworkStatus {
     await acquireLifecycle()
     defer { releaseLifecycle() }
-    guard activeNode == nil else {
-      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
+    if activeNode != nil {
+      guard let activeMetadata else { throw ApplePrivateNetworkMetadataError.invalid }
+      _ = try activeMetadata.claimed(by: claim)
+      return cachedStatus
     }
     guard stateStore.hasPersistedIdentity else {
       publish(.unavailable(reason: "no_identity", hasPersistedIdentity: false))
       throw ApplePrivateNetworkNodeOwnerError.noIdentity
     }
     try stateStore.prepare()
-    let metadata = try stateStore.loadMetadata()
+    let retained = try stateStore.loadMetadata()
+    let metadata = try retained.claimed(by: claim)
+    if retained.version == 1 { try stateStore.write(metadata: metadata) }
     try await startLocked(config: configuration(metadata: metadata, authKey: nil))
     activeMetadata = metadata
     do {
@@ -816,6 +821,7 @@ private struct TailscaleKitNodeFactory: ApplePrivateNetworkNodeFactory {
 
 private struct ApplePrivateNetworkBootstrap: Sendable {
   let version: Int
+  let profileId: String
   let controlUrl: String
   let authKey: String
   let homeIpv4: String
@@ -826,6 +832,7 @@ private struct ApplePrivateNetworkBootstrap: Sendable {
       let values = arguments as? [String: Any],
       let version = values["version"] as? Int,
       version == 1,
+      let profileId = values["profileId"] as? String,
       let controlUrl = values["controlUrl"] as? String,
       let authKey = values["authKey"] as? String,
       let homeIpv4 = values["homeIpv4"] as? String,
@@ -834,7 +841,8 @@ private struct ApplePrivateNetworkBootstrap: Sendable {
       throw ApplePrivateNetworkMetadataError.invalid
     }
     let metadata = ApplePrivateNetworkMetadata(
-      version: version,
+      version: 2,
+      profileId: profileId,
       controlUrl: controlUrl,
       homeIpv4: homeIpv4,
       homePort: homePort,
@@ -845,6 +853,7 @@ private struct ApplePrivateNetworkBootstrap: Sendable {
       throw ApplePrivateNetworkMetadataError.invalid
     }
     self.version = version
+    self.profileId = profileId
     self.controlUrl = controlUrl
     self.authKey = authKey
     self.homeIpv4 = homeIpv4
@@ -852,8 +861,37 @@ private struct ApplePrivateNetworkBootstrap: Sendable {
   }
 }
 
+private struct ApplePrivateNetworkIdentityClaim: Sendable {
+  let profileId: String
+  let controlUrl: String
+  let homeIpv4: String
+  let homePort: Int
+  let allowLegacyClaim: Bool
+
+  init(arguments: Any?) throws {
+    guard let values = arguments as? [String: Any],
+      let profileId = values["profileId"] as? String,
+      let controlUrl = values["controlUrl"] as? String,
+      let homeIpv4 = values["homeIpv4"] as? String,
+      let homePort = values["homePort"] as? Int,
+      let allowLegacyClaim = values["allowLegacyClaim"] as? Bool
+    else { throw ApplePrivateNetworkMetadataError.invalid }
+    let candidate = ApplePrivateNetworkMetadata(
+      version: 2, profileId: profileId, controlUrl: controlUrl,
+      homeIpv4: homeIpv4, homePort: homePort, nodeHostname: "rodplayer-validation"
+    )
+    try candidate.validated()
+    self.profileId = profileId
+    self.controlUrl = controlUrl
+    self.homeIpv4 = homeIpv4
+    self.homePort = homePort
+    self.allowLegacyClaim = allowLegacyClaim
+  }
+}
+
 private struct ApplePrivateNetworkMetadata: Codable, Sendable {
   let version: Int
+  let profileId: String?
   let controlUrl: String
   let homeIpv4: String
   let homePort: Int
@@ -865,7 +903,8 @@ private struct ApplePrivateNetworkMetadata: Codable, Sendable {
       .lowercased()
       .prefix(16)
     return ApplePrivateNetworkMetadata(
-      version: bootstrap.version,
+      version: 2,
+      profileId: bootstrap.profileId,
       controlUrl: bootstrap.controlUrl,
       homeIpv4: bootstrap.homeIpv4,
       homePort: bootstrap.homePort,
@@ -881,7 +920,8 @@ private struct ApplePrivateNetworkMetadata: Codable, Sendable {
 
   func validated() throws {
     guard
-      version == 1,
+      (version == 1 && profileId == nil) ||
+        (version == 2 && profileId.map(ApplePrivateNetworkValidation.isProfileId) == true),
       ApplePrivateNetworkValidation.isControlUrl(controlUrl),
       ApplePrivateNetworkValidation.isIpv4(homeIpv4),
       (1 ... 65_535).contains(homePort),
@@ -890,6 +930,19 @@ private struct ApplePrivateNetworkMetadata: Codable, Sendable {
       throw ApplePrivateNetworkMetadataError.invalid
     }
   }
+
+  func claimed(by claim: ApplePrivateNetworkIdentityClaim) throws -> ApplePrivateNetworkMetadata {
+    guard ApplePrivateNetworkValidation.sameControlEndpoint(controlUrl, claim.controlUrl),
+      homeIpv4 == claim.homeIpv4,
+      homePort == claim.homePort,
+      (version == 2 ? profileId == claim.profileId : claim.allowLegacyClaim)
+    else { throw ApplePrivateNetworkMetadataError.invalid }
+    if version == 2 { return self }
+    return ApplePrivateNetworkMetadata(
+      version: 2, profileId: claim.profileId, controlUrl: controlUrl,
+      homeIpv4: homeIpv4, homePort: homePort, nodeHostname: nodeHostname
+    )
+  }
 }
 
 private enum ApplePrivateNetworkMetadataError: Error {
@@ -897,6 +950,20 @@ private enum ApplePrivateNetworkMetadataError: Error {
 }
 
 private enum ApplePrivateNetworkValidation {
+  // Same identity rule as Dart: HTTPS host plus effective port; root slash is ignored.
+  static func sameControlEndpoint(_ left: String, _ right: String) -> Bool {
+    guard isControlUrl(left), isControlUrl(right),
+      let lhs = URLComponents(string: left), let rhs = URLComponents(string: right),
+      let lhsHost = lhs.host, let rhsHost = rhs.host
+    else { return false }
+    return lhsHost.caseInsensitiveCompare(rhsHost) == .orderedSame &&
+      (lhs.port ?? 443) == (rhs.port ?? 443)
+  }
+
+  static func isProfileId(_ value: String) -> Bool {
+    value.range(of: "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$", options: .regularExpression) != nil
+  }
+
   static func isControlUrl(_ value: String) -> Bool {
     guard
       let components = URLComponents(string: value),
@@ -906,6 +973,7 @@ private enum ApplePrivateNetworkValidation {
       components.password == nil,
       components.query == nil,
       components.fragment == nil,
+      components.port.map({ (1 ... 65_535).contains($0) }) ?? true,
       components.path.isEmpty || components.path == "/"
     else {
       return false

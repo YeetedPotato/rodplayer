@@ -8,9 +8,10 @@ import 'package:rodplayer/core/network/private_network_runtime.dart';
 /// This is intentionally application-scoped: login, profile changes, and
 /// Jellyfin client recreation do not own the persisted mesh identity.
 class PrivateNetworkSessionController {
-  PrivateNetworkSessionController(this._runtime);
+  PrivateNetworkSessionController(this._runtime, this._claim);
 
   final PrivateNetworkRuntime _runtime;
+  final PrivateNetworkIdentityClaim _claim;
   final ValueNotifier<PrivateNetworkStatus?> status =
       ValueNotifier<PrivateNetworkStatus?>(null);
 
@@ -18,6 +19,8 @@ class PrivateNetworkSessionController {
   var _started = false;
   var _closed = false;
   var _revision = 0;
+  var _verified = false;
+  PrivateNetworkStatus? _latestStatus;
 
   Future<void> start() async {
     if (_started || _closed) return;
@@ -46,20 +49,25 @@ class PrivateNetworkSessionController {
         effective = current;
       } else {
         // The cached EventChannel replay may arrive before status() returns.
-        effective = status.value;
+        effective = _latestStatus;
       }
 
-      if (_closed ||
-          effective == null ||
-          !effective.hasPersistedIdentity ||
-          effective.state != PrivateNetworkState.stopped) {
+      if (_closed || effective == null) return;
+      if (!effective.hasPersistedIdentity) {
+        status.value = effective;
         return;
       }
 
       final resumeRevision = _revision;
-      final resumed = await _runtime.resume();
-      if (_closed || resumeRevision != _revision) return;
-      _acceptStatus(resumed);
+      final resumed = await _runtime.resume(_claim);
+      if (_closed) return;
+      if (!resumed.hasPersistedIdentity) {
+        status.value = resumed;
+        return;
+      }
+      _verified = true;
+      status.value =
+          resumeRevision == _revision ? resumed : _latestStatus ?? resumed;
     } catch (_) {
       // Private networking is optional and must not block application startup.
     }
@@ -75,6 +83,7 @@ class PrivateNetworkSessionController {
   void _acceptStatus(PrivateNetworkStatus next) {
     if (_closed) return;
     _revision++;
-    status.value = next;
+    _latestStatus = next;
+    if (_verified) status.value = next;
   }
 }

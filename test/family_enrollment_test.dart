@@ -12,12 +12,30 @@ const _authKey = 'hskey-auth-ABCDEFGHIJKL-'
     '0123456789_-';
 
 void main() {
+  test('explicit HTTPS enrollment target is required', () {
+    for (final bad in <String>[
+      'http://enroll.example.test/v1/enroll',
+      'https://enroll.example.test',
+      'https://user:secret@enroll.example.test/v1/enroll',
+      'https://enroll.example.test/v1/enroll?token=secret',
+      'https://enroll.example.test:0/v1/enroll',
+      'https://enroll.example.test:65536/v1/enroll',
+    ]) {
+      final endpoint = Uri.tryParse(bad);
+      if (endpoint != null) {
+        expect(() => FamilyEnrollmentClient(endpoint: endpoint),
+            throwsArgumentError);
+      }
+    }
+  });
+
   test(
     'posts setup code and parses enrollment response',
     () async {
       late http.Request captured;
 
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient((request) async {
           captured = request;
 
@@ -93,6 +111,7 @@ void main() {
       var requests = 0;
 
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient((request) async {
           requests++;
 
@@ -119,6 +138,7 @@ void main() {
     'HTTP 400 maps to invalid setup code',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             '{"error":"invalid_setup_code"}',
@@ -144,6 +164,7 @@ void main() {
     'HTTP 429 maps to rate limited with Retry-After',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             '{"error":"rate_limited"}',
@@ -178,6 +199,7 @@ void main() {
     'HTTP 403 maps to rate limited',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             '{}',
@@ -202,6 +224,7 @@ void main() {
     'server failures map to unavailable',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             '{"error":"enrollment_unavailable"}',
@@ -227,6 +250,7 @@ void main() {
     'transport failures map to unavailable without leaking details',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient((_) async {
           throw http.ClientException(
             'secret transport detail',
@@ -259,6 +283,7 @@ void main() {
       final completer = Completer<http.Response>();
 
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) => completer.future,
         ),
@@ -282,6 +307,7 @@ void main() {
     'malformed success response is rejected',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             jsonEncode(
@@ -318,6 +344,7 @@ void main() {
     'non-HTTPS control URL is rejected',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             jsonEncode(
@@ -354,6 +381,7 @@ void main() {
     'invalid home endpoint is rejected',
     () async {
       final client = FamilyEnrollmentClient(
+        endpoint: Uri.parse('https://stream.rodserver.top/v1/enroll'),
         client: MockClient(
           (_) async => http.Response(
             jsonEncode(

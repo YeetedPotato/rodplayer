@@ -8,6 +8,7 @@ import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
+import 'package:rodplayer/core/network/private_transport_profile.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/platform/network/method_channel_private_network_runtime.dart';
@@ -26,7 +27,9 @@ Future<void> main() async {
     MediaKit.ensureInitialized();
   }
   final preferences = await SharedPreferences.getInstance();
-  runApp(RodPlayerApp(preferences: preferences, credentialStore: const SecureCredentialStore()));
+  runApp(RodPlayerApp(
+      preferences: preferences,
+      credentialStore: const SecureCredentialStore()));
 }
 
 class RodPlayerApp extends StatelessWidget {
@@ -35,7 +38,6 @@ class RodPlayerApp extends StatelessWidget {
     required this.credentialStore,
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
-    this.activePrivateTransportProfileId,
     super.key,
   });
 
@@ -43,7 +45,6 @@ class RodPlayerApp extends StatelessWidget {
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
-  final String? activePrivateTransportProfileId;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -54,7 +55,6 @@ class RodPlayerApp extends StatelessWidget {
           credentialStore: credentialStore,
           clientFactory: clientFactory,
           privateNetworkRuntimeFactory: privateNetworkRuntimeFactory,
-          activePrivateTransportProfileId: activePrivateTransportProfileId,
         ),
       );
 }
@@ -65,7 +65,6 @@ class RodPlayerShell extends StatefulWidget {
     required this.credentialStore,
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
-    this.activePrivateTransportProfileId,
     super.key,
   });
 
@@ -73,7 +72,6 @@ class RodPlayerShell extends StatefulWidget {
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
-  final String? activePrivateTransportProfileId;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
@@ -84,13 +82,17 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   InstallationIdentity? _identity;
   bool _loading = true;
   PrivateNetworkSessionController? _privateNetwork;
-  final ValueNotifier<PrivateNetworkStatus?> _unavailablePrivateStatus = ValueNotifier(null);
+  PrivateTransportProfile? _privateNetworkProfile;
+  final ValueNotifier<PrivateNetworkStatus?> _unavailablePrivateStatus =
+      ValueNotifier(null);
   late final PrivateTransportProfileAssociation _privateTransport;
+  late final PrivateTransportProfileStore _profiles;
 
   @override
   void initState() {
     super.initState();
     _privateTransport = PrivateTransportProfileAssociation(widget.preferences);
+    _profiles = PrivateTransportProfileStore(widget.preferences);
     _restore();
   }
 
@@ -103,14 +105,24 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 
   Future<void> _restore() async {
-    final migration = CredentialMigration(preferences: widget.preferences, credentialStore: widget.credentialStore);
+    final migration = CredentialMigration(
+        preferences: widget.preferences,
+        credentialStore: widget.credentialStore);
     await migration.migrate();
-    final identity = await SharedPreferencesInstallationIdentityStore(widget.preferences).load();
+    final identity =
+        await SharedPreferencesInstallationIdentityStore(widget.preferences)
+            .load();
     final url = widget.preferences.getString(CredentialMigration.serverUrlKey);
-    final token = await widget.credentialStore.readToken(CredentialMigration.tokenKey);
+    final token =
+        await widget.credentialStore.readToken(CredentialMigration.tokenKey);
     final user = widget.preferences.getString(CredentialMigration.userIdKey);
     JellyfinApiClient? client;
-    if (url != null && token != null && user != null && url.isNotEmpty && token.isNotEmpty && user.isNotEmpty) {
+    if (url != null &&
+        token != null &&
+        user != null &&
+        url.isNotEmpty &&
+        token.isNotEmpty &&
+        user.isNotEmpty) {
       client = _makeClient(url, identity)
         ..accessToken = token
         ..userId = user;
@@ -124,22 +136,49 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 
   Future<void> _authenticated(String url, JellyfinApiClient client) async {
-    final previousUrl = widget.preferences.getString(CredentialMigration.serverUrlKey);
+    final previousUrl =
+        widget.preferences.getString(CredentialMigration.serverUrlKey);
     await widget.preferences.setString(CredentialMigration.serverUrlKey, url);
     if (previousUrl != url) {
       await _privateTransport.clear();
     }
-    await widget.credentialStore.writeToken(CredentialMigration.tokenKey, client.accessToken!);
-    await widget.preferences.setString(CredentialMigration.userIdKey, client.userId!);
+    await widget.credentialStore
+        .writeToken(CredentialMigration.tokenKey, client.accessToken!);
+    await widget.preferences
+        .setString(CredentialMigration.userIdKey, client.userId!);
     if (mounted) setState(() => _client = client);
   }
 
   JellyfinApiClient _makeClient(String url, InstallationIdentity identity) {
     final client = widget.clientFactory(url, identity);
     final association = _privateTransport.lookupFor(url);
-    if (association.kind == PrivateTransportAssociationKind.associated &&
-        association.profileId == widget.activePrivateTransportProfileId) {
-      final network = _privateNetwork ??= PrivateNetworkSessionController(widget.privateNetworkRuntimeFactory());
+    PrivateTransportProfile? profile;
+    try {
+      if (association.kind == PrivateTransportAssociationKind.associated) {
+        profile = _profiles.find(association.profileId!);
+      }
+    } on FormatException {
+      // A malformed profile store must never turn private traffic public.
+    }
+    if (profile != null) {
+      final claim = PrivateNetworkIdentityClaim(
+        profileId: profile.id,
+        controlUrl: profile.controlUrl,
+        homeIpv4: profile.serviceIpv4,
+        homePort: profile.servicePort,
+        allowLegacyClaim: _profiles.uniquelyMatches(profile),
+      );
+      if (_privateNetworkProfile?.id != profile.id ||
+          _privateNetworkProfile?.controlUrl != profile.controlUrl ||
+          _privateNetworkProfile?.serviceIpv4 != profile.serviceIpv4 ||
+          _privateNetworkProfile?.servicePort != profile.servicePort) {
+        final previous = _privateNetwork;
+        if (previous != null) unawaited(previous.close());
+        _privateNetwork = PrivateNetworkSessionController(
+            widget.privateNetworkRuntimeFactory(), claim);
+        _privateNetworkProfile = profile;
+      }
+      final network = _privateNetwork!;
       unawaited(network.start());
       client.usePrivateTransport(network.status);
     } else if (association.kind != PrivateTransportAssociationKind.none) {
@@ -175,18 +214,39 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_client == null) return LoginScreen(identity: _identity!, initialServerUrl: widget.preferences.getString(CredentialMigration.serverUrlKey), clientFactory: _makeClient, onAuthenticated: _authenticated);
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_client == null) {
+      return LoginScreen(
+          identity: _identity!,
+          initialServerUrl:
+              widget.preferences.getString(CredentialMigration.serverUrlKey),
+          clientFactory: _makeClient,
+          onAuthenticated: _authenticated);
+    }
     return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.maybePop(context)},
-      child: RodPlayerAppShell(client: _client!, onLogout: _logout, onSwitchProfile: _switchProfile),
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.maybePop(context)
+      },
+      child: RodPlayerAppShell(
+          client: _client!, onLogout: _logout, onSwitchProfile: _switchProfile),
     );
   }
 }
 
-Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client, String itemId) => VideoPlayerView(engine: engine, surface: MediaKitPlaybackVideoSurface(engine), client: client, itemId: itemId);
+Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client,
+        String itemId) =>
+    VideoPlayerView(
+        engine: engine,
+        surface: MediaKitPlaybackVideoSurface(engine),
+        client: client,
+        itemId: itemId);
 
-JellyfinApiClient _defaultClientFactory(String baseUrl, InstallationIdentity identity) => JellyfinApiClient(baseUrl: baseUrl, identity: identity);
+JellyfinApiClient _defaultClientFactory(
+        String baseUrl, InstallationIdentity identity) =>
+    JellyfinApiClient(baseUrl: baseUrl, identity: identity);
 
 PrivateNetworkRuntime _defaultPrivateNetworkRuntimeFactory() =>
     MethodChannelPrivateNetworkRuntime();

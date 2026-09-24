@@ -58,6 +58,7 @@ class MethodChannelPrivateNetworkRuntime implements PrivateNetworkRuntime {
       _invokeStatus(
         'bootstrap',
         <String, Object?>{
+          'profileId': bootstrap.profileId,
           'version': bootstrap.version,
           'controlUrl': bootstrap.controlUrl.toString(),
           'authKey': bootstrap.authKey,
@@ -67,7 +68,14 @@ class MethodChannelPrivateNetworkRuntime implements PrivateNetworkRuntime {
       );
 
   @override
-  Future<PrivateNetworkStatus> resume() => _invokeStatus('resume');
+  Future<PrivateNetworkStatus> resume(PrivateNetworkIdentityClaim claim) =>
+      _invokeStatus('resume', <String, Object?>{
+        'profileId': claim.profileId,
+        'controlUrl': claim.controlUrl.toString(),
+        'homeIpv4': claim.homeIpv4,
+        'homePort': claim.homePort,
+        'allowLegacyClaim': claim.allowLegacyClaim,
+      });
 
   @override
   Future<void> stop() => _invokeVoid('stop');

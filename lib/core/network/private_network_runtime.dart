@@ -39,6 +39,7 @@ class PrivateNetworkException implements Exception {
 
 class PrivateNetworkBootstrap {
   const PrivateNetworkBootstrap({
+    required this.profileId,
     required this.version,
     required this.controlUrl,
     required this.authKey,
@@ -47,9 +48,11 @@ class PrivateNetworkBootstrap {
   });
 
   factory PrivateNetworkBootstrap.fromEnrollment(
-    FamilyEnrollmentResult enrollment,
-  ) =>
+    FamilyEnrollmentResult enrollment, {
+    required String profileId,
+  }) =>
       PrivateNetworkBootstrap(
+        profileId: profileId,
         version: enrollment.version,
         controlUrl: enrollment.controlUrl,
         authKey: enrollment.authKey,
@@ -57,6 +60,7 @@ class PrivateNetworkBootstrap {
         homePort: enrollment.homePort,
       );
 
+  final String profileId;
   final int version;
   final Uri controlUrl;
 
@@ -71,12 +75,30 @@ class PrivateNetworkBootstrap {
 
   @override
   String toString() => 'PrivateNetworkBootstrap('
+      'profileId: $profileId, '
       'version: $version, '
       'controlUrl: $controlUrl, '
       'authKey: <redacted>, '
       'homeIpv4: $homeIpv4, '
       'homePort: $homePort'
       ')';
+}
+
+/// Explicit claim checked by native code before retained identity is resumed.
+class PrivateNetworkIdentityClaim {
+  const PrivateNetworkIdentityClaim({
+    required this.profileId,
+    required this.controlUrl,
+    required this.homeIpv4,
+    required this.homePort,
+    this.allowLegacyClaim = false,
+  });
+
+  final String profileId;
+  final Uri controlUrl;
+  final String homeIpv4;
+  final int homePort;
+  final bool allowLegacyClaim;
 }
 
 class PrivateNetworkStatus {
@@ -193,7 +215,7 @@ abstract interface class PrivateNetworkRuntime {
     PrivateNetworkBootstrap bootstrap,
   );
 
-  Future<PrivateNetworkStatus> resume();
+  Future<PrivateNetworkStatus> resume(PrivateNetworkIdentityClaim claim);
 
   Future<void> stop();
 
