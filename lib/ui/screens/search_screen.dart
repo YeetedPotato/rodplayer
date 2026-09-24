@@ -248,7 +248,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 16, mainAxisSpacing: 18),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final item = _items[index];
-                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: item.kind == JellyfinItemKind.episode ? 16 / 9 : 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
+                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.subtitle(), imageUrl: item.imageUrl(widget.client.baseUrl), imageClient: widget.client, aspectRatio: item.kind == JellyfinItemKind.episode ? 16 / 9 : 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
                   }, childCount: _items.length),
                 );
               }),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({required this.client, required this.onSwitchProfile, required this.onLogout, super.key});
@@ -161,7 +162,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Row(children: [
-            CircleAvatar(radius: 34, foregroundImage: imageUri == null ? null : NetworkImage(imageUri.toString(), headers: widget.client.headers), child: Text(profile.initials)),
+            ClipOval(child: SizedBox(width: 68, height: 68, child: imageUri == null ? CircleAvatar(child: Text(profile.initials)) : RoutedJellyfinImage(client: widget.client, url: imageUri.toString(), publicHeaders: widget.client.headers, fallback: CircleAvatar(child: Text(profile.initials))))),
             const SizedBox(width: 16),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -164,7 +164,7 @@ class _MediaLibraryScreenState extends State<MediaLibraryScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, childAspectRatio: .64, crossAxisSpacing: 16, mainAxisSpacing: 18),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final item = _items[index];
-                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), aspectRatio: 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
+                    return FocusableMediaCard(title: mediaItemTitle(item), subtitle: item.productionYear?.toString() ?? item.rawType, imageUrl: item.imageUrl(widget.client.baseUrl), imageClient: widget.client, aspectRatio: 2 / 3, badge: userDataBadgeFor(item), onTap: () => _openDetails(item));
                   }, childCount: _items.length),
                 );
               }),

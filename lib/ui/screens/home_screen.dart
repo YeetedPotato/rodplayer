@@ -5,6 +5,7 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
 import 'package:rodplayer/ui/widgets/user_data_badge.dart';
@@ -172,6 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
             title: _title(item),
             subtitle: subtitle(item),
             imageUrl: item.imageUrl(widget.client.baseUrl),
+            imageClient: widget.client,
             progress: progress?.call(item),
             aspectRatio: aspectRatio,
             badge: userDataBadgeFor(item),
@@ -205,7 +207,7 @@ class _HomeHero extends StatelessWidget {
       height: height,
       child: Stack(fit: StackFit.expand, children: [
         if (imageUrl != null)
-          Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+          RoutedJellyfinImage(client: client, url: imageUrl, fallback: const SizedBox.shrink()),
         DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.obsidian, theme.obsidian.withValues(alpha: .72), theme.obsidian], begin: Alignment.bottomCenter, end: Alignment.topCenter))),
         Padding(
           padding: EdgeInsets.fromLTRB(compact ? 20 : 40, compact ? 28 : 36, compact ? 20 : 48, compact ? 22 : 28),

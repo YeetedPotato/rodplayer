@@ -6,6 +6,7 @@ import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/user_data_badge.dart';
 
@@ -426,7 +427,7 @@ class _Header extends StatelessWidget {
       aspectRatio: 2 / 3,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: imageUrl == null ? const ColoredBox(color: Colors.white10, child: Icon(Icons.movie_outlined, size: 56, color: Colors.white38)) : Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.white10, child: SizedBox.expand())),
+        child: imageUrl == null ? const ColoredBox(color: Colors.white10, child: Icon(Icons.movie_outlined, size: 56, color: Colors.white38)) : RoutedJellyfinImage(client: client, url: imageUrl, fallback: const ColoredBox(color: Colors.white10, child: SizedBox.expand())),
       ),
     );
     final details = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -555,6 +556,7 @@ class _EpisodeGrid extends StatelessWidget {
               title: mediaItemTitle(episode),
               subtitle: [code, _dateLabel(episode.premiereDate), episode.runTime == null ? null : _duration(episode.runTime!)].whereType<String>().where((part) => part.isNotEmpty).join(' · '),
               imageUrl: episode.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
+              imageClient: client,
               aspectRatio: 16 / 9,
               progress: visualProgress(episode),
               badge: userDataBadgeFor(episode),
@@ -583,6 +585,7 @@ class _SimilarGrid extends StatelessWidget {
               title: mediaItemTitle(item),
               subtitle: item.subtitle(),
               imageUrl: item.imageUrl(client.baseUrl, type: JellyfinImageType.primary),
+              imageClient: client,
               badge: userDataBadgeFor(item),
               onTap: () => onTap(item),
             );

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -5,6 +7,7 @@ import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
+import 'package:rodplayer/core/network/private_transport_profile_association.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
 import 'package:rodplayer/main.dart';
@@ -14,30 +17,176 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets(
-    'app resumes a persisted private identity once without tying it to logout',
+    'ordinary public app does not start or enroll a private identity',
     (tester) async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       final prefs = await SharedPreferences.getInstance();
       final runtime = _RootPrivateNetworkRuntime();
+      var factoryCalls = 0;
 
       await tester.pumpWidget(RodPlayerApp(
         preferences: prefs,
         credentialStore: MemoryCredentialStore(),
-        privateNetworkRuntimeFactory: () => runtime,
+        privateNetworkRuntimeFactory: () { factoryCalls++; return runtime; },
       ));
       await tester.pumpAndSettle();
       await tester.pumpWidget(RodPlayerApp(
         preferences: prefs,
         credentialStore: MemoryCredentialStore(),
-        privateNetworkRuntimeFactory: () => runtime,
+        privateNetworkRuntimeFactory: () { factoryCalls++; return runtime; },
       ));
       await tester.pumpAndSettle();
 
-      expect(runtime.resumeCalls, 1);
+      expect(factoryCalls, 0);
+      expect(runtime.resumeCalls, 0);
       expect(runtime.bootstrapCalls, 0);
       expect(runtime.resetCalls, 0);
     },
   );
+
+  testWidgets('only the matching associated profile starts private transport', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      CredentialMigration.serverUrlKey: 'https://server',
+      CredentialMigration.userIdKey: 'user',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await PrivateTransportProfileAssociation(prefs).associate('https://server', 'invite:one');
+    final store = MemoryCredentialStore();
+    await store.writeToken(CredentialMigration.tokenKey, 'token');
+    final runtime = _RootPrivateNetworkRuntime();
+    var factoryCalls = 0;
+    final clients = <_RootClient>[];
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: store,
+      activePrivateTransportProfileId: 'custom:two',
+      privateNetworkRuntimeFactory: () { factoryCalls++; return runtime; },
+      clientFactory: (url, identity) {
+        final client = _RootClient(baseUrl: url, identity: identity);
+        clients.add(client);
+        return client;
+      },
+    ));
+    await tester.pumpAndSettle();
+    expect(factoryCalls, 0);
+    expect(clients.single.usesPrivateTransport, isTrue);
+    expect(() => clients.single.resolveServiceUri(Uri.parse('https://server/Items')),
+        throwsA(isA<PrivateNetworkException>()));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: store,
+      activePrivateTransportProfileId: 'invite:one',
+      privateNetworkRuntimeFactory: () { factoryCalls++; return runtime; },
+      clientFactory: (url, identity) {
+        final client = _RootClient(baseUrl: url, identity: identity);
+        clients.add(client);
+        return client;
+      },
+    ));
+    await tester.pumpAndSettle();
+    expect(factoryCalls, 1);
+    expect(clients.last.usesPrivateTransport, isTrue);
+    expect(runtime.resumeCalls, 1);
+    expect(runtime.bootstrapCalls, 0);
+    expect(runtime.resetCalls, 0);
+  });
+
+  for (final associationRecord in <String>[
+    '{broken',
+    jsonEncode({'serverUrl': 'https://server', 'profileId': ''}),
+  ]) {
+    testWidgets('corrupt private association fails closed: $associationRecord',
+        (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        CredentialMigration.serverUrlKey: 'https://server',
+        CredentialMigration.userIdKey: 'user',
+        PrivateTransportProfileAssociation.preferenceKey: associationRecord,
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final store = MemoryCredentialStore();
+      await store.writeToken(CredentialMigration.tokenKey, 'token');
+      final clients = <_RootClient>[];
+      var runtimeCreated = false;
+      await tester.pumpWidget(RodPlayerApp(
+        preferences: prefs,
+        credentialStore: store,
+        privateNetworkRuntimeFactory: () {
+          runtimeCreated = true;
+          return _RootPrivateNetworkRuntime();
+        },
+        clientFactory: (url, identity) {
+          final client = _RootClient(baseUrl: url, identity: identity);
+          clients.add(client);
+          return client;
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(runtimeCreated, isFalse);
+      expect(clients.single.usesPrivateTransport, isTrue);
+      expect(() => clients.single.resolveServiceUri(Uri.parse('https://server/Items')),
+          throwsA(isA<PrivateNetworkException>()));
+    });
+  }
+
+  testWidgets('same-server user switch keeps association; new server clears it',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      CredentialMigration.serverUrlKey: 'https://server',
+      CredentialMigration.userIdKey: 'user',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final association = PrivateTransportProfileAssociation(prefs);
+    await association.associate('https://server', 'invite:one');
+    final store = MemoryCredentialStore();
+    await store.writeToken(CredentialMigration.tokenKey, 'token');
+    final clients = <_RootClient>[];
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: store,
+      clientFactory: (url, identity) {
+        final client = _RootClient(baseUrl: url, identity: identity);
+        clients.add(client);
+        return client;
+      },
+    ));
+    await tester.pumpAndSettle();
+    expect(clients.first.usesPrivateTransport, isTrue);
+
+    Future<void> switchProfile() async {
+      await tester.tap(find.byTooltip('Profile'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+          find.widgetWithText(OutlinedButton, 'Switch profile'), 300,
+          scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Switch profile'));
+      await tester.pumpAndSettle();
+    }
+
+    await switchProfile();
+    expect(association.lookupFor('https://server').profileId, 'invite:one');
+    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'second');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pumpAndSettle();
+    expect(association.lookupFor('https://server').profileId, 'invite:one');
+    expect(clients.last.usesPrivateTransport, isTrue);
+
+    await switchProfile();
+    await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
+        'https://other.example.test');
+    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'third');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pumpAndSettle();
+    expect(prefs.getString(CredentialMigration.serverUrlKey),
+        'https://other.example.test');
+    expect(prefs.getString(PrivateTransportProfileAssociation.preferenceKey),
+        isNull);
+    expect(clients.last.usesPrivateTransport, isFalse);
+  });
 
   testWidgets('switch profile keeps server URL and full logout clears it despite server logout failure', (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -50,10 +199,11 @@ void main() {
     await store.writeToken(CredentialMigration.tokenKey, 'token');
     final clients = <_RootClient>[];
     final privateNetwork = _RootPrivateNetworkRuntime();
+    var privateFactoryCalls = 0;
     await tester.pumpWidget(RodPlayerApp(
       preferences: prefs,
       credentialStore: store,
-      privateNetworkRuntimeFactory: () => privateNetwork,
+      privateNetworkRuntimeFactory: () { privateFactoryCalls++; return privateNetwork; },
       clientFactory: (url, identity) {
         final client = _RootClient(baseUrl: url, identity: identity, failLogout: clients.isEmpty);
         clients.add(client);
@@ -86,6 +236,7 @@ void main() {
     expect(await store.readToken(CredentialMigration.tokenKey), isNull);
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(privateNetwork.resetCalls, 0);
+    expect(privateFactoryCalls, 0);
   });
 }
 

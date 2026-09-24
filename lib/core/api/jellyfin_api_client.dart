@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
@@ -7,6 +9,8 @@ import 'package:rodplayer/core/api/models/media_segment.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/network/private_network_runtime.dart';
+import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
 
 class JellyfinAuthException implements Exception {
   JellyfinAuthException(this.message);
@@ -91,11 +95,27 @@ class JellyfinApiClient {
     required this.identity,
     http.Client? client,
   })  : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
-        _client = client ?? http.Client();
+        _rawClient = client ?? http.Client();
 
   final String baseUrl;
   final InstallationIdentity identity;
-  final http.Client _client;
+  final http.Client _rawClient;
+  PrivateServiceEndpointResolver? _privateResolver;
+  PrivateServiceHttpClient? _privateClient;
+  http.Client get _client => _privateClient ?? _rawClient;
+  bool get usesPrivateTransport => _privateResolver != null;
+  ValueListenable<PrivateNetworkStatus?>? get privateNetworkStatus => _privateResolver?.status;
+
+  void usePrivateTransport(ValueListenable<PrivateNetworkStatus?> status) {
+    final resolver = PrivateServiceEndpointResolver(canonicalBaseUrl: baseUrl, status: status);
+    _privateResolver = resolver;
+    _privateClient = PrivateServiceHttpClient(_rawClient, resolver);
+  }
+
+  Uri resolveServiceUri(Uri canonicalUrl) => _privateResolver?.resolve(canonicalUrl) ?? canonicalUrl;
+  Uri resolveWebSocketUri(Uri canonicalUrl) => _privateResolver?.resolveWebSocket(canonicalUrl) ?? canonicalUrl;
+  Future<Uint8List> readServiceImage(Uri canonicalUrl) => _client.readBytes(canonicalUrl, headers: headers);
+
   String? accessToken;
   String? userId;
 
@@ -400,14 +420,17 @@ class JellyfinApiClient {
     };
     final token = cleanToken(accessToken);
     if (token != null) query['api_key'] = token;
-    return Uri.parse('$baseUrl/Videos/${Uri.encodeComponent(itemId)}/stream').replace(queryParameters: query);
+    return resolveServiceUri(Uri.parse('$baseUrl/Videos/${Uri.encodeComponent(itemId)}/stream').replace(queryParameters: query));
   }
 
   Uri resolvePlaybackUri(String path) {
     final uri = Uri.parse(path);
     final resolved = uri.hasScheme ? uri : Uri.parse(baseUrl).resolve(path);
     final token = cleanToken(accessToken);
-    return token != null && !resolved.queryParameters.containsKey('api_key') ? resolved.replace(queryParameters: <String, String>{...resolved.queryParameters, 'api_key': token}) : resolved;
+    final withAuth = token != null && !resolved.queryParametersAll.containsKey('api_key')
+        ? resolved.replace(query: '${resolved.query}${resolved.query.isEmpty ? '' : '&'}api_key=${Uri.encodeComponent(token)}')
+        : resolved;
+    return resolveServiceUri(withAuth);
   }
 
   Future<void> reportPlaybackStarted(Map<String, dynamic> payload) => _postReport('/Sessions/Playing', payload);
