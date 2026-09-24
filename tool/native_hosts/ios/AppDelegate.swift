@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 import Flutter
 import MobileVLCKit
@@ -288,6 +289,15 @@ private struct ApplePrivateNetworkStatus: Equatable, Sendable {
   let path: String
   let hasPersistedIdentity: Bool
   let reason: String
+  let gatewayUrl: String?
+
+  init(state: String, path: String, hasPersistedIdentity: Bool, reason: String, gatewayUrl: String? = nil) {
+    self.state = state
+    self.path = path
+    self.hasPersistedIdentity = hasPersistedIdentity
+    self.reason = reason
+    self.gatewayUrl = gatewayUrl
+  }
 
   static func stopped(hasPersistedIdentity: Bool) -> ApplePrivateNetworkStatus {
     ApplePrivateNetworkStatus(state: "stopped", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: "none")
@@ -301,13 +311,17 @@ private struct ApplePrivateNetworkStatus: Equatable, Sendable {
     ApplePrivateNetworkStatus(state: "unavailable", path: "none", hasPersistedIdentity: hasPersistedIdentity, reason: reason)
   }
 
+  static func ready(gatewayUrl: String) -> ApplePrivateNetworkStatus {
+    ApplePrivateNetworkStatus(state: "ready", path: "direct", hasPersistedIdentity: true, reason: "none", gatewayUrl: gatewayUrl)
+  }
+
   var payload: [String: Any] {
     [
       "state": state,
       "path": path,
       "hasPersistedIdentity": hasPersistedIdentity,
       "reason": reason,
-      "gatewayUrl": NSNull(),
+      "gatewayUrl": gatewayUrl.map { $0 as Any } ?? NSNull(),
     ]
   }
 }
@@ -372,6 +386,7 @@ private protocol ApplePrivateNetworkNode: AnyObject, Sendable {
   func up() async throws
   func close() async throws
   func statusJSON() async throws -> Data
+  func dialTCP(_ destination: String) throws -> Int32
 }
 
 private protocol ApplePrivateNetworkNodeFactory: Sendable {
@@ -390,9 +405,17 @@ private actor ApplePrivateNetworkNodeOwner {
   private let factory: any ApplePrivateNetworkNodeFactory
   private var activeNode: (any ApplePrivateNetworkNode)?
   private var activeMetadata: ApplePrivateNetworkMetadata?
+  private var gateway: AppleLoopbackGateway?
   private var cachedStatus: ApplePrivateNetworkStatus
   private var statusObserver: (@Sendable (ApplePrivateNetworkStatus) -> Void)?
   private var monitorTask: Task<Void, Never>?
+  private var warmupTask: Task<Void, Never>?
+  private var warmupGeneration = 0
+  private var lastDirectAddress: String?
+  private var verifiedAddress: String?
+  private var warmupSucceeded = false
+  private var nextWarmupAt = Date.distantPast
+  private var stopping = false
   private var lifecycleLocked = false
   private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -429,6 +452,12 @@ private actor ApplePrivateNetworkNodeOwner {
       throw ApplePrivateNetworkNodeOwnerError.startFailed
     }
     activeMetadata = metadata
+    do {
+      try startGatewayLocked(metadata: metadata)
+    } catch {
+      try? await stopLocked()
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
     return await startMonitorLocked()
   }
 
@@ -446,7 +475,18 @@ private actor ApplePrivateNetworkNodeOwner {
     let metadata = try stateStore.loadMetadata()
     try await startLocked(config: configuration(metadata: metadata, authKey: nil))
     activeMetadata = metadata
+    do {
+      try startGatewayLocked(metadata: metadata)
+    } catch {
+      try? await stopLocked()
+      throw ApplePrivateNetworkNodeOwnerError.startFailed
+    }
     return await startMonitorLocked()
+  }
+
+  private func startGatewayLocked(metadata: ApplePrivateNetworkMetadata) throws {
+    guard let activeNode else { throw ApplePrivateNetworkNodeOwnerError.startFailed }
+    gateway = try AppleLoopbackGateway(node: activeNode, metadata: metadata)
   }
 
   private func startLocked(config: TailscaleKit.Configuration) async throws {
@@ -512,10 +552,33 @@ private actor ApplePrivateNetworkNodeOwner {
   }
 
   private func stopLocked() async throws {
-    guard let activeNode else { return }
+    stopping = true
+    warmupGeneration += 1
+    warmupTask?.cancel()
+    let retiringWarmup = warmupTask
+    let retiringGateway = gateway
+    retiringGateway?.close()
+    publish(.starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity))
+    guard let activeNode else {
+      await retiringGateway?.drain()
+      await retiringWarmup?.value
+      gateway = nil
+      warmupTask = nil
+      stopping = false
+      return
+    }
     try await activeNode.close()
+    await retiringGateway?.drain()
+    await retiringWarmup?.value
+    gateway = nil
+    warmupTask = nil
     self.activeNode = nil
     activeMetadata = nil
+    lastDirectAddress = nil
+    verifiedAddress = nil
+    warmupSucceeded = false
+    nextWarmupAt = .distantPast
+    stopping = false
   }
 
   private func startMonitorLocked() async -> ApplePrivateNetworkStatus {
@@ -545,7 +608,9 @@ private actor ApplePrivateNetworkNodeOwner {
 
   private func pollStatus() async {
     guard monitorTask != nil else { return }
-    publish(await sampleStatus())
+    let status = await sampleStatus()
+    guard monitorTask != nil else { return }
+    publish(status)
   }
 
   private func sampleStatus() async -> ApplePrivateNetworkStatus {
@@ -554,7 +619,10 @@ private actor ApplePrivateNetworkNodeOwner {
     }
     do {
       let backend = try JSONDecoder().decode(AppleTsnetStatus.self, from: await activeNode.statusJSON())
+      guard let currentNode = self.activeNode, currentNode === activeNode else { return cachedStatus }
+      guard !stopping else { return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity) }
       guard backend.backendState == "Running" else {
+        invalidateUpstreamVerification()
         return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
       }
       let homePeers = backend.peer.values.filter { $0.tailscaleIPs.contains(metadata.homeIpv4) }
@@ -564,15 +632,65 @@ private actor ApplePrivateNetworkNodeOwner {
         peer.online,
         peer.peerRelay?.isEmpty != false
       else {
+        invalidateUpstreamVerification()
         return .unavailable(reason: "direct_path_unavailable", hasPersistedIdentity: stateStore.hasPersistedIdentity)
       }
       guard let currentAddress = peer.currentAddress, !currentAddress.isEmpty else {
+        if lastDirectAddress != nil || verifiedAddress != nil || warmupSucceeded {
+          invalidateUpstreamVerification()
+        }
+        startWarmupIfNeeded(node: activeNode, metadata: metadata)
         return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      if lastDirectAddress != currentAddress {
+        if lastDirectAddress != nil { invalidateUpstreamVerification() }
+        lastDirectAddress = currentAddress
+      }
+      if warmupSucceeded { verifiedAddress = currentAddress }
+      guard verifiedAddress == currentAddress else {
+        startWarmupIfNeeded(node: activeNode, metadata: metadata)
+        return .starting(path: "direct", hasPersistedIdentity: stateStore.hasPersistedIdentity)
+      }
+      if stateStore.hasPersistedIdentity, let gateway, gateway.isListening {
+        return .ready(gatewayUrl: gateway.baseURL)
       }
       return .starting(path: "direct", hasPersistedIdentity: stateStore.hasPersistedIdentity)
     } catch {
+      guard let currentNode = self.activeNode, currentNode === activeNode else { return cachedStatus }
+      guard !stopping else { return .starting(path: "none", hasPersistedIdentity: stateStore.hasPersistedIdentity) }
+      invalidateUpstreamVerification()
       return .unavailable(reason: "transport_failure", hasPersistedIdentity: stateStore.hasPersistedIdentity)
     }
+  }
+
+  private func invalidateUpstreamVerification() {
+    lastDirectAddress = nil
+    verifiedAddress = nil
+    warmupSucceeded = false
+    if warmupTask != nil {
+      warmupGeneration += 1
+      warmupTask?.cancel()
+    }
+  }
+
+  private func startWarmupIfNeeded(node: any ApplePrivateNetworkNode, metadata: ApplePrivateNetworkMetadata) {
+    guard !stopping, warmupTask == nil, Date() >= nextWarmupAt else { return }
+    nextWarmupAt = Date().addingTimeInterval(5)
+    let generation = warmupGeneration
+    let destination = "\(metadata.homeIpv4):\(metadata.homePort)"
+    warmupTask = Task.detached(priority: .utility) { [weak self] in
+      // tailscale_dial is blocking; node closure invalidates this attempt on stop/reset.
+      let connection = try? node.dialTCP(destination)
+      if let connection { Darwin.close(connection) }
+      await self?.warmupFinished(generation: generation, succeeded: connection != nil && !Task.isCancelled)
+    }
+  }
+
+  private func warmupFinished(generation: Int, succeeded: Bool) {
+    warmupTask = nil
+    guard !stopping, generation == warmupGeneration else { return }
+    warmupSucceeded = succeeded
+    Task { [weak self] in await self?.pollStatus() }
   }
 
   private func publish(_ status: ApplePrivateNetworkStatus) {
@@ -600,6 +718,10 @@ private actor ApplePrivateNetworkNodeOwner {
 
 private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked Sendable {
   private let node: TailscaleNode
+  private let lock = NSLock()
+  private let inFlightDials = DispatchGroup()
+  private var cachedHandle: Int32?
+  private var closing = false
 
   init(node: TailscaleNode) {
     self.node = node
@@ -607,14 +729,50 @@ private final class TailscaleKitNodeAdapter: ApplePrivateNetworkNode, @unchecked
 
   func up() async throws {
     try await node.up()
+    guard let handle = await node.tailscale else { throw AppleGatewayError.dialFailure }
+    try cacheHandle(handle)
   }
 
   func close() async throws {
+    beginClosing()
     try await node.close()
+    await withCheckedContinuation { continuation in
+      inFlightDials.notify(queue: .global(qos: .utility)) { continuation.resume() }
+    }
+  }
+
+  private func beginClosing() {
+    lock.lock()
+    closing = true
+    cachedHandle = nil
+    lock.unlock()
   }
 
   func statusJSON() async throws -> Data {
     try await node.statusJSON()
+  }
+
+  func dialTCP(_ destination: String) throws -> Int32 {
+    lock.lock()
+    guard !closing, let handle = cachedHandle else {
+      lock.unlock()
+      throw AppleGatewayError.dialFailure
+    }
+    inFlightDials.enter()
+    lock.unlock()
+    defer { inFlightDials.leave() }
+    var connection: Int32 = -1
+    guard tailscale_dial(handle, "tcp", destination, &connection) == 0, connection >= 0 else {
+      throw AppleGatewayError.dialFailure
+    }
+    return connection
+  }
+
+  private func cacheHandle(_ handle: Int32) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !closing else { throw AppleGatewayError.dialFailure }
+    cachedHandle = handle
   }
 }
 

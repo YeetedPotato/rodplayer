@@ -94,10 +94,22 @@ class PrivateNetworkStatus {
   final PrivateNetworkUnavailableReason unavailableReason;
   final Uri? gatewayBaseUrl;
 
-  bool get canProxy =>
-      state == PrivateNetworkState.ready &&
-      path == PrivateNetworkPath.direct &&
-      gatewayBaseUrl != null;
+  bool get canProxy {
+    final gateway = gatewayBaseUrl;
+    if (state != PrivateNetworkState.ready ||
+        path != PrivateNetworkPath.direct ||
+        !hasPersistedIdentity ||
+        unavailableReason != PrivateNetworkUnavailableReason.none ||
+        gateway == null) {
+      return false;
+    }
+    try {
+      _parseLoopbackGateway(gateway.toString());
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
 
   factory PrivateNetworkStatus.fromPayload(
     Object? payload,

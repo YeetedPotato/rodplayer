@@ -60,6 +60,40 @@ void main() {
       },
     );
 
+    test('constructed status needs identity, no error, and loopback', () {
+      final gateway = Uri.parse('http://127.0.0.1:43127');
+      expect(
+        PrivateNetworkStatus(
+          state: PrivateNetworkState.ready,
+          path: PrivateNetworkPath.direct,
+          hasPersistedIdentity: false,
+          unavailableReason: PrivateNetworkUnavailableReason.none,
+          gatewayBaseUrl: gateway,
+        ).canProxy,
+        isFalse,
+      );
+      expect(
+        PrivateNetworkStatus(
+          state: PrivateNetworkState.ready,
+          path: PrivateNetworkPath.direct,
+          hasPersistedIdentity: true,
+          unavailableReason: PrivateNetworkUnavailableReason.transportFailure,
+          gatewayBaseUrl: gateway,
+        ).canProxy,
+        isFalse,
+      );
+      expect(
+        PrivateNetworkStatus(
+          state: PrivateNetworkState.ready,
+          path: PrivateNetworkPath.direct,
+          hasPersistedIdentity: true,
+          unavailableReason: PrivateNetworkUnavailableReason.none,
+          gatewayBaseUrl: Uri.parse('http://100.64.0.1:3000'),
+        ).canProxy,
+        isFalse,
+      );
+    });
+
     test(
       'rejects non-loopback gateway',
       () {
@@ -228,6 +262,51 @@ void main() {
         expect(status.gatewayBaseUrl, isNull);
       },
     );
+
+    test('failed verification and lost direct path revoke gateway access', () {
+      final transitions = <Map<String, Object?>>[
+        {
+          'state': 'starting',
+          'path': 'none',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': null,
+        },
+        {
+          'state': 'starting',
+          'path': 'direct',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': null,
+        },
+        {
+          'state': 'ready',
+          'path': 'direct',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': 'http://127.0.0.1:43127',
+        },
+        {
+          'state': 'unavailable',
+          'path': 'none',
+          'hasPersistedIdentity': true,
+          'reason': 'direct_path_unavailable',
+          'gatewayUrl': null,
+        },
+        {
+          'state': 'starting',
+          'path': 'direct',
+          'hasPersistedIdentity': true,
+          'reason': 'none',
+          'gatewayUrl': null,
+        },
+      ];
+      final proxyable = transitions
+          .map(PrivateNetworkStatus.fromPayload)
+          .map((status) => status.canProxy)
+          .toList();
+      expect(proxyable, [false, false, true, false, false]);
+    });
 
     test(
       'direct path unavailable state is not proxyable',

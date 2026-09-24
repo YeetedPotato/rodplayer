@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Static contract checks for the duplicated Apple D3 private-network host."""
 
+import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -10,6 +13,7 @@ HOSTS = (
     ROOT / "tool" / "native_hosts" / "ios" / "AppDelegate.swift",
     ROOT / "tool" / "native_hosts" / "macos" / "MainFlutterWindow.swift",
 )
+GATEWAY = ROOT / "tool" / "native_hosts" / "apple" / "AppleLoopbackGateway.swift"
 
 
 def private_network_source(path: Path) -> str:
@@ -122,7 +126,7 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("try await nodeOwner.resume()", host_resume)
             self.assertIn("guard stateStore.hasPersistedIdentity else", source)
             self.assertIn('reason: "no_identity"', source)
-            self.assertNotIn('"state": "ready"', source)
+            self.assertIn('static func ready(gatewayUrl: String)', source)
             self.assertNotIn('"path": "relay"', source)
             self.assertNotIn(".down()", source)
             self.assertNotIn(".loopback()", source)
@@ -258,6 +262,122 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn('case peerRelay = "PeerRelay"', status)
             self.assertNotIn('case relay = "Relay"', status)
             self.assertNotIn('"Relay"', status)
+
+    def test_fixed_loopback_gateway_and_byte_stream_cleanup(self) -> None:
+        gateway = GATEWAY.read_text()
+        self.assertIn('"127.0.0.1".withCString', gateway)
+        self.assertIn("address.sin_port = 0", gateway)
+        self.assertIn("Darwin.bind(fd, $0, length)", gateway)
+        self.assertIn("Darwin.listen(fd, 16)", gateway)
+        self.assertIn("flags | O_NONBLOCK", gateway)
+        self.assertIn("clientFlags & ~O_NONBLOCK", gateway)
+        self.assertIn('baseURL = "http://127.0.0.1:', gateway)
+        self.assertNotIn('"0.0.0.0"', gateway)
+        self.assertNotIn('"::1"', gateway)
+        self.assertIn('destination = "\\(metadata.homeIpv4):\\(metadata.homePort)"', gateway)
+        self.assertIn("node.dialTCP(destination)", gateway)
+        self.assertNotIn("CONNECT", gateway)
+        self.assertNotIn("SOCKS", gateway)
+        self.assertIn("connections.count < 32", gateway)
+        self.assertIn("SO_NOSIGPIPE", gateway)
+        self.assertIn("Darwin.read(source", gateway)
+        self.assertIn("Darwin.write(destination", gateway)
+        self.assertIn("while offset < received", gateway)
+        self.assertIn("if errno == EINTR", gateway)
+        self.assertIn("SHUT_WR", gateway)
+        self.assertIn("pumps.wait()", gateway)
+        self.assertIn("func close()", gateway)
+        self.assertIn("deinit { close() }", gateway)
+        close = gateway[gateway.index("  func close() {"):gateway.index("  func drain() async {")]
+        accept = gateway[gateway.index("  private func acceptLoop() {"):gateway.index("  private func removeConnection(")]
+        self.assertIn("closing = true", close)
+        self.assertIn("connection.cancel()", close)
+        self.assertNotIn("Darwin.close(", close)
+        self.assertIn("if shouldStop { return }", accept)
+        self.assertIn("Darwin.close(ownedFD)", accept)
+        self.assertIn("acceptGroup.leave()", accept)
+        self.assertIn("workers.enter()", accept)
+        self.assertIn("if removed != nil { workers.leave() }", gateway)
+        self.assertIn("acceptGroup.notify", gateway)
+        self.assertIn("self.workers.notify", gateway)
+
+    def test_generation_appends_same_gateway_to_both_apple_hosts(self) -> None:
+        spec = importlib.util.spec_from_file_location("apply_native_hosts", ROOT / "tool" / "apply_native_hosts.py")
+        assert spec and spec.loader
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(generator, "ROOT", root):
+                for platform, name in (("ios", "AppDelegate.swift"), ("macos", "MainFlutterWindow.swift")):
+                    target = root / platform / "Runner" / name
+                    target.parent.mkdir(parents=True)
+                    target.write_text("// generated host\n")
+                    generator.append_apple_gateway(f"{platform}/Runner/{name}")
+                    self.assertEqual(target.read_text(), "// generated host\n\n" + GATEWAY.read_text())
+        generator_source = (ROOT / "tool" / "apply_native_hosts.py").read_text()
+        self.assertIn('append_apple_gateway("ios/Runner/AppDelegate.swift")', generator_source)
+        self.assertIn('append_apple_gateway("macos/Runner/MainFlutterWindow.swift")', generator_source)
+
+    def test_ready_requires_current_direct_peer_and_lifecycle_owned_listener(self) -> None:
+        for path in HOSTS:
+            source = private_network_source(path)
+            owner = source[source.index("actor ApplePrivateNetworkNodeOwner"):]
+            status = source[source.index("private struct ApplePrivateNetworkStatus"):source.index("private struct ApplePrivateNetworkStateStore")]
+            self.assertIn("let gatewayUrl: String?", status)
+            self.assertIn('state: "ready", path: "direct", hasPersistedIdentity: true, reason: "none"', status)
+            self.assertIn('"gatewayUrl": gatewayUrl.map { $0 as Any } ?? NSNull()', status)
+            self.assertIn("private var gateway: AppleLoopbackGateway?", owner)
+            self.assertIn("gateway = try AppleLoopbackGateway(node: activeNode, metadata: metadata)", owner)
+            stop = owner[owner.index("private func stopLocked()"):owner.index("private func startMonitorLocked()")]
+            self.assertLess(stop.index("retiringGateway?.close()"), stop.index("try await activeNode.close()"))
+            self.assertLess(stop.index("try await activeNode.close()"), stop.index("await retiringGateway?.drain()", stop.index("try await activeNode.close()")))
+            self.assertLess(stop.index("await retiringGateway?.drain()", stop.index("try await activeNode.close()")), stop.index("self.activeNode = nil"))
+            self.assertIn("await retiringWarmup?.value", stop)
+            self.assertIn('publish(.starting(path: "none"', stop)
+            reset = owner[owner.index("func reset() async throws"):owner.index("private func stopLocked()")]
+            self.assertLess(reset.index("try await stopLocked()"), reset.index("try stateStore.reset()"))
+            sample = owner[owner.index("private func sampleStatus()"):owner.index("private func startWarmupIfNeeded")]
+            self.assertLess(sample.index('backend.backendState == "Running"'), sample.index("homePeers.count == 1"))
+            self.assertLess(sample.index("peer.peerRelay?.isEmpty != false"), sample.index("guard let currentAddress"))
+            self.assertLess(sample.index("!currentAddress.isEmpty"), sample.index("verifiedAddress == currentAddress"))
+            self.assertLess(sample.index("verifiedAddress == currentAddress"), sample.index("gateway.isListening"))
+            self.assertIn("if warmupSucceeded { verifiedAddress = currentAddress }", sample)
+            self.assertIn("startWarmupIfNeeded(node: activeNode, metadata: metadata)", sample)
+            self.assertIn("invalidateUpstreamVerification()", sample)
+            self.assertIn("if lastDirectAddress != currentAddress", sample)
+            self.assertIn('return .starting(path: "none"', sample)
+            self.assertIn('return .starting(path: "direct"', sample)
+            self.assertIn("stateStore.hasPersistedIdentity, let gateway, gateway.isListening", sample)
+            self.assertIn("return .ready(gatewayUrl: gateway.baseURL)", sample)
+            self.assertIn('reason: "direct_path_unavailable"', sample)
+            self.assertIn('reason: "transport_failure"', sample)
+            warmup = owner[owner.index("private func startWarmupIfNeeded"):owner.index("private func publish(")]
+            self.assertIn("guard !stopping, warmupTask == nil", warmup)
+            self.assertIn('let destination = "\\(metadata.homeIpv4):\\(metadata.homePort)"', warmup)
+            self.assertIn("Task.detached(priority: .utility)", warmup)
+            self.assertIn("Darwin.close(connection)", warmup)
+            self.assertIn("succeeded: connection != nil && !Task.isCancelled", warmup)
+            self.assertIn("guard !stopping, generation == warmupGeneration else { return }", warmup)
+            self.assertIn("warmupSucceeded = succeeded", warmup)
+            invalidate = sample[sample.index("private func invalidateUpstreamVerification()"):]
+            for cleared in ("lastDirectAddress = nil", "verifiedAddress = nil", "warmupSucceeded = false"):
+                self.assertIn(cleared, invalidate)
+            self.assertIn("warmupGeneration += 1", owner)
+            self.assertIn("warmupTask?.cancel()", owner)
+            self.assertIn("directOnlyData: true", owner)
+            adapter = source[source.index("private final class TailscaleKitNodeAdapter"):source.index("private struct AppleTsnetStatus")]
+            self.assertIn("guard let handle = await node.tailscale", adapter)
+            self.assertEqual(adapter.count("node.tailscale"), 1)
+            self.assertIn("try cacheHandle(handle)", adapter)
+            self.assertIn("private var cachedHandle: Int32?", adapter)
+            self.assertIn("guard !closing, let handle = cachedHandle", adapter)
+            self.assertIn("inFlightDials.enter()", adapter)
+            self.assertIn("defer { inFlightDials.leave() }", adapter)
+            self.assertLess(adapter.index("beginClosing()"), adapter.index("try await node.close()"))
+            self.assertLess(adapter.index("try await node.close()"), adapter.index("inFlightDials.notify"))
+            self.assertIn('tailscale_dial(handle, "tcp", destination, &connection)', adapter)
+            self.assertNotIn(".loopback()", source)
 
     def test_apple_hosts_keep_identical_private_network_implementations(self) -> None:
         self.assertEqual(

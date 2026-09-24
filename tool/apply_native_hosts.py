@@ -30,6 +30,12 @@ def copy(src: str, dst: str) -> None:
     shutil.copyfile(source, target)
 
 
+def append_apple_gateway(dst: str) -> None:
+    target = ROOT / dst
+    gateway = (HOSTS / "apple" / "AppleLoopbackGateway.swift").read_text()
+    target.write_text(target.read_text().rstrip() + "\n\n" + gateway)
+
+
 def patch_windows_cmake() -> None:
     path = ROOT / "windows" / "runner" / "CMakeLists.txt"
     if not path.exists():
@@ -178,10 +184,12 @@ def main(platform: str) -> None:
         patch_android_gradle()
     elif platform == "ios":
         copy("ios/AppDelegate.swift", "ios/Runner/AppDelegate.swift")
+        append_apple_gateway("ios/Runner/AppDelegate.swift")
         patch_podfile("ios")
         patch_ios_deployment_target()
     elif platform == "macos":
         copy("macos/MainFlutterWindow.swift", "macos/Runner/MainFlutterWindow.swift")
+        append_apple_gateway("macos/Runner/MainFlutterWindow.swift")
         patch_podfile("macos")
         patch_macos_deployment_target()
         patch_macos_entitlements()
