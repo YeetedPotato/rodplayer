@@ -270,6 +270,35 @@ jobs:
           flutter build ios --release --no-codesign 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           exit "$status"
+      - name: Package unsigned iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=build/ios/iphoneos/Runner.app
+          ipa=RodPlayer-iOS-unsigned.ipa
+          if [ ! -d "$app" ]; then
+            echo "::error::Expected unsigned iOS device app not found: $app"
+            exit 1
+          fi
+          package_dir=$(mktemp -d)
+          trap 'rm -rf "$package_dir"' EXIT
+          mkdir -p "$package_dir/Payload"
+          ditto "$app" "$package_dir/Payload/Runner.app"
+          ditto -c -k --sequesterRsrc --keepParent "$package_dir/Payload" "$ipa"
+          if [ ! -s "$ipa" ]; then
+            echo "::error::IPA was not created or is empty: $ipa"
+            exit 1
+          fi
+          if ! unzip -Z1 "$ipa" | grep '^Payload/Runner\.app/' >/dev/null; then
+            echo "::error::IPA does not contain Payload/Runner.app: $ipa"
+            exit 1
+          fi
+      - name: Upload unsigned iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: rodplayer-ios-${{ matrix.name }}-unsigned-ipa
+          path: RodPlayer-iOS-unsigned.ipa
+          if-no-files-found: error
       - name: Upload debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
