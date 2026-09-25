@@ -1,8 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
+import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
+
+import 'test_support.dart';
 
 final _claim = PrivateNetworkIdentityClaim(
   profileId: 'profile-one',
@@ -13,6 +19,453 @@ final _claim = PrivateNetworkIdentityClaim(
 
 void main() {
   group('PrivateNetworkSessionController', () {
+    test('multiple waiters share resume and wait for verified ready', () async {
+      final pending = Completer<PrivateNetworkStatus>();
+      final resumed = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeFuture: pending.future,
+        resumeStarted: resumed,
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      final first = controller.waitUntilReady();
+      final second = controller.waitUntilReady();
+      await resumed.future;
+      expect(runtime.resumeCalls, 1);
+      pending.complete(
+          _status(state: PrivateNetworkState.starting, hasIdentity: true));
+      await controller.start();
+      var completed = false;
+      first.then((_) => completed = true);
+      await Future<void>.value();
+      expect(completed, isFalse);
+      runtime.events.add(PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      }));
+      await Future.wait([first, second]);
+      expect(completed, isTrue);
+      await controller.close();
+    });
+
+    test('terminal unavailable and native failures settle readiness', () async {
+      final cases = <_FakeRuntime>[
+        _FakeRuntime(hostAvailable: false),
+        _FakeRuntime(statusError: StateError('status')),
+        _FakeRuntime(
+            statusValue:
+                _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+            resumeError: StateError('resume')),
+        _FakeRuntime(
+            statusValue: _status(
+                state: PrivateNetworkState.stopped, hasIdentity: false)),
+        _FakeRuntime(
+            statusValue:
+                _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+            resumeValue: _status(
+                state: PrivateNetworkState.unavailable,
+                hasIdentity: true,
+                reason: PrivateNetworkUnavailableReason.unknown)),
+        _FakeRuntime(
+            statusValue:
+                _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+            resumeValue:
+                _status(state: PrivateNetworkState.stopped, hasIdentity: true)),
+      ];
+      for (final runtime in cases) {
+        final controller = PrivateNetworkSessionController(runtime, _claim);
+        await expectLater(controller.waitUntilReady(),
+            throwsA(isA<PrivateNetworkException>()));
+        await controller.close();
+      }
+    });
+
+    test('terminal resume status cannot be resurrected by a late ready event',
+        () async {
+      final terminalStatuses = <PrivateNetworkStatus>[
+        _status(
+          state: PrivateNetworkState.unavailable,
+          reason: PrivateNetworkUnavailableReason.unknown,
+          hasIdentity: true,
+        ),
+        _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+      ];
+
+      for (final terminal in terminalStatuses) {
+        final runtime = _FakeRuntime(
+          statusValue:
+              _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+          resumeValue: terminal,
+        );
+        final controller = PrivateNetworkSessionController(runtime, _claim);
+        final resolver = PrivateServiceEndpointResolver(
+          canonicalBaseUrl: 'https://private.example',
+          status: controller.status,
+        );
+        var sends = 0;
+        final transport = PrivateServiceHttpClient(
+          MockClient((_) async {
+            sends++;
+            return http.Response('ok', 200);
+          }),
+          resolver,
+          waitUntilReady: controller.waitUntilReady,
+        );
+        final serviceUrl = Uri.parse('https://private.example/Items');
+
+        await expectLater(
+          controller.waitUntilReady(),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        expect(runtime.resumeCalls, 1);
+        expect(runtime.bootstrapCalls, 0);
+        expect(controller.status.value?.canProxy, isFalse);
+        expect(controller.status.value?.gatewayBaseUrl, isNull);
+        expect(
+          () => resolver.resolve(serviceUrl),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        await expectLater(
+          transport.get(serviceUrl),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        expect(sends, 0);
+
+        runtime.events.add(_ready(45000));
+
+        await expectLater(
+          controller.waitUntilReady(),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        expect(controller.status.value?.canProxy, isFalse);
+        expect(controller.status.value?.gatewayBaseUrl, isNull);
+        expect(controller.status.value?.state, terminal.state);
+        expect(
+          () => resolver.resolve(serviceUrl),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        await expectLater(
+          transport.get(serviceUrl),
+          throwsA(isA<PrivateNetworkException>()),
+        );
+        expect(sends, 0);
+
+        transport.close();
+        await controller.close();
+      }
+    });
+
+    test('close settles a waiter while native resume is still pending',
+        () async {
+      final pending = Completer<PrivateNetworkStatus>();
+      final resumed = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeFuture: pending.future,
+        resumeStarted: resumed,
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      final waiting = expectLater(
+          controller.waitUntilReady(),
+          throwsA(isA<PrivateNetworkException>().having(
+              (e) => e.failure, 'failure', PrivateNetworkFailure.closed)));
+      await resumed.future;
+      await controller.close();
+      await waiting;
+      pending.complete(
+          _status(state: PrivateNetworkState.starting, hasIdentity: true));
+    });
+
+    test('closing during a routed HTTP wait emits no request', () async {
+      final pending = Completer<PrivateNetworkStatus>();
+      final resumed = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeFuture: pending.future,
+        resumeStarted: resumed,
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      var sends = 0;
+      final transport = PrivateServiceHttpClient(
+        MockClient((_) async {
+          sends++;
+          return http.Response('{}', 200);
+        }),
+        PrivateServiceEndpointResolver(
+            canonicalBaseUrl: 'https://private.example',
+            status: controller.status),
+        waitUntilReady: controller.waitUntilReady,
+      );
+      final request = expectLater(
+          transport.get(Uri.parse('https://private.example/Items')),
+          throwsA(isA<PrivateNetworkException>().having(
+              (e) => e.failure, 'failure', PrivateNetworkFailure.closed)));
+      await resumed.future;
+      await controller.close();
+      await request;
+      pending.complete(PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      }));
+      expect(sends, 0);
+      transport.close();
+    });
+
+    test('status stream loss invalidates a previously ready gateway', () async {
+      final ready = PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      });
+      final runtime = _FakeRuntime(statusValue: ready, resumeValue: ready);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      await controller.waitUntilReady();
+      expect(controller.status.value?.canProxy, isTrue);
+      await runtime.events.close();
+      expect(controller.status.value?.canProxy, isFalse);
+      expect(controller.status.value?.unavailableReason,
+          PrivateNetworkUnavailableReason.transportFailure);
+      await controller.close();
+    });
+
+    for (final reason in <PrivateNetworkUnavailableReason>[
+      PrivateNetworkUnavailableReason.directPathUnavailable,
+      PrivateNetworkUnavailableReason.transportFailure,
+    ]) {
+      test('$reason remains pending until monitored ready', () async {
+        final transient = _unavailable(reason);
+        final runtime = _FakeRuntime(
+          statusValue: reason ==
+                  PrivateNetworkUnavailableReason.directPathUnavailable
+              ? transient
+              : _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+          resumeValue: transient,
+        );
+        final controller = PrivateNetworkSessionController(runtime, _claim);
+        final requests = <http.BaseRequest>[];
+        final transport = PrivateServiceHttpClient(
+          MockClient((request) async {
+            requests.add(request);
+            return http.Response('ok', 200);
+          }),
+          PrivateServiceEndpointResolver(
+              canonicalBaseUrl: 'https://private.example:3000',
+              status: controller.status),
+          waitUntilReady: controller.waitUntilReady,
+        );
+        await controller.start();
+        final response =
+            transport.get(Uri.parse('https://private.example:3000/Items'));
+        expect(runtime.resumeCalls, 1);
+        expect(controller.status.value, same(transient));
+        var completed = false;
+        response.then((_) => completed = true);
+        await Future<void>.value();
+        expect(completed, isFalse);
+        expect(requests, isEmpty);
+
+        runtime.events.add(_ready(45000));
+        expect((await response).body, 'ok');
+        expect(requests.single.url.host, '127.0.0.1');
+        expect(requests.single.url.port, 45000);
+        expect(requests.single.headers['host'], 'private.example:3000');
+        transport.close();
+        await controller.close();
+      });
+    }
+
+    test('two Jellyfin clients share recoverable readiness and one resume',
+        () async {
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeValue:
+            _unavailable(PrivateNetworkUnavailableReason.directPathUnavailable),
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      var sends = 0;
+      JellyfinApiClient client() {
+        final result = JellyfinApiClient(
+          baseUrl: 'https://private.example',
+          identity: testIdentity,
+          client: MockClient((request) async {
+            sends++;
+            expect(request.url.host, '127.0.0.1');
+            return http.Response('[{"Id":"user","Name":"User"}]', 200);
+          }),
+        );
+        result.usePrivateTransport(controller.status,
+            waitUntilReady: controller.waitUntilReady);
+        return result;
+      }
+
+      await controller.start();
+      final first = client();
+      final second = client();
+      final firstUsers = first.getPublicUsers();
+      final secondUsers = second.getPublicUsers();
+      expect(runtime.resumeCalls, 1);
+      expect(sends, 0);
+      runtime.events.add(_ready(45000));
+      expect((await firstUsers).single.id, 'user');
+      expect((await secondUsers).single.id, 'user');
+      expect(sends, 2);
+      first.close();
+      second.close();
+      await controller.close();
+    });
+
+    test('no identity and unavailable host settle without an HTTP send',
+        () async {
+      for (final runtime in <_FakeRuntime>[
+        _FakeRuntime(
+            statusValue: _status(
+          state: PrivateNetworkState.unavailable,
+          reason: PrivateNetworkUnavailableReason.noIdentity,
+          hasIdentity: false,
+        )),
+        _FakeRuntime(
+            statusValue:
+                _unavailable(PrivateNetworkUnavailableReason.hostUnavailable)),
+        _FakeRuntime(hostAvailable: false),
+      ]) {
+        final controller = PrivateNetworkSessionController(runtime, _claim);
+        var sends = 0;
+        final transport = PrivateServiceHttpClient(
+          MockClient((_) async {
+            sends++;
+            return http.Response('ok', 200);
+          }),
+          PrivateServiceEndpointResolver(
+              canonicalBaseUrl: 'https://private.example',
+              status: controller.status),
+          waitUntilReady: controller.waitUntilReady,
+        );
+        await expectLater(
+            transport.get(Uri.parse('https://private.example/Items')),
+            throwsA(isA<PrivateNetworkException>()));
+        expect(runtime.resumeCalls, 0);
+        expect(sends, 0);
+        transport.close();
+        await controller.close();
+      }
+    });
+
+    test('ready, unavailable, then rotated ready uses live gateway', () async {
+      final runtime =
+          _FakeRuntime(statusValue: _ready(45000), resumeValue: _ready(45000));
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      final ports = <int>[];
+      final transport = PrivateServiceHttpClient(
+        MockClient((request) async {
+          ports.add(request.url.port);
+          return http.Response('ok', 200);
+        }),
+        PrivateServiceEndpointResolver(
+            canonicalBaseUrl: 'https://private.example',
+            status: controller.status),
+        waitUntilReady: controller.waitUntilReady,
+      );
+      final url = Uri.parse('https://private.example/Items');
+      await controller.waitUntilReady();
+      await transport.get(url);
+      runtime.events.add(
+          _unavailable(PrivateNetworkUnavailableReason.directPathUnavailable));
+      await expectLater(
+          transport.get(url), throwsA(isA<PrivateNetworkException>()));
+      runtime.events.add(_ready(46000));
+      await transport.get(url);
+      expect(ports, [45000, 46000]);
+      transport.close();
+      await controller.close();
+    });
+
+    test('close during recoverable unavailability cancels the HTTP waiter',
+        () async {
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeValue:
+            _unavailable(PrivateNetworkUnavailableReason.directPathUnavailable),
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      var sends = 0;
+      final transport = PrivateServiceHttpClient(
+        MockClient((_) async {
+          sends++;
+          return http.Response('ok', 200);
+        }),
+        PrivateServiceEndpointResolver(
+            canonicalBaseUrl: 'https://private.example',
+            status: controller.status),
+        waitUntilReady: controller.waitUntilReady,
+      );
+      await controller.start();
+      final waiting = expectLater(
+          transport.get(Uri.parse('https://private.example/Items')),
+          throwsA(isA<PrivateNetworkException>().having(
+              (e) => e.failure, 'failure', PrivateNetworkFailure.closed)));
+      expect(controller.status.value?.unavailableReason,
+          PrivateNetworkUnavailableReason.directPathUnavailable);
+      expect(sends, 0);
+      await controller.close();
+      await waiting;
+      runtime.events.add(_ready(45000));
+      expect(sends, 0);
+      transport.close();
+    });
+
+    test('status channel error cannot reauthorize a later event', () async {
+      final ready = PrivateNetworkStatus.fromPayload({
+        'state': 'ready',
+        'path': 'direct',
+        'hasPersistedIdentity': true,
+        'reason': 'none',
+        'gatewayUrl': 'http://127.0.0.1:45000',
+      });
+      final runtime = _FakeRuntime(statusValue: ready, resumeValue: ready);
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      await controller.waitUntilReady();
+      runtime.events.addError(StateError('channel'));
+      runtime.events.add(ready);
+      expect(controller.status.value?.canProxy, isFalse);
+      await controller.close();
+    });
+
+    test('status channel failure during resume cannot publish late ready',
+        () async {
+      final pending = Completer<PrivateNetworkStatus>();
+      final resumed = Completer<void>();
+      final runtime = _FakeRuntime(
+        statusValue:
+            _status(state: PrivateNetworkState.stopped, hasIdentity: true),
+        resumeFuture: pending.future,
+        resumeStarted: resumed,
+      );
+      final controller = PrivateNetworkSessionController(runtime, _claim);
+      final start = controller.start();
+      await resumed.future;
+      runtime.events.addError(StateError('channel'));
+      pending.complete(_ready(45000));
+      await start;
+      runtime.events.add(_ready(45000));
+      expect(controller.status.value?.canProxy, isFalse);
+      await expectLater(
+          controller.waitUntilReady(), throwsA(isA<PrivateNetworkException>()));
+      await controller.close();
+    });
+
     test('cached ready gateway is withheld until profile ownership verifies',
         () async {
       final pending = Completer<PrivateNetworkStatus>();
@@ -387,6 +840,20 @@ void main() {
     });
   });
 }
+
+PrivateNetworkStatus _ready(int port) => PrivateNetworkStatus.fromPayload({
+      'state': 'ready',
+      'path': 'direct',
+      'hasPersistedIdentity': true,
+      'reason': 'none',
+      'gatewayUrl': 'http://127.0.0.1:$port',
+    });
+
+PrivateNetworkStatus _unavailable(PrivateNetworkUnavailableReason reason) =>
+    _status(
+        state: PrivateNetworkState.unavailable,
+        reason: reason,
+        hasIdentity: true);
 
 PrivateNetworkStatus _status({
   required PrivateNetworkState state,

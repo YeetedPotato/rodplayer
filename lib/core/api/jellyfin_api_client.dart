@@ -106,10 +106,12 @@ class JellyfinApiClient {
   bool get usesPrivateTransport => _privateResolver != null;
   ValueListenable<PrivateNetworkStatus?>? get privateNetworkStatus => _privateResolver?.status;
 
-  void usePrivateTransport(ValueListenable<PrivateNetworkStatus?> status) {
+  void usePrivateTransport(ValueListenable<PrivateNetworkStatus?> status,
+      {Future<void> Function()? waitUntilReady}) {
     final resolver = PrivateServiceEndpointResolver(canonicalBaseUrl: baseUrl, status: status);
     _privateResolver = resolver;
-    _privateClient = PrivateServiceHttpClient(_rawClient, resolver);
+    _privateClient = PrivateServiceHttpClient(_rawClient, resolver,
+        waitUntilReady: waitUntilReady);
   }
 
   Uri resolveServiceUri(Uri canonicalUrl) => _privateResolver?.resolve(canonicalUrl) ?? canonicalUrl;

@@ -26,6 +26,7 @@ enum PrivateNetworkFailure {
   hostUnavailable,
   operationFailed,
   invalidNativeResponse,
+  closed,
 }
 
 class PrivateNetworkException implements Exception {

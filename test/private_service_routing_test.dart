@@ -33,6 +33,60 @@ const unavailable = PrivateNetworkStatus(
 );
 
 void main() {
+  test('private request waits, then routes through the current gateway',
+      () async {
+    final readiness = Completer<void>();
+    final status = ValueNotifier<PrivateNetworkStatus?>(null);
+    final sent = <http.Request>[];
+    final client = JellyfinApiClient(
+      baseUrl: canonical,
+      identity: testIdentity,
+      client: MockClient((request) async {
+        sent.add(request);
+        return http.Response(jsonEncode({'Id': 'movie', 'Type': 'Movie'}), 200);
+      }),
+    )..userId = 'user';
+    client.usePrivateTransport(status, waitUntilReady: () => readiness.future);
+    final item = client.getItem('movie');
+    await Future<void>.value();
+    expect(sent, isEmpty);
+    status.value = ready(41001);
+    readiness.complete();
+    expect((await item).id, 'movie');
+    expect(sent.single.url.host, '127.0.0.1');
+    expect(sent.single.url.port, 41001);
+    expect(sent.single.headers['host'], 'media.example.test');
+    status.value = unavailable;
+    await expectLater(
+        client.getItem('movie'), throwsA(isA<PrivateNetworkException>()));
+    expect(sent, hasLength(1));
+    client.close();
+    status.dispose();
+  });
+
+  test('readiness failure sends no canonical or gateway request', () async {
+    final readiness = Completer<void>();
+    final status = ValueNotifier<PrivateNetworkStatus?>(null);
+    var sends = 0;
+    final client = JellyfinApiClient(
+        baseUrl: canonical,
+        identity: testIdentity,
+        client: MockClient((_) async {
+          sends++;
+          return http.Response('{}', 200);
+        }));
+    client.usePrivateTransport(status, waitUntilReady: () => readiness.future);
+    final request = client.getPublicUsers();
+    await Future<void>.value();
+    expect(sends, 0);
+    readiness.completeError(
+        const PrivateNetworkException(PrivateNetworkFailure.operationFailed));
+    await expectLater(request, throwsA(isA<PrivateNetworkException>()));
+    expect(sends, 0);
+    client.close();
+    status.dispose();
+  });
+
   test('association is explicit, profile-specific and stores no gateway',
       () async {
     SharedPreferences.setMockInitialValues(

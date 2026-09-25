@@ -180,7 +180,8 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
       }
       final network = _privateNetwork!;
       unawaited(network.start());
-      client.usePrivateTransport(network.status);
+      client.usePrivateTransport(network.status,
+          waitUntilReady: network.waitUntilReady);
     } else if (association.kind != PrivateTransportAssociationKind.none) {
       client.usePrivateTransport(_unavailablePrivateStatus);
     }

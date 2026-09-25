@@ -48,17 +48,20 @@ class PrivateServiceEndpointResolver {
 
 /// Routes at send time and handles redirects without an automatic escape.
 class PrivateServiceHttpClient extends http.BaseClient {
-  PrivateServiceHttpClient(this._inner, this._resolver);
+  PrivateServiceHttpClient(this._inner, this._resolver, {this.waitUntilReady});
 
   final http.Client _inner;
   final PrivateServiceEndpointResolver _resolver;
+  final Future<void> Function()? waitUntilReady;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    await waitUntilReady?.call();
     var canonicalUrl = request.url;
     var currentRequest = request;
     var redirects = 0;
     while (true) {
+      // Read the current gateway after readiness, including on redirects.
       final destination = _resolver.resolve(canonicalUrl);
       final response = await _inner.send(
         _TransportRequest(currentRequest, destination),

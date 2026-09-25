@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,89 @@ import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('login discovery and sign-in share one pending private session',
+      (tester) async {
+    const server = 'https://server';
+    SharedPreferences.setMockInitialValues({
+      CredentialMigration.serverUrlKey: server,
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await PrivateTransportProfileStore(prefs).put(_profile('owner:one'));
+    await PrivateTransportProfileAssociation(prefs)
+        .associate(server, 'owner:one');
+    final resume = Completer<PrivateNetworkStatus>();
+    final resumeStarted = Completer<void>();
+    final runtime = _RootPrivateNetworkRuntime(
+        resumePending: resume.future, resumeStarted: resumeStarted);
+    final requests = <http.Request>[];
+    var runtimeCreations = 0;
+    final clients = <JellyfinApiClient>[];
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: MemoryCredentialStore(),
+      privateNetworkRuntimeFactory: () {
+        runtimeCreations++;
+        return runtime;
+      },
+      clientFactory: (url, identity) {
+        final client = JellyfinApiClient(
+          baseUrl: url,
+          identity: identity,
+          client: http_testing.MockClient((request) async {
+            requests.add(request);
+            if (request.url.path.endsWith('/Users/Public')) {
+              return http.Response('[{"Id":"user","Name":"Alice"}]', 200);
+            }
+            if (request.url.path.endsWith('/Users/AuthenticateByName')) {
+              return http.Response('{"AccessToken":"token","User":{"Id":"user"}}', 200);
+            }
+            if (request.url.path.endsWith('/Users/user')) {
+              return http.Response('{"Id":"user","Name":"Alice"}', 200);
+            }
+            return http.Response('{"Items":[]}', 200);
+          }),
+        );
+        clients.add(client);
+        return client;
+      },
+    ));
+    await tester.pump();
+    await tester.pump();
+    await resumeStarted.future;
+    expect(requests, isEmpty);
+    expect(find.text('Could not load public profiles.'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'Alice');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pump();
+    expect(requests, isEmpty);
+    expect(runtimeCreations, 1);
+    expect(runtime.resumeCalls, 1);
+    expect(clients, hasLength(2));
+
+    resume.complete(const PrivateNetworkStatus(
+      state: PrivateNetworkState.starting,
+      path: PrivateNetworkPath.none,
+      hasPersistedIdentity: true,
+      unavailableReason: PrivateNetworkUnavailableReason.none,
+    ));
+    await tester.pump();
+    expect(requests, isEmpty);
+    runtime.events.add(PrivateNetworkStatus.fromPayload({
+      'state': 'ready', 'path': 'direct', 'hasPersistedIdentity': true,
+      'reason': 'none', 'gatewayUrl': 'http://127.0.0.1:45000',
+    }));
+    await tester.pumpAndSettle();
+    expect(requests.where((r) => r.url.path == '/Users/Public'), hasLength(1));
+    expect(requests.where((r) => r.url.path == '/Users/AuthenticateByName'),
+        hasLength(1));
+    expect(requests, everyElement(isA<http.Request>().having(
+        (r) => r.url.host, 'host', '127.0.0.1')));
+    expect(requests.first.headers['host'], 'server');
+    expect(find.byType(RodPlayerAppShell), findsOneWidget);
+    expect(runtimeCreations, 1);
+    expect(runtime.resumeCalls, 1);
+  });
+
   testWidgets(
     'ordinary public app does not start or enroll a private identity',
     (tester) async {
@@ -232,6 +316,8 @@ void main() {
       expect(factoryCalls, 0);
       expect(client.usesPrivateTransport, isTrue);
       expect(() => client.resolveServiceUri(Uri.parse('https://server/Items')),
+          throwsA(isA<PrivateNetworkException>()));
+      await expectLater(client.getPublicUsers(),
           throwsA(isA<PrivateNetworkException>()));
     });
   }
@@ -471,9 +557,13 @@ class _RootClient extends JellyfinApiClient {
 }
 
 class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
-  _RootPrivateNetworkRuntime({this.allowedProfileId});
+  _RootPrivateNetworkRuntime({this.allowedProfileId, this.resumePending,
+      this.resumeStarted});
 
   final String? allowedProfileId;
+  final Future<PrivateNetworkStatus>? resumePending;
+  final Completer<void>? resumeStarted;
+  final events = StreamController<PrivateNetworkStatus>.broadcast(sync: true);
   PrivateNetworkIdentityClaim? lastClaim;
   int resumeCalls = 0;
   int bootstrapCalls = 0;
@@ -497,15 +587,17 @@ class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
   Future<PrivateNetworkStatus> resume(PrivateNetworkIdentityClaim claim) async {
     lastClaim = claim;
     resumeCalls++;
+    resumeStarted?.complete();
     if (allowedProfileId != null && allowedProfileId != claim.profileId) {
       throw const PrivateNetworkException(
           PrivateNetworkFailure.operationFailed);
     }
+    if (resumePending != null) return resumePending!;
     return const PrivateNetworkStatus(
-      state: PrivateNetworkState.starting,
+      state: PrivateNetworkState.unavailable,
       path: PrivateNetworkPath.none,
       hasPersistedIdentity: true,
-      unavailableReason: PrivateNetworkUnavailableReason.none,
+      unavailableReason: PrivateNetworkUnavailableReason.hostUnavailable,
     );
   }
 
@@ -518,8 +610,7 @@ class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
       );
 
   @override
-  Stream<PrivateNetworkStatus> get statuses =>
-      const Stream<PrivateNetworkStatus>.empty();
+  Stream<PrivateNetworkStatus> get statuses => events.stream;
 
   @override
   Future<void> stop() async {}
