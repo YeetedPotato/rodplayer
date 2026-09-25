@@ -32,8 +32,9 @@ def copy(src: str, dst: str) -> None:
 
 def append_apple_gateway(dst: str) -> None:
     target = ROOT / dst
+    ownership = (HOSTS / "apple" / "ApplePrivateNetworkBootstrapOwnership.swift").read_text()
     gateway = (HOSTS / "apple" / "AppleLoopbackGateway.swift").read_text()
-    target.write_text(target.read_text().rstrip() + "\n\n" + gateway)
+    target.write_text(target.read_text().rstrip() + "\n\n" + ownership + "\n\n" + gateway)
 
 
 def patch_windows_cmake() -> None:

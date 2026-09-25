@@ -8,6 +8,32 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('strict v1 invitation document contains no setup credential', () {
+    const valid = '{"version":1,"profileId":"owner:one",'
+        '"displayName":"Family","enrollmentEndpoint":"https://owner.example/v1/enroll"}';
+    final invitation = PrivateTransportInvitation.parse(valid);
+    expect(invitation.profileId, 'owner:one');
+    expect(invitation.enrollmentEndpoint.toString(),
+        'https://owner.example/v1/enroll');
+    for (final invalid in [
+      '{}',
+      '{"version":2,"profileId":"owner:one","displayName":"Family",'
+          '"enrollmentEndpoint":"https://owner.example/v1/enroll"}',
+      '{"version":1.0,"profileId":"owner:one","displayName":"Family",'
+          '"enrollmentEndpoint":"https://owner.example/v1/enroll"}',
+      '{"version":1,"profileId":"owner:one","displayName":"Family",'
+          '"enrollmentEndpoint":"http://owner.example/v1/enroll"}',
+      '{"version":1,"profileId":"owner:one","displayName":"Family",'
+          '"enrollmentEndpoint":"https://owner.example/v1/enroll",'
+          '"setupCode":"secret"}',
+      '{"version":1,"displayName":"Family",'
+          '"enrollmentEndpoint":"https://owner.example/v1/enroll"}',
+    ]) {
+      expect(() => PrivateTransportInvitation.parse(invalid),
+          throwsFormatException);
+    }
+  });
+
   PrivateTransportProfile profile(String id,
           {String host = '100.64.0.1',
           String control = 'https://control.example.test'}) =>

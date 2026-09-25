@@ -18,9 +18,55 @@ class PrivateTransportProfileAssociation {
   const PrivateTransportProfileAssociation(this.preferences);
 
   static const preferenceKey = 'rodplayer_server_private_transport_profile';
+  static const pendingSetupKey = 'rodplayer_private_transport_setup_pending';
   final SharedPreferences preferences;
 
+  static String pendingSetupRecord(String serverUrl, String profileId) =>
+      jsonEncode(
+          {'version': 1, 'serverUrl': serverUrl, 'profileId': profileId});
+
+  static String associationRecord(String serverUrl, String profileId) =>
+      jsonEncode({'serverUrl': serverUrl, 'profileId': profileId});
+
+  static bool validCanonicalServerUrl(String value) {
+    if (value.isEmpty || value != value.trim()) return false;
+    final url = Uri.tryParse(value);
+    return url != null &&
+        {'http', 'https'}.contains(url.scheme) &&
+        url.host.isNotEmpty &&
+        url.userInfo.isEmpty &&
+        !url.hasQuery &&
+        !url.hasFragment;
+  }
+
   PrivateTransportAssociationLookup lookupFor(String canonicalServerUrl) {
+    if (preferences.containsKey(pendingSetupKey)) {
+      try {
+        final pending = jsonDecode(preferences.get(pendingSetupKey) as String);
+        if (pending is! Map<String, dynamic> ||
+            pending.length != 3 ||
+            pending['version'] is! int ||
+            pending['version'] != 1 ||
+            pending['serverUrl'] is! String ||
+            !validCanonicalServerUrl(pending['serverUrl'] as String) ||
+            pending['profileId'] is! String ||
+            !RegExp(r'^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$')
+                .hasMatch(pending['profileId'] as String) ||
+            pending.keys.any((key) =>
+                !{'version', 'serverUrl', 'profileId'}.contains(key))) {
+          return const PrivateTransportAssociationLookup(
+              PrivateTransportAssociationKind.invalid);
+        }
+        if (pending['serverUrl'] == canonicalServerUrl) {
+          return const PrivateTransportAssociationLookup(
+              PrivateTransportAssociationKind.invalid);
+        }
+      } catch (_) {
+        // A damaged pending transaction cannot authorize direct routing.
+        return const PrivateTransportAssociationLookup(
+            PrivateTransportAssociationKind.invalid);
+      }
+    }
     final saved = preferences.getString(CredentialMigration.serverUrlKey);
     if (saved != canonicalServerUrl ||
         !preferences.containsKey(preferenceKey)) {
@@ -67,12 +113,11 @@ class PrivateTransportProfileAssociation {
         canonicalServerUrl) {
       throw StateError('The canonical server must be saved first.');
     }
-    await preferences.setString(
-        preferenceKey,
-        jsonEncode({
-          'serverUrl': canonicalServerUrl,
-          'profileId': profileId,
-        }));
+    final saved = await preferences.setString(
+        preferenceKey, associationRecord(canonicalServerUrl, profileId));
+    if (!saved) {
+      throw StateError('Could not save private transport association');
+    }
   }
 
   Future<void> clear() => preferences.remove(preferenceKey);

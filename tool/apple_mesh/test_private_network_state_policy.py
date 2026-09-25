@@ -14,6 +14,7 @@ HOSTS = (
     ROOT / "tool" / "native_hosts" / "macos" / "MainFlutterWindow.swift",
 )
 GATEWAY = ROOT / "tool" / "native_hosts" / "apple" / "AppleLoopbackGateway.swift"
+OWNERSHIP = ROOT / "tool" / "native_hosts" / "apple" / "ApplePrivateNetworkBootstrapOwnership.swift"
 
 
 def private_network_source(path: Path) -> str:
@@ -61,9 +62,13 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("case nodeAlreadyActive", source)
             self.assertIn("case startFailed", source)
             bootstrap = owner[owner.index("func bootstrap(metadata"):owner.index("func resume(claim:")]
-            self.assertLess(bootstrap.index("guard !stateStore.hasPersistedIdentity"), bootstrap.index("try stateStore.write(metadata: metadata)"))
+            self.assertIn("var ownership = try ApplePrivateNetworkBootstrapOwnership(", bootstrap)
+            self.assertIn("hasActiveNode: activeNode != nil", bootstrap)
+            self.assertIn("hasPersistedIdentity: stateStore.hasPersistedIdentity", bootstrap)
             self.assertLess(bootstrap.index("try stateStore.write(metadata: metadata)"), bootstrap.index("try await startLocked"))
-            self.assertLess(owner.index("guard activeNode == nil"), owner.index("activeNode = node"))
+            self.assertIn("ownership.acquiredNode()", bootstrap)
+            self.assertIn("ownership.completed()", bootstrap)
+            self.assertIn("ownership.takeCleanup(activeNode: activeNode != nil)", bootstrap)
             self.assertLess(owner.index("activeNode = node"), owner.index("try await node.up()"))
             start = owner[owner.index("private func startLocked"):owner.index("func stop()")]
             self.assertIn("try await node.close()", start)
@@ -78,7 +83,16 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
             self.assertIn("for _ in 0 ..< 20", source)
             self.assertIn("Task.sleep(nanoseconds: 50_000_000)", source)
             self.assertIn("guard try await stateStore.waitForPersistedIdentity() else", bootstrap)
-            self.assertIn("try await stopLocked()", bootstrap)
+            self.assertLess(bootstrap.index("var ownership = try"), bootstrap.index("do {\n      try await startLocked"))
+            self.assertLess(bootstrap.index("try await startLocked"), bootstrap.index("guard try await stateStore.waitForPersistedIdentity() else"))
+            self.assertLess(bootstrap.index("try await startLocked"), bootstrap.index("ownership.acquiredNode()"))
+            self.assertLess(bootstrap.index("guard try await stateStore.waitForPersistedIdentity() else"), bootstrap.index("try startGatewayLocked"))
+            self.assertLess(bootstrap.index("try startGatewayLocked"), bootstrap.index("let status = await startMonitorLocked()"))
+            self.assertLess(bootstrap.index("let status = await startMonitorLocked()"), bootstrap.index("ownership.completed()"))
+            failure = bootstrap[bootstrap.index("    } catch {"):]
+            self.assertIn("if ownership.takeCleanup(activeNode: activeNode != nil) { try? await stopLocked() }", failure)
+            self.assertIn("throw error", failure)
+            self.assertNotIn("stateStore.reset()", bootstrap)
 
     def test_configuration_and_initialization_failure_are_truthful(self) -> None:
         for path in HOSTS:
@@ -314,10 +328,15 @@ class PrivateNetworkStatePolicyTest(unittest.TestCase):
                     target.parent.mkdir(parents=True)
                     target.write_text("// generated host\n")
                     generator.append_apple_gateway(f"{platform}/Runner/{name}")
-                    self.assertEqual(target.read_text(), "// generated host\n\n" + GATEWAY.read_text())
+                    self.assertEqual(target.read_text(), "// generated host\n\n" + OWNERSHIP.read_text() + "\n\n" + GATEWAY.read_text())
         generator_source = (ROOT / "tool" / "apply_native_hosts.py").read_text()
         self.assertIn('append_apple_gateway("ios/Runner/AppDelegate.swift")', generator_source)
         self.assertIn('append_apple_gateway("macos/Runner/MainFlutterWindow.swift")', generator_source)
+        workflow = (ROOT / ".github" / "workflows" / "build-multiplatform.yml").read_text()
+        self.assertIn("bash tool/apple_mesh/test_bootstrap_ownership.sh", workflow)
+        harness = (ROOT / "tool" / "apple_mesh" / "test_bootstrap_ownership.sh").read_text()
+        self.assertIn("swiftc -parse-as-library", harness)
+        self.assertIn("ApplePrivateNetworkBootstrapOwnership.swift", harness)
 
     def test_ready_requires_current_direct_peer_and_lifecycle_owned_listener(self) -> None:
         for path in HOSTS:

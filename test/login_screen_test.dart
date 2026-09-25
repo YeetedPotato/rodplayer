@@ -14,23 +14,127 @@ import 'test_support.dart';
 void main() {
   Widget app(Widget child, {double textScale = 1}) => MaterialApp(
         theme: rodPlayerThemeData(),
-        home: Builder(builder: (context) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)), child: child)),
+        home: Builder(
+            builder: (context) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(textScale)),
+                child: child)),
       );
 
-  testWidgets('initial server loads public profiles and profile selection fills username', (tester) async {
+  testWidgets('private setup validates URL and cancel does not configure',
+      (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(app(LoginScreen(
+      identity: testIdentity,
+      onAuthenticated: (_, __) async {},
+      onConfigurePrivateAccess: (_, __, ___) async {
+        calls++;
+      },
+    )));
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
+    await tester.pump();
+    expect(find.text('Enter a valid server URL first.'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Server URL'), 'https://server.example');
+    await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Invitation'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Setup code'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(calls, 0);
+  });
+
+  testWidgets('private setup passes exact input and reloads profiles',
+      (tester) async {
+    final calls = <String>[];
+    var profileLoads = 0;
+    await tester.pumpWidget(app(LoginScreen(
+      identity: testIdentity,
+      clientFactory: (_, __) {
+        profileLoads++;
+        return _LoginClient(
+            publicUsers: const [JellyfinUserProfile(id: 'u', name: 'Alice')]);
+      },
+      onAuthenticated: (_, __) async {},
+      onConfigurePrivateAccess: (url, invitation, code) async {
+        calls.add('$url|$invitation|$code');
+      },
+    )));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Server URL'), 'https://server.example');
+    await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Invitation'), '{"version":1}');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Setup code'), 'one-use-code');
+    await tester
+        .tap(find.widgetWithText(FilledButton, 'Configure private access'));
+    await tester.pumpAndSettle();
+    expect(calls, ['https://server.example|{"version":1}|one-use-code']);
+    expect(find.text('Private access configured.'), findsOneWidget);
+    expect(find.text('Alice'), findsOneWidget);
+    expect(profileLoads, 1);
+    expect(find.widgetWithText(TextField, 'https://server.example'),
+        findsOneWidget);
+  });
+
+  for (final detail in [
+    'sensitive-native-detail',
+    'sensitive-cancellation-detail'
+  ]) {
+    testWidgets('private setup failure hides $detail', (tester) async {
+      await tester.pumpWidget(app(LoginScreen(
+        identity: testIdentity,
+        onAuthenticated: (_, __) async {},
+        onConfigurePrivateAccess: (_, __, ___) async =>
+            throw StateError(detail),
+      )));
+      await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
+          'https://server.example');
+      await tester
+          .tap(find.widgetWithText(TextButton, 'Set up private access'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Invitation'), 'invite');
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Setup code'), 'code');
+      await tester
+          .tap(find.widgetWithText(FilledButton, 'Configure private access'));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('Private access setup failed.'), findsOneWidget);
+      expect(find.textContaining(detail), findsNothing);
+      expect(
+          tester
+              .widget<TextField>(find.widgetWithText(TextField, 'Setup code'))
+              .controller!
+              .text,
+          isEmpty);
+    });
+  }
+
+  testWidgets(
+      'initial server loads public profiles and profile selection fills username',
+      (tester) async {
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
       initialServerUrl: 'https://server/jellyfin',
       clientFactory: (url, identity) {
-        final client = _LoginClient(publicUsers: <JellyfinUserProfile>[const JellyfinUserProfile(id: 'u', name: 'Alice')]);
+        final client = _LoginClient(publicUsers: <JellyfinUserProfile>[
+          const JellyfinUserProfile(id: 'u', name: 'Alice')
+        ]);
         clients.add(client);
         return client;
       },
       onAuthenticated: (_, __) async {},
     )));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'https://server/jellyfin'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'https://server/jellyfin'),
+        findsOneWidget);
     expect(find.text('Alice'), findsOneWidget);
     await tester.tap(find.text('Alice'));
     await tester.pump();
@@ -38,7 +142,8 @@ void main() {
     expect(clients.single.closed, isTrue);
   });
 
-  testWidgets('empty password auth is allowed and malformed input is rejected', (tester) async {
+  testWidgets('empty password auth is allowed and malformed input is rejected',
+      (tester) async {
     JellyfinApiClient? authed;
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
@@ -50,43 +155,54 @@ void main() {
     await tester.pump();
     expect(find.text('Enter a valid server URL and username.'), findsOneWidget);
 
-    await tester.enterText(find.widgetWithText(TextField, 'Server URL'), 'server');
-    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'passwordless');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Server URL'), 'server');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Username'), 'passwordless');
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
     expect(authed, isNotNull);
     expect((authed as _LoginClient).passwords, <String>['']);
   });
 
-  testWidgets('profile discovery failure does not block manual login and compact layout is stable', (tester) async {
+  testWidgets(
+      'profile discovery failure does not block manual login and compact layout is stable',
+      (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 760);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     JellyfinApiClient? authed;
     var created = 0;
-    await tester.pumpWidget(app(LoginScreen(
-      identity: testIdentity,
-      initialServerUrl: 'https://server',
-      clientFactory: (_, __) => _LoginClient(failPublic: created++ == 0),
-      onAuthenticated: (_, client) async => authed = client,
-    ), textScale: 1.25));
+    await tester.pumpWidget(app(
+        LoginScreen(
+          identity: testIdentity,
+          initialServerUrl: 'https://server',
+          clientFactory: (_, __) => _LoginClient(failPublic: created++ == 0),
+          onAuthenticated: (_, client) async => authed = client,
+        ),
+        textScale: 1.25));
     await tester.pumpAndSettle();
     expect(find.text('Could not load public profiles.'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'manual');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Username'), 'manual');
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
     expect(authed, isNotNull);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('public profiles are scoped to current server URL', (tester) async {
+  testWidgets('public profiles are scoped to current server URL',
+      (tester) async {
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
       initialServerUrl: 'https://server-a',
       clientFactory: (url, __) {
-        final client = _LoginClient(publicUsers: <JellyfinUserProfile>[JellyfinUserProfile(id: url, name: url.contains('server-a') ? 'Alice' : 'Bob')]);
+        final client = _LoginClient(publicUsers: <JellyfinUserProfile>[
+          JellyfinUserProfile(
+              id: url, name: url.contains('server-a') ? 'Alice' : 'Bob')
+        ]);
         clients.add(client);
         return client;
       },
@@ -95,7 +211,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Alice'), findsOneWidget);
 
-    await tester.enterText(find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
     await tester.pump();
     expect(find.text('Alice'), findsNothing);
     expect(clients.length, 1);
@@ -105,28 +222,38 @@ void main() {
     expect(find.text('Bob'), findsOneWidget);
   });
 
-  testWidgets('slow old public profile response is ignored after URL edit', (tester) async {
+  testWidgets('slow old public profile response is ignored after URL edit',
+      (tester) async {
     final slow = Completer<List<JellyfinUserProfile>>();
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
       initialServerUrl: 'https://server-a',
       clientFactory: (url, __) {
-        final client = _LoginClient(publicFuture: clients.isEmpty ? slow.future : Future<List<JellyfinUserProfile>>.value(<JellyfinUserProfile>[const JellyfinUserProfile(id: 'b', name: 'Bob')]));
+        final client = _LoginClient(
+            publicFuture: clients.isEmpty
+                ? slow.future
+                : Future<List<JellyfinUserProfile>>.value(<JellyfinUserProfile>[
+                    const JellyfinUserProfile(id: 'b', name: 'Bob')
+                  ]));
         clients.add(client);
         return client;
       },
       onAuthenticated: (_, __) async {},
     )));
     await tester.pump();
-    await tester.enterText(find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Server URL'), 'https://server-b');
     await tester.pump();
-    slow.complete(<JellyfinUserProfile>[const JellyfinUserProfile(id: 'a', name: 'Alice')]);
+    slow.complete(<JellyfinUserProfile>[
+      const JellyfinUserProfile(id: 'a', name: 'Alice')
+    ]);
     await tester.pumpAndSettle();
     expect(find.text('Alice'), findsNothing);
     expect(find.text('Bob'), findsNothing);
 
-    await tester.enterText(find.widgetWithText(TextField, 'Username'), 'manual');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Username'), 'manual');
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
     expect(clients.length, 2);
@@ -135,8 +262,15 @@ void main() {
 }
 
 class _LoginClient extends JellyfinApiClient {
-  _LoginClient({this.publicUsers = const <JellyfinUserProfile>[], this.publicFuture, this.failPublic = false})
-      : super(baseUrl: 'https://server', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+  _LoginClient(
+      {this.publicUsers = const <JellyfinUserProfile>[],
+      this.publicFuture,
+      this.failPublic = false})
+      : super(
+            baseUrl: 'https://server',
+            identity: testIdentity,
+            client:
+                http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final List<JellyfinUserProfile> publicUsers;
   final Future<List<JellyfinUserProfile>>? publicFuture;
@@ -153,7 +287,8 @@ class _LoginClient extends JellyfinApiClient {
   }
 
   @override
-  Future<void> authenticate({required String username, required String password}) async {
+  Future<void> authenticate(
+      {required String username, required String password}) async {
     passwords.add(password);
     accessToken = 'token';
     userId = 'user';

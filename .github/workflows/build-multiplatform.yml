@@ -147,6 +147,8 @@ jobs:
         with: {go-version: '1.25.5'}
       - name: Verify Apple SDK policy
         run: python3 tool/apple_mesh/verify_apple_toolchain.py --xcode-major ${{ matrix.xcode_major }} --ios-sdk-major ${{ matrix.ios_sdk_major }} --macos-sdk-major ${{ matrix.macos_sdk_major }} --go-version 1.25.5
+      - name: Verify shared native bootstrap ownership
+        run: bash tool/apple_mesh/test_bootstrap_ownership.sh
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
       - name: Build pinned macOS TailscaleKit framework

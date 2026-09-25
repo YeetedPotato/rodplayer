@@ -188,6 +188,34 @@ class PrivateTransportInvitation {
   final String displayName;
   final Uri enrollmentEndpoint;
 
+  static PrivateTransportInvitation parse(String document) {
+    try {
+      final value = jsonDecode(document);
+      if (value is! Map<String, dynamic> ||
+          value.length != 4 ||
+          value['version'] is! int ||
+          value['version'] != 1 ||
+          value['profileId'] is! String ||
+          value['displayName'] is! String ||
+          value['enrollmentEndpoint'] is! String ||
+          value.keys.any((key) => !{
+                'version',
+                'profileId',
+                'displayName',
+                'enrollmentEndpoint',
+              }.contains(key))) {
+        throw const FormatException();
+      }
+      return PrivateTransportInvitation(
+        profileId: value['profileId'] as String,
+        displayName: value['displayName'] as String,
+        enrollmentEndpoint: Uri.parse(value['enrollmentEndpoint'] as String),
+      );
+    } catch (_) {
+      throw const FormatException('Invalid private transport invitation');
+    }
+  }
+
   PrivateTransportProfile profileFrom(FamilyEnrollmentResult enrollment) =>
       PrivateTransportProfile.fromEnrollment(
         id: profileId,
@@ -259,11 +287,17 @@ class PrivateTransportProfileStore {
     await _write(all().where((profile) => profile.id != id).toList());
   }
 
-  Future<void> _write(List<PrivateTransportProfile> profiles) =>
-      preferences.setString(
-          preferenceKey,
-          jsonEncode({
-            'version': 1,
-            'profiles': profiles.map((profile) => profile.toJson()).toList(),
-          }));
+  Future<void> _write(List<PrivateTransportProfile> profiles) => preferences
+          .setString(
+              preferenceKey,
+              jsonEncode({
+                'version': 1,
+                'profiles':
+                    profiles.map((profile) => profile.toJson()).toList(),
+              }))
+          .then((saved) {
+        if (!saved) {
+          throw StateError('Could not save private transport profiles');
+        }
+      });
 }

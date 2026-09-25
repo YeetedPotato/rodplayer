@@ -7,6 +7,8 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
+import 'package:rodplayer/core/network/family_enrollment.dart';
+import 'package:rodplayer/core/network/managed_private_transport_setup.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
 import 'package:rodplayer/core/network/private_transport_profile.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
@@ -38,6 +40,7 @@ class RodPlayerApp extends StatelessWidget {
     required this.credentialStore,
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
+    this.enrollmentClientFactory = _defaultEnrollmentClientFactory,
     super.key,
   });
 
@@ -45,6 +48,7 @@ class RodPlayerApp extends StatelessWidget {
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
+  final EnrollmentClientFactory enrollmentClientFactory;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -55,6 +59,7 @@ class RodPlayerApp extends StatelessWidget {
           credentialStore: credentialStore,
           clientFactory: clientFactory,
           privateNetworkRuntimeFactory: privateNetworkRuntimeFactory,
+          enrollmentClientFactory: enrollmentClientFactory,
         ),
       );
 }
@@ -65,6 +70,7 @@ class RodPlayerShell extends StatefulWidget {
     required this.credentialStore,
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
+    this.enrollmentClientFactory = _defaultEnrollmentClientFactory,
     super.key,
   });
 
@@ -72,6 +78,7 @@ class RodPlayerShell extends StatefulWidget {
   final CredentialStore credentialStore;
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
+  final EnrollmentClientFactory enrollmentClientFactory;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
@@ -149,6 +156,23 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     if (mounted) setState(() => _client = client);
   }
 
+  Future<void> _configurePrivateAccess(
+      String canonicalUrl, String invitationText, String setupCode) async {
+    await ManagedPrivateTransportSetup(
+      preferences: widget.preferences,
+      runtimeFactory: widget.privateNetworkRuntimeFactory,
+      enrollmentClientFactory: widget.enrollmentClientFactory,
+    ).configure(
+      canonicalServerUrl: canonicalUrl,
+      invitationText: invitationText,
+      setupCode: setupCode,
+    );
+    final previous = _privateNetwork;
+    _privateNetwork = null;
+    _privateNetworkProfile = null;
+    if (previous != null) await previous.close();
+  }
+
   JellyfinApiClient _makeClient(String url, InstallationIdentity identity) {
     final client = widget.clientFactory(url, identity);
     final association = _privateTransport.lookupFor(url);
@@ -224,6 +248,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
           initialServerUrl:
               widget.preferences.getString(CredentialMigration.serverUrlKey),
           clientFactory: _makeClient,
+          onConfigurePrivateAccess: _configurePrivateAccess,
           onAuthenticated: _authenticated);
     }
     return CallbackShortcuts(
@@ -251,3 +276,6 @@ JellyfinApiClient _defaultClientFactory(
 
 PrivateNetworkRuntime _defaultPrivateNetworkRuntimeFactory() =>
     MethodChannelPrivateNetworkRuntime();
+
+FamilyEnrollmentClient _defaultEnrollmentClientFactory(Uri endpoint) =>
+    FamilyEnrollmentClient(endpoint: endpoint);

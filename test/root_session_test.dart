@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/network/family_enrollment.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
 import 'package:rodplayer/core/network/private_transport_profile.dart';
@@ -18,6 +19,176 @@ import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('setup cancellation completes before normal private listener',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final cancelStarted = Completer<void>();
+    final releaseCancel = Completer<void>();
+    addTearDown(() {
+      if (!releaseCancel.isCompleted) releaseCancel.complete();
+    });
+    final temporaryEvents = StreamController<PrivateNetworkStatus>(
+      sync: true,
+      onCancel: () {
+        cancelStarted.complete();
+        return releaseCancel.future;
+      },
+    );
+    addTearDown(temporaryEvents.close);
+    final temporary = _RootPrivateNetworkRuntime(
+        bootstrapResult: _rootReady(), statusStream: temporaryEvents.stream);
+    final normal = _RootPrivateNetworkRuntime(resumeResult: _rootReady());
+    var runtimeCreations = 0;
+    final requests = <http.Request>[];
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: MemoryCredentialStore(),
+      privateNetworkRuntimeFactory: () =>
+          ++runtimeCreations == 1 ? temporary : normal,
+      enrollmentClientFactory: (endpoint) => FamilyEnrollmentClient(
+          endpoint: endpoint,
+          client: http_testing.MockClient((_) async => http.Response(
+              jsonEncode({
+                'version': 1,
+                'control_url': 'https://mesh.owner.example',
+                'auth_key': 'hskey-auth-${'a' * 12}-${'b' * 64}',
+                'auth_key_expires_in_seconds': 600,
+                'home': {'ipv4': '100.64.0.8', 'port': 4444},
+              }),
+              200))),
+      clientFactory: (url, identity) => JellyfinApiClient(
+          baseUrl: url,
+          identity: identity,
+          client: http_testing.MockClient((request) async {
+            requests.add(request);
+            return http.Response('[]', 200);
+          })),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
+        'https://media.owner.example:3000');
+    await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Invitation'),
+        '{"version":1,"profileId":"owner:family","displayName":"Family",'
+        '"enrollmentEndpoint":"https://enroll.owner.example/v1/enroll"}');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Setup code'), 'one-use-code');
+    await tester
+        .tap(find.widgetWithText(FilledButton, 'Configure private access'));
+    await tester.pump();
+    await cancelStarted.future;
+    expect(runtimeCreations, 1);
+    expect(normal.resumeCalls, 0);
+    expect(requests, isEmpty);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    releaseCancel.complete();
+    await tester.pumpAndSettle();
+    expect(temporary.stopCalls, 1);
+    expect(runtimeCreations, 2);
+    expect(normal.resumeCalls, 1);
+    expect(requests.single.url.host, '127.0.0.1');
+  });
+
+  testWidgets(
+      'fresh install configures managed access then discovers via gateway',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final cancelStarted = Completer<void>();
+    final releaseCancel = Completer<void>();
+    addTearDown(() {
+      if (!releaseCancel.isCompleted) releaseCancel.complete();
+    });
+    final temporaryEvents = StreamController<PrivateNetworkStatus>(
+        sync: true,
+        onCancel: () {
+          cancelStarted.complete();
+          return releaseCancel.future;
+        });
+    addTearDown(temporaryEvents.close);
+    final temporary = _RootPrivateNetworkRuntime(
+      bootstrapResult: _rootReady(),
+      statusStream: temporaryEvents.stream,
+    );
+    final normal = _RootPrivateNetworkRuntime(resumeResult: _rootReady());
+    var runtimeCreations = 0;
+    final requests = <http.Request>[];
+    Uri? enrollmentEndpoint;
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: MemoryCredentialStore(),
+      privateNetworkRuntimeFactory: () =>
+          ++runtimeCreations == 1 ? temporary : normal,
+      enrollmentClientFactory: (endpoint) {
+        enrollmentEndpoint = endpoint;
+        return FamilyEnrollmentClient(
+          endpoint: endpoint,
+          client: http_testing.MockClient((request) async {
+            expect(jsonDecode(request.body), {'code': 'one-use-code'});
+            return http.Response(
+                jsonEncode({
+                  'version': 1,
+                  'control_url': 'https://mesh.owner.example',
+                  'auth_key': 'hskey-auth-${'a' * 12}-${'b' * 64}',
+                  'auth_key_expires_in_seconds': 600,
+                  'home': {'ipv4': '100.64.0.8', 'port': 4444},
+                }),
+                200);
+          }),
+        );
+      },
+      clientFactory: (url, identity) => JellyfinApiClient(
+        baseUrl: url,
+        identity: identity,
+        client: http_testing.MockClient((request) async {
+          requests.add(request);
+          return http.Response('[]', 200);
+        }),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(temporary.bootstrapCalls, 0);
+    expect(normal.resumeCalls, 0);
+    await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
+        'https://media.owner.example:3000');
+    await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Invitation'),
+        '{"version":1,"profileId":"owner:family","displayName":"Family",'
+        '"enrollmentEndpoint":"https://enroll.owner.example/v1/enroll"}');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Setup code'), 'one-use-code');
+    await tester
+        .tap(find.widgetWithText(FilledButton, 'Configure private access'));
+    await tester.pump();
+    await cancelStarted.future;
+    releaseCancel.complete();
+    await tester.pumpAndSettle();
+    expect(enrollmentEndpoint.toString(),
+        'https://enroll.owner.example/v1/enroll');
+    expect(temporary.bootstrapCalls, 1);
+    expect(temporary.statusCalls, 1);
+    expect(temporary.stopCalls, 1);
+    expect(prefs.getString(PrivateTransportProfileAssociation.pendingSetupKey),
+        isNull);
+    expect(normal.resumeCalls, 1);
+    expect(temporary.resetCalls, 0);
+    expect(temporary.lastBootstrap?.profileId, 'owner:family');
+    expect(requests.single.url.host, '127.0.0.1');
+    expect(requests.single.headers['host'], 'media.owner.example:3000');
+    expect(prefs.getString(CredentialMigration.serverUrlKey),
+        'https://media.owner.example:3000');
+    expect(
+        PrivateTransportProfileAssociation(prefs)
+            .lookupFor('https://media.owner.example:3000')
+            .profileId,
+        'owner:family');
+  });
+
   testWidgets('login discovery and sign-in share one pending private session',
       (tester) async {
     const server = 'https://server';
@@ -52,7 +223,8 @@ void main() {
               return http.Response('[{"Id":"user","Name":"Alice"}]', 200);
             }
             if (request.url.path.endsWith('/Users/AuthenticateByName')) {
-              return http.Response('{"AccessToken":"token","User":{"Id":"user"}}', 200);
+              return http.Response(
+                  '{"AccessToken":"token","User":{"Id":"user"}}', 200);
             }
             if (request.url.path.endsWith('/Users/user')) {
               return http.Response('{"Id":"user","Name":"Alice"}', 200);
@@ -86,15 +258,20 @@ void main() {
     await tester.pump();
     expect(requests, isEmpty);
     runtime.events.add(PrivateNetworkStatus.fromPayload({
-      'state': 'ready', 'path': 'direct', 'hasPersistedIdentity': true,
-      'reason': 'none', 'gatewayUrl': 'http://127.0.0.1:45000',
+      'state': 'ready',
+      'path': 'direct',
+      'hasPersistedIdentity': true,
+      'reason': 'none',
+      'gatewayUrl': 'http://127.0.0.1:45000',
     }));
     await tester.pumpAndSettle();
     expect(requests.where((r) => r.url.path == '/Users/Public'), hasLength(1));
     expect(requests.where((r) => r.url.path == '/Users/AuthenticateByName'),
         hasLength(1));
-    expect(requests, everyElement(isA<http.Request>().having(
-        (r) => r.url.host, 'host', '127.0.0.1')));
+    expect(
+        requests,
+        everyElement(isA<http.Request>()
+            .having((r) => r.url.host, 'host', '127.0.0.1')));
     expect(requests.first.headers['host'], 'server');
     expect(find.byType(RodPlayerAppShell), findsOneWidget);
     expect(runtimeCreations, 1);
@@ -317,8 +494,8 @@ void main() {
       expect(client.usesPrivateTransport, isTrue);
       expect(() => client.resolveServiceUri(Uri.parse('https://server/Items')),
           throwsA(isA<PrivateNetworkException>()));
-      await expectLater(client.getPublicUsers(),
-          throwsA(isA<PrivateNetworkException>()));
+      await expectLater(
+          client.getPublicUsers(), throwsA(isA<PrivateNetworkException>()));
     });
   }
 
@@ -389,6 +566,42 @@ void main() {
           throwsA(isA<PrivateNetworkException>()));
     });
   }
+
+  testWidgets(
+      'restarted partial setup with malformed marker cannot route direct',
+      (tester) async {
+    const server = 'https://server';
+    SharedPreferences.setMockInitialValues({
+      CredentialMigration.serverUrlKey: server,
+      CredentialMigration.userIdKey: 'user',
+      PrivateTransportProfileAssociation.pendingSetupKey: jsonEncode({
+        'version': 1,
+        'serverUrl': '',
+        'profileId': 'owner:one',
+      }),
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final credentials = MemoryCredentialStore();
+    await credentials.writeToken(CredentialMigration.tokenKey, 'token');
+    var runtimeCreations = 0;
+    late _RootClient client;
+    await tester.pumpWidget(RodPlayerApp(
+      preferences: prefs,
+      credentialStore: credentials,
+      privateNetworkRuntimeFactory: () {
+        runtimeCreations++;
+        return _RootPrivateNetworkRuntime();
+      },
+      clientFactory: (url, identity) =>
+          client = _RootClient(baseUrl: url, identity: identity),
+    ));
+    await tester.pumpAndSettle();
+    expect(runtimeCreations, 0);
+    expect(client.usesPrivateTransport, isTrue);
+    expect(() => client.resolveServiceUri(Uri.parse('$server/Items')),
+        throwsA(isA<PrivateNetworkException>()));
+  });
 
   testWidgets('same-server user switch keeps association; new server clears it',
       (tester) async {
@@ -557,23 +770,40 @@ class _RootClient extends JellyfinApiClient {
 }
 
 class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
-  _RootPrivateNetworkRuntime({this.allowedProfileId, this.resumePending,
-      this.resumeStarted});
+  _RootPrivateNetworkRuntime(
+      {this.allowedProfileId,
+      this.resumePending,
+      this.resumeStarted,
+      this.bootstrapResult,
+      this.resumeResult,
+      this.statusStream});
 
   final String? allowedProfileId;
   final Future<PrivateNetworkStatus>? resumePending;
   final Completer<void>? resumeStarted;
+  final PrivateNetworkStatus? bootstrapResult;
+  final PrivateNetworkStatus? resumeResult;
+  final Stream<PrivateNetworkStatus>? statusStream;
   final events = StreamController<PrivateNetworkStatus>.broadcast(sync: true);
   PrivateNetworkIdentityClaim? lastClaim;
   int resumeCalls = 0;
   int bootstrapCalls = 0;
   int resetCalls = 0;
+  int stopCalls = 0;
+  int statusCalls = 0;
+  PrivateNetworkBootstrap? lastBootstrap;
+  PrivateNetworkStatus? _currentStatus;
 
   @override
   Future<PrivateNetworkStatus> bootstrap(
     PrivateNetworkBootstrap bootstrap,
   ) async {
     bootstrapCalls++;
+    lastBootstrap = bootstrap;
+    if (bootstrapResult != null) {
+      _currentStatus = bootstrapResult;
+      return bootstrapResult!;
+    }
     throw UnsupportedError('startup must not bootstrap');
   }
 
@@ -593,6 +823,7 @@ class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
           PrivateNetworkFailure.operationFailed);
     }
     if (resumePending != null) return resumePending!;
+    if (resumeResult != null) return resumeResult!;
     return const PrivateNetworkStatus(
       state: PrivateNetworkState.unavailable,
       path: PrivateNetworkPath.none,
@@ -602,16 +833,30 @@ class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {
   }
 
   @override
-  Future<PrivateNetworkStatus> status() async => const PrivateNetworkStatus(
-        state: PrivateNetworkState.stopped,
-        path: PrivateNetworkPath.none,
-        hasPersistedIdentity: true,
-        unavailableReason: PrivateNetworkUnavailableReason.none,
-      );
+  Future<PrivateNetworkStatus> status() async {
+    statusCalls++;
+    return _currentStatus ??
+        const PrivateNetworkStatus(
+          state: PrivateNetworkState.stopped,
+          path: PrivateNetworkPath.none,
+          hasPersistedIdentity: true,
+          unavailableReason: PrivateNetworkUnavailableReason.none,
+        );
+  }
 
   @override
-  Stream<PrivateNetworkStatus> get statuses => events.stream;
+  Stream<PrivateNetworkStatus> get statuses => statusStream ?? events.stream;
 
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async {
+    stopCalls++;
+  }
 }
+
+PrivateNetworkStatus _rootReady() => PrivateNetworkStatus.fromPayload({
+      'state': 'ready',
+      'path': 'direct',
+      'hasPersistedIdentity': true,
+      'reason': 'none',
+      'gatewayUrl': 'http://127.0.0.1:45000',
+    });

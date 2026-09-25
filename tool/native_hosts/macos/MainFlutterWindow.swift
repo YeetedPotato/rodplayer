@@ -459,27 +459,27 @@ private actor ApplePrivateNetworkNodeOwner {
   func bootstrap(metadata: ApplePrivateNetworkMetadata, authKey: String) async throws -> ApplePrivateNetworkStatus {
     await acquireLifecycle()
     defer { releaseLifecycle() }
-    guard activeNode == nil else {
-      throw ApplePrivateNetworkNodeOwnerError.nodeAlreadyActive
-    }
-    guard !stateStore.hasPersistedIdentity else {
-      throw ApplePrivateNetworkNodeOwnerError.existingIdentity
-    }
+    var ownership = try ApplePrivateNetworkBootstrapOwnership(
+      hasActiveNode: activeNode != nil,
+      hasPersistedIdentity: stateStore.hasPersistedIdentity
+    )
     try stateStore.prepare()
     try stateStore.write(metadata: metadata)
-    try await startLocked(config: configuration(metadata: metadata, authKey: authKey))
-    guard try await stateStore.waitForPersistedIdentity() else {
-      try await stopLocked()
-      throw ApplePrivateNetworkNodeOwnerError.startFailed
-    }
-    activeMetadata = metadata
     do {
+      try await startLocked(config: configuration(metadata: metadata, authKey: authKey))
+      ownership.acquiredNode()
+      guard try await stateStore.waitForPersistedIdentity() else {
+        throw ApplePrivateNetworkNodeOwnerError.startFailed
+      }
+      activeMetadata = metadata
       try startGatewayLocked(metadata: metadata)
+      let status = await startMonitorLocked()
+      ownership.completed()
+      return status
     } catch {
-      try? await stopLocked()
-      throw ApplePrivateNetworkNodeOwnerError.startFailed
+      if ownership.takeCleanup(activeNode: activeNode != nil) { try? await stopLocked() }
+      throw error
     }
-    return await startMonitorLocked()
   }
 
   func resume(claim: ApplePrivateNetworkIdentityClaim) async throws -> ApplePrivateNetworkStatus {
