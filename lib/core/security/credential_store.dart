@@ -8,12 +8,16 @@ abstract interface class CredentialStore {
 
 class SecureCredentialStore implements CredentialStore {
   const SecureCredentialStore([FlutterSecureStorage? storage])
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ??
+            const FlutterSecureStorage(
+              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+            );
 
   final FlutterSecureStorage _storage;
 
   @override
-  Future<void> writeToken(String key, String token) => _storage.write(key: key, value: token);
+  Future<void> writeToken(String key, String token) =>
+      _storage.write(key: key, value: token);
 
   @override
   Future<String?> readToken(String key) => _storage.read(key: key);
