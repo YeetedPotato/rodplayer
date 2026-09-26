@@ -21,6 +21,90 @@ final _key = 'hskey-auth-${'a' * 12}-${'b' * 64}';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('missing native host fails before consuming enrollment', () async {
+    final prefs = await SharedPreferences.getInstance();
+    var enrollments = 0;
+    var subscriptions = 0;
+
+    final events = StreamController<PrivateNetworkStatus>.broadcast(
+      onListen: () => subscriptions++,
+    );
+    addTearDown(events.close);
+
+    final runtime = _SetupRuntime(
+      hostAvailable: false,
+      statusStream: events.stream,
+    );
+
+    await expectLater(
+      _setup(
+        prefs,
+        runtime,
+        onEnroll: () => enrollments++,
+      ).configure(
+        canonicalServerUrl: _server,
+        invitationText: _invitation,
+        setupCode: _code,
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          'Private access is not available on this device',
+        ),
+      ),
+    );
+
+    expect(runtime.confirmHostCalls, 1);
+    expect(enrollments, 0);
+    expect(subscriptions, 0);
+    expect(runtime.bootstrapCalls, 0);
+    expect(runtime.stopCalls, 0);
+    expect(runtime.resetCalls, 0);
+    expect(prefs.getKeys(), isEmpty);
+    expect(
+      PrivateTransportProfileAssociation(prefs).lookupFor(_server).kind,
+      PrivateTransportAssociationKind.none,
+    );
+  });
+
+  test('native host probe exception fails before enrollment', () async {
+    final prefs = await SharedPreferences.getInstance();
+    var enrollments = 0;
+    var subscriptions = 0;
+
+    final events = StreamController<PrivateNetworkStatus>.broadcast(
+      onListen: () => subscriptions++,
+    );
+    addTearDown(events.close);
+
+    final runtime = _SetupRuntime(
+      failHostCheck: true,
+      statusStream: events.stream,
+    );
+
+    await expectLater(
+      _setup(
+        prefs,
+        runtime,
+        onEnroll: () => enrollments++,
+      ).configure(
+        canonicalServerUrl: _server,
+        invitationText: _invitation,
+        setupCode: _code,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(runtime.confirmHostCalls, 1);
+    expect(enrollments, 0);
+    expect(subscriptions, 0);
+    expect(runtime.bootstrapCalls, 0);
+    expect(runtime.stopCalls, 0);
+    expect(runtime.resetCalls, 0);
+    expect(prefs.getKeys(), isEmpty);
+  });
+
   test(
       'enrolls only at owner endpoint, boots, stops, then persists stable keys',
       () async {
@@ -37,6 +121,7 @@ void main() {
         return runtime;
       },
       enrollmentClientFactory: (uri) {
+        expect(runtime.confirmHostCalls, 1);
         endpoint = uri;
         return FamilyEnrollmentClient(
             endpoint: uri,
@@ -744,7 +829,9 @@ PrivateNetworkStatus _readyStatus() => PrivateNetworkStatus.fromPayload({
 
 class _SetupRuntime implements PrivateNetworkRuntime {
   _SetupRuntime(
-      {this.failBootstrap = false,
+      {this.hostAvailable = true,
+      this.failHostCheck = false,
+      this.failBootstrap = false,
       this.ready = true,
       this.starting = false,
       this.bootstrapEvents = const [],
@@ -754,6 +841,8 @@ class _SetupRuntime implements PrivateNetworkRuntime {
       this.failStop = false,
       this.statusStream});
 
+  final bool hostAvailable;
+  final bool failHostCheck;
   final bool failBootstrap;
   final bool ready;
   final bool starting;
@@ -768,6 +857,7 @@ class _SetupRuntime implements PrivateNetworkRuntime {
   final events = StreamController<PrivateNetworkStatus>.broadcast(sync: true);
   PrivateNetworkBootstrap? bootstrapValue;
   PrivateNetworkStatus? currentStatus;
+  int confirmHostCalls = 0;
   int bootstrapCalls = 0;
   int statusCalls = 0;
   int stopCalls = 0;
@@ -805,7 +895,13 @@ class _SetupRuntime implements PrivateNetworkRuntime {
   }
 
   @override
-  Future<bool> confirmHostAvailable() async => true;
+  Future<bool> confirmHostAvailable() async {
+    confirmHostCalls++;
+    if (failHostCheck) {
+      throw StateError('native host probe failed');
+    }
+    return hostAvailable;
+  }
 
   @override
   Future<PrivateNetworkStatus> resume(

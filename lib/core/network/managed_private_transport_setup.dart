@@ -71,6 +71,19 @@ class ManagedPrivateTransportSetup {
         .containsKey(PrivateTransportProfileAssociation.pendingSetupKey)) {
       throw StateError('An unfinished private setup requires recovery');
     }
+    final runtime = runtimeFactory();
+
+    bool hostAvailable;
+    try {
+      hostAvailable = await runtime.confirmHostAvailable();
+    } catch (_) {
+      hostAvailable = false;
+    }
+
+    if (!hostAvailable) {
+      throw StateError('Private access is not available on this device');
+    }
+
     final enrollmentClient =
         enrollmentClientFactory(invitation.enrollmentEndpoint);
     late final FamilyEnrollmentResult enrollment;
@@ -81,7 +94,6 @@ class ManagedPrivateTransportSetup {
     }
 
     final profile = invitation.profileFrom(enrollment);
-    final runtime = runtimeFactory();
     final ready = Completer<PrivateNetworkStatus?>();
     PrivateNetworkStatus? latestStatus;
     var statusRevision = 0;

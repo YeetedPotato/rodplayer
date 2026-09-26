@@ -22,12 +22,12 @@ class MethodChannelPrivateNetworkRuntime implements PrivateNetworkRuntime {
     }
 
     return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => true,
       TargetPlatform.android ||
-      TargetPlatform.iOS ||
-      TargetPlatform.macOS ||
-      TargetPlatform.windows =>
-        true,
-      TargetPlatform.linux || TargetPlatform.fuchsia => false,
+      TargetPlatform.windows ||
+      TargetPlatform.linux ||
+      TargetPlatform.fuchsia =>
+        false,
     };
   }
 

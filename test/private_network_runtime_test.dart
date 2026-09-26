@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/network/family_enrollment.dart';
@@ -381,6 +382,49 @@ void main() {
         channel,
         null,
       );
+    });
+
+    test('default private-network support is Apple-only', () async {
+      final cases = <TargetPlatform, bool>{
+        TargetPlatform.iOS: true,
+        TargetPlatform.macOS: true,
+        TargetPlatform.windows: false,
+        TargetPlatform.android: false,
+      };
+
+      try {
+        for (final entry in cases.entries) {
+          debugDefaultTargetPlatformOverride = entry.key;
+          var nativeCalls = 0;
+
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(
+            channel,
+            (_) async {
+              nativeCalls++;
+              return true;
+            },
+          );
+
+          final runtime = MethodChannelPrivateNetworkRuntime(
+            channel: channel,
+          );
+
+          expect(
+            await runtime.confirmHostAvailable(),
+            entry.value,
+            reason: '${entry.key}',
+          );
+
+          expect(
+            nativeCalls,
+            entry.value ? 1 : 0,
+            reason: '${entry.key}',
+          );
+        }
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     test('resume sends explicit owner and exact retained configuration',
