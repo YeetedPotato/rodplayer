@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/widgets/rodplayer_logo.dart';
 
 typedef JellyfinClientFactory = JellyfinApiClient Function(
@@ -216,9 +217,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             Column(mainAxisSize: MainAxisSize.min, children: [
                           const RodPlayerLogo(size: 76, glow: true),
                           const SizedBox(height: 18),
-                          const Text('RodPlayer',
+                          Text('RodPlayer',
                               style: TextStyle(
-                                  color: Color(0xFFEBCF52),
+                                  color: Theme.of(context).colorScheme.primary,
                                   fontSize: 30,
                                   fontWeight: FontWeight.w700)),
                           const SizedBox(height: 28),
@@ -249,7 +250,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                   style: TextStyle(
                                       color: _setupMessage ==
                                               'Private access configured.'
-                                          ? Colors.greenAccent
+                                          ? (Theme.of(context).extension<RodPlayerTheme>() ??
+                                                  const RodPlayerTheme())
+                                              .success
                                           : Colors.orangeAccent)),
                             ),
                           const SizedBox(height: 12),

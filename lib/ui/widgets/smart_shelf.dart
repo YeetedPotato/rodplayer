@@ -85,10 +85,10 @@ class _CountBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(color: theme.gold.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.gold.withValues(alpha: 0.34))),
+        decoration: BoxDecoration(color: theme.accent.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.accent.withValues(alpha: 0.34))),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          child: Text('$count', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: theme.goldBright, fontWeight: FontWeight.w700)),
+          child: Text('$count', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: theme.accentBright, fontWeight: FontWeight.w700)),
         ),
       );
 }

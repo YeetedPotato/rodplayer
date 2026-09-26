@@ -131,7 +131,7 @@ class _SideNav extends StatelessWidget {
       child: SizedBox(
         width: directional ? 188 : 118,
         child: Column(children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 18), child: Text('RodPlayer', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.goldBright, fontWeight: FontWeight.w800))),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 18), child: Text('RodPlayer', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.accentBright, fontWeight: FontWeight.w800))),
           Expanded(
             child: NavigationRail(
               backgroundColor: Colors.transparent,

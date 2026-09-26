@@ -14,7 +14,7 @@ class UserDataBadge extends StatelessWidget {
     return Semantics(
       label: labels.join(', '),
       child: DecoratedBox(
-        decoration: BoxDecoration(color: theme.obsidianGlassStrong, borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.gold.withValues(alpha: .5))),
+        decoration: BoxDecoration(color: theme.obsidianGlassStrong, borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.accent.withValues(alpha: .5))),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           child: Row(mainAxisSize: MainAxisSize.min, children: [

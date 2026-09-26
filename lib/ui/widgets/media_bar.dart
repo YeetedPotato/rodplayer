@@ -56,7 +56,7 @@ class _MediaBarState extends State<MediaBar> {
           backgroundColor: theme.obsidianGlassStrong.withValues(alpha: 0.96),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(theme.radiusLarge),
-            side: BorderSide(color: theme.gold.withValues(alpha: 0.4)),
+            side: BorderSide(color: theme.accent.withValues(alpha: 0.4)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(24),

@@ -12,9 +12,9 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
     this.obsidianRaised = const Color(0xFF08090B),
     this.obsidianGlass = const Color(0xCC0D0F12),
     this.obsidianGlassStrong = const Color(0xF014171B),
-    this.gold = const Color(0xFFEBCF52),
-    this.goldBright = const Color(0xFFF5DE76),
-    this.green = const Color(0xFF1C3421),
+    this.accent = const Color(0xFFA7F9FA),
+    this.accentBright = const Color(0xFFD9FFFF),
+    this.accentDeep = const Color(0xFF174B50),
     this.textPrimary = const Color(0xFFF4F6F8),
     this.textSecondary = const Color(0xFFA2A9B3),
     this.textMuted = const Color(0xFF707780),
@@ -30,7 +30,7 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
   });
 
   final Color obsidian, surface1, surface2, surface3, obsidianRaised;
-  final Color obsidianGlass, obsidianGlassStrong, gold, goldBright, green;
+  final Color obsidianGlass, obsidianGlassStrong, accent, accentBright, accentDeep;
   final Color textPrimary, textSecondary, textMuted, success, error, shadowColor;
   final double radiusPill, radiusSmall, radiusMedium, radiusLarge, radiusXLarge;
   final double glassBlur;
@@ -39,9 +39,9 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
         BoxShadow(color: shadowColor, blurRadius: 24, offset: const Offset(0, 10)),
       ];
 
-  List<BoxShadow> get goldGlow => [
+  List<BoxShadow> get accentGlow => [
         BoxShadow(
-          color: gold.withValues(alpha: 0.22),
+          color: accent.withValues(alpha: 0.22),
           blurRadius: 18,
           spreadRadius: 1,
         ),
@@ -60,9 +60,9 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
     Color? obsidianRaised,
     Color? obsidianGlass,
     Color? obsidianGlassStrong,
-    Color? gold,
-    Color? goldBright,
-    Color? green,
+    Color? accent,
+    Color? accentBright,
+    Color? accentDeep,
     Color? textPrimary,
     Color? textSecondary,
     Color? textMuted,
@@ -83,9 +83,9 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
         obsidianRaised: obsidianRaised ?? this.obsidianRaised,
         obsidianGlass: obsidianGlass ?? this.obsidianGlass,
         obsidianGlassStrong: obsidianGlassStrong ?? this.obsidianGlassStrong,
-        gold: gold ?? this.gold,
-        goldBright: goldBright ?? this.goldBright,
-        green: green ?? this.green,
+        accent: accent ?? this.accent,
+        accentBright: accentBright ?? this.accentBright,
+        accentDeep: accentDeep ?? this.accentDeep,
         textPrimary: textPrimary ?? this.textPrimary,
         textSecondary: textSecondary ?? this.textSecondary,
         textMuted: textMuted ?? this.textMuted,
@@ -105,9 +105,9 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
     if (other == null) return this;
     return copyWith(
       obsidian: Color.lerp(obsidian, other.obsidian, t),
-      gold: Color.lerp(gold, other.gold, t),
-      goldBright: Color.lerp(goldBright, other.goldBright, t),
-      green: Color.lerp(green, other.green, t),
+      accent: Color.lerp(accent, other.accent, t),
+      accentBright: Color.lerp(accentBright, other.accentBright, t),
+      accentDeep: Color.lerp(accentDeep, other.accentDeep, t),
     );
   }
 }
@@ -115,12 +115,12 @@ class RodPlayerTheme extends ThemeExtension<RodPlayerTheme> {
 ThemeData rodPlayerThemeData() {
   const t = RodPlayerTheme();
   final scheme = ColorScheme.fromSeed(
-    seedColor: t.gold,
+    seedColor: t.accent,
     brightness: Brightness.dark,
     surface: t.obsidian,
-    primary: t.gold,
+    primary: t.accent,
     onPrimary: t.obsidian,
-    secondary: t.goldBright,
+    secondary: t.accentBright,
   );
 
   return ThemeData(
@@ -161,13 +161,13 @@ ThemeData rodPlayerThemeData() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(t.radiusMedium),
-        borderSide: BorderSide(color: t.gold, width: 1.2),
+        borderSide: BorderSide(color: t.accent, width: 1.2),
       ),
     ),
     dividerTheme: DividerThemeData(color: t.borderColor(0.08), thickness: 1),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: t.surface1,
-      indicatorColor: t.gold.withValues(alpha: 0.16),
+      indicatorColor: t.accent.withValues(alpha: 0.16),
       labelTextStyle: WidgetStatePropertyAll(TextStyle(color: t.textSecondary)),
     ),
   );

@@ -181,7 +181,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('Playback error: $message', style: TextStyle(color: theme.textPrimary)), backgroundColor: theme.obsidianRaised, behavior: SnackBarBehavior.floating, action: SnackBarAction(label: 'RETRY', textColor: theme.goldBright, onPressed: () { if (isCurrent()) unawaited(widget.onPlaybackError?.call() ?? Future<void>.value()); })));
+        ..showSnackBar(SnackBar(content: Text('Playback error: $message', style: TextStyle(color: theme.textPrimary)), backgroundColor: theme.obsidianRaised, behavior: SnackBarBehavior.floating, action: SnackBarAction(label: 'RETRY', textColor: theme.accentBright, onPressed: () { if (isCurrent()) unawaited(widget.onPlaybackError?.call() ?? Future<void>.value()); })));
     });
   }
 
@@ -419,7 +419,7 @@ class _Hud extends StatelessWidget {
             });
           },
         ),
-      if (plan != null) DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusSmall)), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), child: Text(plan.playMethod.jellyfinName, style: TextStyle(color: theme.goldBright, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis))),
+      if (plan != null) DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusSmall)), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), child: Text(plan.playMethod.jellyfinName, style: TextStyle(color: theme.accentBright, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis))),
           ]),
         ]),
       ),
@@ -454,8 +454,8 @@ class _OsdButton extends StatelessWidget {
       onFocusChange: (hasFocus) { if (hasFocus) onFocus?.call(); },
       child: Builder(builder: (context) => AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: Focus.of(context).hasFocus ? theme.goldBright : theme.goldBright.withValues(alpha: 0.45), width: Focus.of(context).hasFocus ? 3 : 2), boxShadow: Focus.of(context).hasFocus ? theme.goldGlow : null),
-        child: Semantics(button: true, label: tooltip, child: IconButton(focusNode: focusNode, tooltip: tooltip, color: theme.goldBright, icon: Icon(icon), onPressed: onPressed)),
+        decoration: BoxDecoration(color: theme.obsidianRaised, borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: Focus.of(context).hasFocus ? theme.accentBright : theme.accentBright.withValues(alpha: 0.45), width: Focus.of(context).hasFocus ? 3 : 2), boxShadow: Focus.of(context).hasFocus ? theme.accentGlow : null),
+        child: Semantics(button: true, label: tooltip, child: IconButton(focusNode: focusNode, tooltip: tooltip, color: theme.accentBright, icon: Icon(icon), onPressed: onPressed)),
       )),
     ),
     );
@@ -472,7 +472,7 @@ class _StatusBar extends StatelessWidget {
     return StreamBuilder<String>(stream: engine.statuses, builder: (_, snapshot) {
       final message = snapshot.data;
       if (message == null || message.isEmpty) return const SizedBox.shrink();
-      return DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised.withValues(alpha: 0.94), borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.goldBright.withValues(alpha: 0.8)), boxShadow: theme.goldGlow), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[Icon(Icons.info_outline, color: theme.goldBright, size: 18), const SizedBox(width: 10), Flexible(child: Text(message, style: TextStyle(color: theme.goldBright), maxLines: 2, overflow: TextOverflow.ellipsis))])));
+      return DecoratedBox(decoration: BoxDecoration(color: theme.obsidianRaised.withValues(alpha: 0.94), borderRadius: BorderRadius.circular(theme.radiusMedium), border: Border.all(color: theme.accentBright.withValues(alpha: 0.8)), boxShadow: theme.accentGlow), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[Icon(Icons.info_outline, color: theme.accentBright, size: 18), const SizedBox(width: 10), Flexible(child: Text(message, style: TextStyle(color: theme.accentBright), maxLines: 2, overflow: TextOverflow.ellipsis))])));
     });
   }
 }

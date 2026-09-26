@@ -38,11 +38,11 @@ void main() {
   });
 
   testWidgets('focused cards use the RodPlayer focus theme', (tester) async {
-    final focusNode = FocusNode(debugLabel: 'gold-card');
+    final focusNode = FocusNode(debugLabel: 'accent-card');
     addTearDown(focusNode.dispose);
     await tester.pumpWidget(testApp(Scaffold(body: FocusableMediaCard(title: 'Focused card', focusNode: focusNode, autofocus: true))));
     await tester.pumpAndSettle();
     final theme = Theme.of(tester.element(find.byType(FocusableMediaCard))).extension<RodPlayerTheme>()!;
-    expect(theme.goldBright, isNot(theme.textMuted));
+    expect(theme.accentBright, isNot(theme.textMuted));
   });
 }

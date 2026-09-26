@@ -18,6 +18,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'test_support.dart';
 
 void main() {
+  test('RodPlayer theme uses the icy cyan primary accent', () {
+    const expected = Color(0xFFA7F9FA);
+    final theme = rodPlayerThemeData();
+
+    expect(theme.colorScheme.primary, expected);
+    expect(theme.extension<RodPlayerTheme>()!.accent, expected);
+  });
+
   Widget app(Widget child, {NavigationMode navigationMode = NavigationMode.traditional, double textScale = 1}) => MaterialApp(
         theme: rodPlayerThemeData(),
         home: Builder(builder: (context) {
@@ -164,8 +172,31 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Resume Movie'), findsWidgets);
+    expect(find.byKey(const ValueKey<String>('home-cinematic-media-bar')), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Resume').first);
     expect(played, 'resume');
+  });
+
+  testWidgets('desktop cinematic media bar fills the available Home width',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    await tester.pumpWidget(app(
+      RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {},
+      ),
+      navigationMode: NavigationMode.directional,
+    ));
+    await tester.pumpAndSettle();
+
+    final homeRect = tester.getRect(find.byType(HomeScreen));
+    final mediaBarRect = tester.getRect(
+      find.byKey(const ValueKey<String>('home-cinematic-media-bar')),
+    );
+    expect(mediaBarRect.left, homeRect.left);
+    expect(mediaBarRect.width, homeRect.width);
+    expect(mediaBarRect.height, inInclusiveRange(480, 600));
   });
 
   testWidgets('hero skips non-playable resume and falls back to playable items', (tester) async {
@@ -204,6 +235,12 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Resume').first);
     expect(played, 'resume');
+    await tester.tap(find.byKey(const ValueKey<String>('home-cinematic-info-button')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailsScreen), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ItemDetailsScreen))).pop();
+    await tester.pumpAndSettle();
+
     await tester.ensureVisible(_card('Resume Movie'));
     await tester.tap(_card('Resume Movie'));
     await tester.pumpAndSettle();
@@ -259,7 +296,7 @@ void main() {
   });
 
   testWidgets('compact Home tolerates larger text without overflow', (tester) async {
-    setSurface(tester, const Size(390, 760));
+    setSurface(tester, const Size(390, 620));
     await tester.pumpWidget(app(home(_FakeHomeClient()), textScale: 1.25));
     await tester.pumpAndSettle();
 

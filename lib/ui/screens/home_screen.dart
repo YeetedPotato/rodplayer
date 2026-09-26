@@ -133,7 +133,15 @@ class _HomeScreenState extends State<HomeScreen> {
     return CustomScrollView(
       key: const PageStorageKey<String>('home-scroll'),
       slivers: [
-        if (hero != null) SliverToBoxAdapter(child: _HomeHero(item: hero, client: widget.client, onPlay: () => _play(hero.id))),
+        if (hero != null)
+          SliverToBoxAdapter(
+            child: _HomeHero(
+              item: hero,
+              client: widget.client,
+              onPlay: () => _play(hero.id),
+              onInfo: () => _openDetails(hero),
+            ),
+          ),
         _shelf<ResumableItem>('Continue Watching', _resume, 16 / 9, (item) => _resumeSubtitle(item), _reloadResume, progress: _visualProgress),
         _shelf<NextUpItem>('Next Up', _nextUp, 16 / 9, _episodeSubtitle, _reloadNextUp),
         _shelf<JellyfinLibraryItem>('Latest Movies', _movies, 2 / 3, (item) => item.productionYear?.toString() ?? 'Movie', _reloadMovies),
@@ -191,42 +199,195 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _HomeHero extends StatelessWidget {
-  const _HomeHero({required this.item, required this.client, required this.onPlay});
+  const _HomeHero({
+    required this.item,
+    required this.client,
+    required this.onPlay,
+    required this.onInfo,
+  });
+
   final JellyfinLibraryItem item;
   final JellyfinApiClient client;
   final VoidCallback? onPlay;
+  final VoidCallback onInfo;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
-    final size = MediaQuery.sizeOf(context);
-    final compact = size.width < 650;
-    final height = compact ? 290.0 : 380.0;
-    final imageUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 85) ?? item.imageUrl(client.baseUrl, quality: 85);
+    final theme =
+        Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final media = MediaQuery.of(context);
+    final size = media.size;
+    final compact =
+        size.width < 650 && media.navigationMode != NavigationMode.directional;
+    final targetHeight = size.height * (compact ? .5 : .64);
+    final minHeight = (size.height * (compact ? .45 : .58))
+        .clamp(180.0, compact ? 360.0 : 430.0);
+    final maxHeight = (size.height * (compact ? .55 : .72))
+        .clamp(200.0, compact ? 480.0 : 700.0);
+    final height = targetHeight.clamp(minHeight, maxHeight).toDouble();
+    final imageUrl = item.imageUrl(client.baseUrl,
+            type: JellyfinImageType.backdrop, quality: 85) ??
+        item.imageUrl(client.baseUrl, quality: 85);
+
     return SizedBox(
+      key: const ValueKey<String>('home-cinematic-media-bar'),
+      width: double.infinity,
       height: height,
-      child: Stack(fit: StackFit.expand, children: [
-        if (imageUrl != null)
-          RoutedJellyfinImage(client: client, url: imageUrl, fallback: const SizedBox.shrink()),
-        DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.obsidian, theme.obsidian.withValues(alpha: .72), theme.obsidian], begin: Alignment.bottomCenter, end: Alignment.topCenter))),
-        Padding(
-          padding: EdgeInsets.fromLTRB(compact ? 20 : 40, compact ? 28 : 36, compact ? 20 : 48, compact ? 22 : 28),
-          child: Align(
-            alignment: Alignment.bottomLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_title(item), maxLines: compact ? 1 : 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: compact ? 28 : 42)),
-                      SizedBox(height: compact ? 6 : 8),
-                      Text(_heroSubtitle(item), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary)),
-                      if (item.overview != null) ...[SizedBox(height: compact ? 8 : 12), Text(item.overview!, maxLines: compact ? 1 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))],
-                      SizedBox(height: compact ? 12 : 18),
-                      FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
-                    ]),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (imageUrl != null)
+            RoutedJellyfinImage(
+              client: client,
+              url: imageUrl,
+              fit: BoxFit.cover,
+              fallback: const SizedBox.shrink(),
+            ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                stops: const [0, .36, .7, 1],
+                colors: [
+                  theme.obsidian.withValues(alpha: .94),
+                  theme.obsidian.withValues(alpha: .72),
+                  theme.obsidian.withValues(alpha: .22),
+                  Colors.transparent,
+                ],
+              ),
             ),
           ),
-        ),
-      ]),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0, .34, 1],
+                colors: [
+                  theme.obsidian.withValues(alpha: .32),
+                  Colors.transparent,
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0, .48, .82, 1],
+                colors: [
+                  Colors.transparent,
+                  theme.obsidian.withValues(alpha: .12),
+                  theme.obsidian.withValues(alpha: .8),
+                  theme.obsidian,
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 22 : 48,
+              compact ? 22 : 40,
+              compact ? 22 : 48,
+              compact ? 24 : 40,
+            ),
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: compact ? 560 : 780),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _title(item),
+                      maxLines: compact ? 1 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            fontSize: compact ? 28 : 48,
+                            height: 1.05,
+                          ),
+                    ),
+                    SizedBox(height: compact ? 6 : 10),
+                    Text(
+                      _heroSubtitle(item),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: theme.textSecondary,
+                        fontSize: compact ? 12 : 14,
+                        letterSpacing: .2,
+                      ),
+                    ),
+                    if (item.overview != null) ...[
+                      SizedBox(height: compact ? 8 : 14),
+                      Text(
+                        item.overview!,
+                        maxLines: compact ? 2 : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.textPrimary,
+                          fontSize: compact ? 13 : 15,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: compact ? 14 : 22),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 10,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: onPlay,
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: Text(
+                            hasMeaningfulResumeProgress(item)
+                                ? 'Resume'
+                                : 'Play',
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: theme.textPrimary,
+                            foregroundColor: theme.obsidian,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact ? 20 : 24,
+                              vertical: compact ? 12 : 15,
+                            ),
+                            shape: const StadiumBorder(),
+                            textStyle: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          key: const ValueKey<String>(
+                            'home-cinematic-info-button',
+                          ),
+                          onPressed: onInfo,
+                          icon: const Icon(Icons.info_outline_rounded),
+                          label: const Text('Info'),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: theme.obsidianGlassStrong,
+                            foregroundColor: theme.textPrimary,
+                            side: BorderSide(color: theme.borderColor(.22)),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact ? 18 : 22,
+                              vertical: compact ? 12 : 15,
+                            ),
+                            shape: const StadiumBorder(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -181,7 +181,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(label.toUpperCase(), style: TextStyle(color: Theme.of(context).extension<RodPlayerTheme>()?.goldBright, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+        child: Text(label.toUpperCase(), style: TextStyle(color: Theme.of(context).extension<RodPlayerTheme>()?.accentBright, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
       );
 }
 
@@ -201,14 +201,14 @@ class _SubtitleChoice extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: enabled ? onTap : null,
-        focusColor: theme.goldBright.withValues(alpha: 0.18),
+        focusColor: theme.accentBright.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(theme.radiusSmall),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: selected ? theme.goldBright.withValues(alpha: 0.10) : Colors.transparent, borderRadius: BorderRadius.circular(theme.radiusSmall)),
+          decoration: BoxDecoration(color: selected ? theme.accentBright.withValues(alpha: 0.10) : Colors.transparent, borderRadius: BorderRadius.circular(theme.radiusSmall)),
           child: Row(children: <Widget>[
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off, color: selected ? theme.goldBright : theme.textMuted),
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off, color: selected ? theme.accentBright : theme.textMuted),
             const SizedBox(width: 10),
             Expanded(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textPrimary))),
           ]),

@@ -82,7 +82,7 @@ void main() {
     Focus.of(tester.element(settings)).requestFocus();
     await tester.pump();
     final theme = Theme.of(tester.element(settings)).extension<RodPlayerTheme>()!;
-    expect(theme.goldBright, isNot(theme.textMuted));
+    expect(theme.accentBright, isNot(theme.textMuted));
     expect(Focus.of(tester.element(settings)).hasFocus, isTrue);
   });
 

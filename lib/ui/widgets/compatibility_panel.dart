@@ -72,7 +72,7 @@ class CompatibilityPanel extends StatelessWidget {
     if (value.isDefault != null) _row('Default', value.isDefault! ? 'Yes' : 'No', theme),
     if (value.isTextSubtitleStream != null) _row('Text', value.isTextSubtitleStream! ? 'Yes' : 'No', theme),
   ];
-  Widget _section(String text, RodPlayerTheme theme) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 5), child: Text(text, style: TextStyle(color: theme.goldBright, fontWeight: FontWeight.w700)));
+  Widget _section(String text, RodPlayerTheme theme) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 5), child: Text(text, style: TextStyle(color: theme.accentBright, fontWeight: FontWeight.w700)));
   Widget _row(String label, String value, RodPlayerTheme theme) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[SizedBox(width: 92, child: Text(label, style: TextStyle(color: theme.textMuted))), Expanded(child: Text(value, style: TextStyle(color: theme.textSecondary)))]));
   String _enum(Object value) => value.toString().split('.').last.replaceAllMapped(RegExp(r'([A-Z])'), (match) => ' ${match.group(1)}').trim().replaceFirstMapped(RegExp(r'^.'), (match) => match.group(0)!.toUpperCase());
   String _playMethod(PlayMethod value) => switch (value) { PlayMethod.directPlay => 'Direct Play', PlayMethod.directStream => 'Direct Stream', PlayMethod.transcode => 'Transcode' };
