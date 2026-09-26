@@ -17,7 +17,7 @@ import 'package:rodplayer/platform/network/method_channel_private_network_runtim
 import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
-import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
@@ -34,7 +34,7 @@ Future<void> main() async {
       credentialStore: const SecureCredentialStore()));
 }
 
-class RodPlayerApp extends StatelessWidget {
+class RodPlayerApp extends StatefulWidget {
   const RodPlayerApp({
     required this.preferences,
     required this.credentialStore,
@@ -51,15 +51,33 @@ class RodPlayerApp extends StatelessWidget {
   final EnrollmentClientFactory enrollmentClientFactory;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: 'RodPlayer',
-        theme: rodPlayerThemeData(),
-        home: RodPlayerShell(
-          preferences: preferences,
-          credentialStore: credentialStore,
-          clientFactory: clientFactory,
-          privateNetworkRuntimeFactory: privateNetworkRuntimeFactory,
-          enrollmentClientFactory: enrollmentClientFactory,
+  State<RodPlayerApp> createState() => _RodPlayerAppState();
+}
+
+class _RodPlayerAppState extends State<RodPlayerApp> {
+  late final AppearanceController _appearance =
+      AppearanceController(widget.preferences);
+
+  @override
+  void dispose() {
+    _appearance.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _appearance,
+        builder: (context, _) => MaterialApp(
+          title: 'Nautilus',
+          theme: _appearance.themeData,
+          home: RodPlayerShell(
+            preferences: widget.preferences,
+            credentialStore: widget.credentialStore,
+            clientFactory: widget.clientFactory,
+            privateNetworkRuntimeFactory: widget.privateNetworkRuntimeFactory,
+            enrollmentClientFactory: widget.enrollmentClientFactory,
+            appearanceController: _appearance,
+          ),
         ),
       );
 }
@@ -71,6 +89,7 @@ class RodPlayerShell extends StatefulWidget {
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
     this.enrollmentClientFactory = _defaultEnrollmentClientFactory,
+    this.appearanceController,
     super.key,
   });
 
@@ -79,6 +98,7 @@ class RodPlayerShell extends StatefulWidget {
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
   final EnrollmentClientFactory enrollmentClientFactory;
+  final AppearanceController? appearanceController;
 
   @override
   State<RodPlayerShell> createState() => _RodPlayerShellState();
@@ -257,7 +277,10 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
             Navigator.maybePop(context)
       },
       child: RodPlayerAppShell(
-          client: _client!, onLogout: _logout, onSwitchProfile: _switchProfile),
+          client: _client!,
+          onLogout: _logout,
+          onSwitchProfile: _switchProfile,
+          appearanceController: widget.appearanceController),
     );
   }
 }

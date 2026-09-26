@@ -3,7 +3,6 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
-import 'package:rodplayer/ui/widgets/rodplayer_logo.dart';
 
 typedef JellyfinClientFactory = JellyfinApiClient Function(
     String baseUrl, InstallationIdentity identity);
@@ -201,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) => PopScope(
         canPop: true,
         child: Scaffold(
-          backgroundColor: Colors.black,
+          backgroundColor: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).obsidian,
           body: SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -215,9 +214,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         padding: const EdgeInsets.all(28),
                         child:
                             Column(mainAxisSize: MainAxisSize.min, children: [
-                          const RodPlayerLogo(size: 76, glow: true),
-                          const SizedBox(height: 18),
-                          Text('RodPlayer',
+                          Text('Nautilus',
                               style: TextStyle(
                                   color: Theme.of(context).colorScheme.primary,
                                   fontSize: 30,
@@ -253,7 +250,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                           ? (Theme.of(context).extension<RodPlayerTheme>() ??
                                                   const RodPlayerTheme())
                                               .success
-                                          : Colors.orangeAccent)),
+                                          : (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error)),
                             ),
                           const SizedBox(height: 12),
                           _ProfilePicker(
@@ -279,8 +276,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             Padding(
                                 padding: const EdgeInsets.only(top: 16),
                                 child: Text(_error!,
-                                    style: const TextStyle(
-                                        color: Colors.orangeAccent))),
+                                    style: TextStyle(
+                                        color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error))),
                           const SizedBox(height: 24),
                           SizedBox(
                               width: double.infinity,
@@ -380,7 +377,7 @@ class _PrivateAccessDialogState extends State<_PrivateAccessDialog> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: Text(_error!,
-                        style: const TextStyle(color: Colors.orangeAccent)),
+                        style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error)),
                   ),
               ]),
             ),
@@ -426,7 +423,7 @@ class _ProfilePicker extends StatelessWidget {
             child: Text(error!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.orangeAccent))),
+                style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error))),
         TextButton(onPressed: onRetry, child: const Text('Retry')),
       ]);
     }

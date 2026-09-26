@@ -7,6 +7,9 @@ import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/core/theme/appearance_controller.dart';
+import 'package:rodplayer/core/theme/appearance_mode.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 
 import 'test_support.dart';
@@ -71,6 +74,31 @@ void main() {
     expect(switched, isTrue);
     expect(loggedOut, isTrue);
   });
+
+  testWidgets('app-local appearance selection persists and changes theme immediately', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = await SharedPreferences.getInstance();
+    final appearance = AppearanceController(preferences);
+    addTearDown(appearance.dispose);
+    await tester.pumpWidget(AnimatedBuilder(
+      animation: appearance,
+      builder: (context, _) => MaterialApp(
+        theme: appearance.themeData,
+        home: ProfileScreen(client: _ProfileClient(), onSwitchProfile: () async {}, onLogout: () async {}, appearanceController: appearance),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'OLED'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Light'));
+    await tester.pumpAndSettle();
+    expect(appearance.mode, AppearanceMode.light);
+    expect(preferences.getString(AppearanceController.preferenceKey), 'light');
+    expect(Theme.of(tester.element(find.text('Appearance'))).brightness, Brightness.light);
+    expect(Theme.of(tester.element(find.text('Appearance'))).extension<RodPlayerTheme>()!.accent, const Color(0xFFA7F9FA));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('client replacement clears stale in-flight save state', (tester) async {
     final pendingSave = Completer<void>();
     final first = _ProfileClient(pendingSave: pendingSave);

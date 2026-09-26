@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
@@ -22,10 +23,11 @@ enum RodPlayerDestination {
 }
 
 class RodPlayerAppShell extends StatefulWidget {
-  const RodPlayerAppShell({required this.client, required this.onLogout, required this.onSwitchProfile, super.key});
+  const RodPlayerAppShell({required this.client, required this.onLogout, required this.onSwitchProfile, this.appearanceController, super.key});
   final JellyfinApiClient client;
   final Future<void> Function() onLogout;
   final Future<void> Function() onSwitchProfile;
+  final AppearanceController? appearanceController;
 
   @override
   State<RodPlayerAppShell> createState() => _RodPlayerAppShellState();
@@ -54,7 +56,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
 
   void _openProfile() {
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ProfileScreen(client: widget.client, onSwitchProfile: widget.onSwitchProfile, onLogout: widget.onLogout),
+      builder: (_) => ProfileScreen(client: widget.client, onSwitchProfile: widget.onSwitchProfile, onLogout: widget.onLogout, appearanceController: widget.appearanceController),
     ));
   }
 
@@ -131,7 +133,7 @@ class _SideNav extends StatelessWidget {
       child: SizedBox(
         width: directional ? 188 : 118,
         child: Column(children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 18), child: Text('RodPlayer', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.accentBright, fontWeight: FontWeight.w800))),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 18), child: Text('Nautilus', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.accentBright, fontWeight: FontWeight.w800))),
           Expanded(
             child: NavigationRail(
               backgroundColor: Colors.transparent,

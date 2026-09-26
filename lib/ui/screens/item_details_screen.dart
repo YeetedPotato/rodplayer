@@ -422,22 +422,23 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final imageUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.primary, quality: 90);
     final poster = AspectRatio(
       aspectRatio: 2 / 3,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: imageUrl == null ? const ColoredBox(color: Colors.white10, child: Icon(Icons.movie_outlined, size: 56, color: Colors.white38)) : RoutedJellyfinImage(client: client, url: imageUrl, fallback: const ColoredBox(color: Colors.white10, child: SizedBox.expand())),
+        child: imageUrl == null ? ColoredBox(color: theme.surface3, child: Icon(Icons.movie_outlined, size: 56, color: theme.textMuted)) : RoutedJellyfinImage(client: client, url: imageUrl, fallback: ColoredBox(color: theme.surface3, child: const SizedBox.expand())),
       ),
     );
     final details = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       Text(mediaItemTitle(item), maxLines: compact ? 2 : 3, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.headlineMedium),
-      if (_subtitle(item).isNotEmpty) ...[const SizedBox(height: 8), Text(_subtitle(item), style: const TextStyle(color: Colors.white70))],
+      if (_subtitle(item).isNotEmpty) ...[const SizedBox(height: 8), Text(_subtitle(item), style: TextStyle(color: theme.textSecondary))],
       if (item.tagline != null) ...[const SizedBox(height: 10), Text(item.tagline!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontStyle: FontStyle.italic))],
       if (item.overview != null) ...[const SizedBox(height: 14), Text(item.overview!, maxLines: compact ? 5 : 8, overflow: TextOverflow.ellipsis)],
-      if (item.genres.isNotEmpty) ...[const SizedBox(height: 12), Text(item.genres.take(4).join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
-      if (item.studios.isNotEmpty) ...[const SizedBox(height: 8), Text('Studios: ${item.studios.take(3).join(', ')}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
-      if (item.people.isNotEmpty) ...[const SizedBox(height: 8), Text('Cast: ${item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))],
+      if (item.genres.isNotEmpty) ...[const SizedBox(height: 12), Text(item.genres.take(4).join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
+      if (item.studios.isNotEmpty) ...[const SizedBox(height: 8), Text('Studios: ${item.studios.take(3).join(', ')}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
+      if (item.people.isNotEmpty) ...[const SizedBox(height: 8), Text('Cast: ${item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
       const SizedBox(height: 18),
       Wrap(spacing: 10, runSpacing: 10, children: [
         if (onPlay != null) FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
@@ -601,7 +602,7 @@ class _Message extends StatelessWidget {
   final Widget? action;
 
   @override
-  Widget build(BuildContext context) => Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: Colors.white38), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), if (action != null) ...[const SizedBox(height: 12), action!]])));
+  Widget build(BuildContext context) { final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme(); return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: theme.textMuted), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge), if (action != null) ...[const SizedBox(height: 12), action!]]))); }
 }
 
 String _duration(Duration duration) {

@@ -101,7 +101,7 @@ class _Poster extends StatelessWidget {
           _MediaImage(imageUrl: imageUrl, imageClient: imageClient, theme: theme),
           if (mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
           if (badge != null) Positioned(top: 10, right: 10, child: badge!),
-          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: Colors.black54, color: theme.accentBright)),
+          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: theme.surface3, color: theme.accentDeep)),
         ]),
       );
 }

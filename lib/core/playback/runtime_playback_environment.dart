@@ -454,7 +454,7 @@ PlatformFamily platformFamilyForCurrentTarget() {
 
 DeviceIdentity _syntheticIdentity() => DeviceIdentity(
       installationId: 'unknown',
-      clientName: 'RodPlayer',
+      clientName: 'Nautilus',
       appVersion: 'unknown',
       platformFamily: platformFamilyForCurrentTarget(),
       deviceName: _platformLabel(),

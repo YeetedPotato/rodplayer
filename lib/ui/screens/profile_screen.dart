@@ -1,14 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:rodplayer/core/theme/appearance_controller.dart';
+import 'package:rodplayer/core/theme/appearance_mode.dart';
+import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({required this.client, required this.onSwitchProfile, required this.onLogout, super.key});
+  const ProfileScreen({required this.client, required this.onSwitchProfile, required this.onLogout, this.appearanceController, super.key});
 
   final JellyfinApiClient client;
   final Future<void> Function() onSwitchProfile;
   final Future<void> Function() onLogout;
+  final AppearanceController? appearanceController;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -175,6 +181,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ]),
           const SizedBox(height: 24),
+          if (widget.appearanceController != null) ...[
+            Text('Appearance', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text('App-local preference', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 4, children: [
+              for (final mode in AppearanceMode.values)
+                ChoiceChip(
+                  label: Text(_appearanceLabel(mode)),
+                  selected: widget.appearanceController!.mode == mode,
+                  onSelected: (selected) {
+                    if (selected) unawaited(widget.appearanceController!.setMode(mode));
+                  },
+                ),
+            ]),
+            const Divider(height: 36),
+          ],
           Text('Jellyfin Profile Preferences', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           TextField(controller: _audio, decoration: const InputDecoration(labelText: 'Preferred audio language', helperText: 'Examples: eng / spa. Blank uses server default.')),
@@ -193,7 +216,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SwitchListTile(value: _autoplayNext, onChanged: (value) => setState(() => _autoplayNext = value), title: const Text('Autoplay next episode')),
           SwitchListTile(value: _hidePlayed, onChanged: (value) => setState(() => _hidePlayed = value), title: const Text('Hide played items in Latest')),
           SwitchListTile(value: _displayMissing, onChanged: (value) => setState(() => _displayMissing = value), title: const Text('Display missing episodes')),
-          if (_saveError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_saveError!, style: const TextStyle(color: Colors.orangeAccent))),
+          if (_saveError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_saveError!, style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error))),
           const SizedBox(height: 16),
           FilledButton(onPressed: _saving ? null : _save, child: _saving ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save preferences')),
           const Divider(height: 36),
@@ -211,3 +234,10 @@ String? _blank(String value) {
   final trimmed = value.trim();
   return trimmed.isEmpty ? null : trimmed;
 }
+
+String _appearanceLabel(AppearanceMode mode) => switch (mode) {
+      AppearanceMode.system => 'System',
+      AppearanceMode.light => 'Light',
+      AppearanceMode.dark => 'Dark',
+      AppearanceMode.oled => 'OLED',
+    };

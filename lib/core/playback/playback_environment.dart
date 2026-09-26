@@ -690,7 +690,7 @@ class ConservativePlaybackEnvironmentProvider implements PlaybackEnvironmentProv
     }
     return DeviceIdentity(
       installationId: 'unknown',
-      clientName: 'RodPlayer',
+      clientName: 'Nautilus',
       appVersion: 'unknown',
       platformFamily: _platformFamily(),
       deviceName: _platformLabel(),

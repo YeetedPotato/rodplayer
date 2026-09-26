@@ -46,7 +46,7 @@ class SharedPreferencesInstallationIdentityStore implements InstallationIdentity
     }
     return InstallationIdentity(
       deviceId: id,
-      clientName: 'RodPlayer',
+      clientName: 'Nautilus',
       deviceName: _platformDeviceName(),
       appVersion: _appVersion,
     );

@@ -6,7 +6,7 @@ void main() {
   test('serializes Jellyfin DeviceProfile structures without backend branding', () async {
     final environment = await const ConservativePlaybackEnvironmentProvider().load();
     final profile = const JellyfinDeviceProfileMapper().map(environment, environment.selectPreferredBackend().capabilities);
-    expect(profile['Name'], 'RodPlayer');
+    expect(profile['Name'], 'Nautilus');
     expect(profile.containsKey('DirectPlayProfiles'), isTrue);
     expect(profile.containsKey('TranscodingProfiles'), isTrue);
     expect(profile.containsKey('CodecProfiles'), isTrue);

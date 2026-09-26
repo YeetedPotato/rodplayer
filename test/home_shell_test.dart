@@ -8,6 +8,7 @@ import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
@@ -26,8 +27,8 @@ void main() {
     expect(theme.extension<RodPlayerTheme>()!.accent, expected);
   });
 
-  Widget app(Widget child, {NavigationMode navigationMode = NavigationMode.traditional, double textScale = 1}) => MaterialApp(
-        theme: rodPlayerThemeData(),
+  Widget app(Widget child, {NavigationMode navigationMode = NavigationMode.traditional, double textScale = 1, AppearanceMode appearance = AppearanceMode.oled}) => MaterialApp(
+        theme: rodPlayerThemeData(mode: appearance),
         home: Builder(builder: (context) {
           final media = MediaQuery.of(context);
           return MediaQuery(data: media.copyWith(navigationMode: navigationMode, textScaler: TextScaler.linear(textScale)), child: child);
@@ -46,9 +47,21 @@ void main() {
     final client = _FakeHomeClient(pending: true);
     await tester.pumpWidget(app(RodPlayerAppShell(client: client, onLogout: () async {}, onSwitchProfile: () async {})));
 
-    expect(find.text('RodPlayer'), findsOneWidget);
+    expect(find.text('Nautilus'), findsOneWidget);
     expect(find.text('Home'), findsWidgets);
     expect(find.byType(HomeScreen), findsOneWidget);
+  });
+
+  testWidgets('light appearance renders the Home shell without layout errors', (tester) async {
+    setSurface(tester, const Size(390, 760));
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await tester.pumpWidget(app(
+      RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {}, onSwitchProfile: () async {}),
+      appearance: AppearanceMode.light,
+    ));
+    await tester.pumpAndSettle();
+    expect(Theme.of(tester.element(find.byType(HomeScreen))).brightness, Brightness.light);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('compact shell uses bottom navigation and switches Home/Search', (tester) async {

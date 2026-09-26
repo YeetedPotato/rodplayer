@@ -34,7 +34,7 @@ void main() {
     expect(() => client.authenticate(username: 'u', password: 'p'), throwsA(isA<JellyfinAuthException>()));
   });
 
-  test('Authorization header uses RodPlayer identity and stable device/version', () async {
+  test('Authorization header uses Nautilus identity and stable device/version', () async {
     late http.BaseRequest seen;
     final mock = MockClient((request) {
       seen = request;
@@ -45,7 +45,7 @@ void main() {
       ..userId = 'user-1';
     await client.getItems();
     final auth = seen.headers['Authorization']!;
-    expect(auth, contains('Client="RodPlayer"'));
+    expect(auth, contains('Client="Nautilus"'));
     expect(auth, contains('Device="Test device"'));
     expect(auth, isNot(contains('FireTV')));
     expect(auth, contains('DeviceId="device-stable"'));

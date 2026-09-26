@@ -7,19 +7,30 @@ import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
+import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
 
 import 'test_support.dart';
 
 void main() {
-  Widget app(Widget child, {double textScale = 1}) => MaterialApp(
-        theme: rodPlayerThemeData(),
+  Widget app(Widget child, {double textScale = 1, AppearanceMode appearance = AppearanceMode.oled}) => MaterialApp(
+        theme: rodPlayerThemeData(mode: appearance),
         home: Builder(
             builder: (context) => MediaQuery(
                 data: MediaQuery.of(context)
                     .copyWith(textScaler: TextScaler.linear(textScale)),
                 child: child)),
       );
+
+  testWidgets('login remains readable in Light appearance', (tester) async {
+    await tester.pumpWidget(app(LoginScreen(
+      identity: testIdentity,
+      onAuthenticated: (_, __) async {},
+    ), appearance: AppearanceMode.light));
+    await tester.pumpAndSettle();
+    expect(find.text('Nautilus'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('private setup validates URL and cancel does not configure',
       (tester) async {
@@ -31,6 +42,8 @@ void main() {
         calls++;
       },
     )));
+    expect(find.text('Nautilus'), findsOneWidget);
+    expect(find.text('RodPlayer'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Set up private access'));
     await tester.pump();

@@ -270,7 +270,7 @@ class _LibraryMessage extends StatelessWidget {
   final Widget? action;
 
   @override
-  Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: Colors.white38), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), if (action != null) ...[const SizedBox(height: 12), action!]]));
+  Widget build(BuildContext context) { final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme(); return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 52, color: theme.textMuted), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge), if (action != null) ...[const SizedBox(height: 12), action!]])); }
 }
 
 class _LoadMoreFooter extends StatelessWidget {

@@ -250,9 +250,9 @@ class _HomeHero extends StatelessWidget {
                 end: Alignment.centerRight,
                 stops: const [0, .36, .7, 1],
                 colors: [
-                  theme.obsidian.withValues(alpha: .94),
-                  theme.obsidian.withValues(alpha: .72),
-                  theme.obsidian.withValues(alpha: .22),
+                  theme.artworkScrim.withValues(alpha: .94),
+                  theme.artworkScrim.withValues(alpha: .72),
+                  theme.artworkScrim.withValues(alpha: .22),
                   Colors.transparent,
                 ],
               ),
@@ -265,7 +265,7 @@ class _HomeHero extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 stops: const [0, .34, 1],
                 colors: [
-                  theme.obsidian.withValues(alpha: .32),
+                  theme.artworkScrim.withValues(alpha: .32),
                   Colors.transparent,
                   Colors.transparent,
                 ],
@@ -280,9 +280,9 @@ class _HomeHero extends StatelessWidget {
                 stops: const [0, .48, .82, 1],
                 colors: [
                   Colors.transparent,
-                  theme.obsidian.withValues(alpha: .12),
-                  theme.obsidian.withValues(alpha: .8),
-                  theme.obsidian,
+                  theme.artworkScrim.withValues(alpha: .12),
+                  theme.artworkScrim.withValues(alpha: .8),
+                  theme.artworkScrim,
                 ],
               ),
             ),
@@ -307,6 +307,7 @@ class _HomeHero extends StatelessWidget {
                       maxLines: compact ? 1 : 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            color: theme.artworkTextPrimary,
                             fontSize: compact ? 28 : 48,
                             height: 1.05,
                           ),
@@ -317,7 +318,7 @@ class _HomeHero extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: theme.textSecondary,
+                        color: theme.artworkTextSecondary,
                         fontSize: compact ? 12 : 14,
                         letterSpacing: .2,
                       ),
@@ -329,7 +330,7 @@ class _HomeHero extends StatelessWidget {
                         maxLines: compact ? 2 : 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: theme.textPrimary,
+                          color: theme.artworkTextPrimary,
                           fontSize: compact ? 13 : 15,
                           height: 1.35,
                         ),
@@ -404,13 +405,13 @@ class _ShelfError extends StatelessWidget {
   final String title;
   final VoidCallback onRetry;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 18), child: Row(children: [Expanded(child: Text('$title unavailable', style: const TextStyle(color: Colors.white70))), TextButton(onPressed: onRetry, child: const Text('Retry'))]));
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 18), child: Row(children: [Expanded(child: Text('$title unavailable', style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).textSecondary))), TextButton(onPressed: onRetry, child: const Text('Retry'))]));
 }
 
 class _HomeEmpty extends StatelessWidget {
   const _HomeEmpty();
   @override
-  Widget build(BuildContext context) => const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.movie_filter_outlined, size: 54, color: Colors.white38), SizedBox(height: 14), Text('No home content yet', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))]));
+  Widget build(BuildContext context) { final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme(); return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.movie_filter_outlined, size: 54, color: theme.textMuted), const SizedBox(height: 14), Text('No home content yet', style: Theme.of(context).textTheme.titleLarge)])); }
 }
 
 class _Load<T extends JellyfinLibraryItem> {
