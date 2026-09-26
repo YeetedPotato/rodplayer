@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
@@ -8,19 +10,7 @@ import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
-
-enum RodPlayerDestination {
-  home('Home', 'Home', Icons.home_outlined, Icons.home),
-  movies('Movies', 'Movies', Icons.movie_outlined, Icons.movie),
-  tvShows('TV Shows', 'TV', Icons.tv_outlined, Icons.tv),
-  search('Search', 'Search', Icons.search, Icons.search);
-
-  const RodPlayerDestination(this.title, this.compactLabel, this.icon, this.selectedIcon);
-  final String title;
-  final String compactLabel;
-  final IconData icon;
-  final IconData selectedIcon;
-}
+import 'package:rodplayer/ui/shell/nautilus_navigation.dart';
 
 class RodPlayerAppShell extends StatefulWidget {
   const RodPlayerAppShell({required this.client, required this.onLogout, required this.onSwitchProfile, this.appearanceController, super.key});
@@ -35,6 +25,11 @@ class RodPlayerAppShell extends StatefulWidget {
 
 class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   RodPlayerDestination _destination = RodPlayerDestination.home;
+  bool? _expandedOverride;
+  late final Map<RodPlayerDestination, FocusNode> _destinationFocusNodes = {
+    for (final destination in RodPlayerDestination.values)
+      destination: FocusNode(debugLabel: destination.title),
+  };
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'RodPlayer search');
   JellyfinUserDataChange? _latestUserDataChange;
   int _userDataRevision = 0;
@@ -42,6 +37,9 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   @override
   void dispose() {
     _searchFocusNode.dispose();
+    for (final focusNode in _destinationFocusNodes.values) {
+      focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -52,6 +50,43 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
         if (mounted) _searchFocusNode.requestFocus();
       });
     }
+  }
+
+  KeyEventResult _handleDirectionalKey(FocusNode node, KeyEvent event) {
+    final context = node.context;
+    if (context == null ||
+        MediaQuery.of(context).navigationMode != NavigationMode.directional ||
+        event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final direction = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowUp => TraversalDirection.up,
+      LogicalKeyboardKey.arrowDown => TraversalDirection.down,
+      LogicalKeyboardKey.arrowLeft => TraversalDirection.left,
+      LogicalKeyboardKey.arrowRight => TraversalDirection.right,
+      _ => null,
+    };
+    if (direction == null) return KeyEventResult.ignored;
+
+    final focused = FocusManager.instance.primaryFocus;
+    if (Navigator.of(context).canPop() ||
+        identical(focused, _searchFocusNode)) {
+      return KeyEventResult.ignored;
+    }
+    final focusContext = focused?.context;
+    final inSidebar =
+        focusContext?.findAncestorWidgetOfExactType<NautilusSideNavigation>() !=
+            null;
+    if (focused != null && direction == TraversalDirection.right && inSidebar) {
+      focused.focusInDirection(direction);
+      return KeyEventResult.handled;
+    }
+    if (direction == TraversalDirection.left && !inSidebar) {
+      _destinationFocusNodes[_destination]?.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _openProfile() {
@@ -79,8 +114,11 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
       },
       child: Focus(
         autofocus: true,
+        onKeyEvent: _handleDirectionalKey,
         child: LayoutBuilder(builder: (context, constraints) {
           final compact = constraints.maxWidth < 720 && !directional;
+          final expanded = directional ||
+              (_expandedOverride ?? constraints.maxWidth >= 1100);
           final body = IndexedStack(index: RodPlayerDestination.values.indexOf(_destination), children: [
             HomeScreen(client: widget.client, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
@@ -92,65 +130,38 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
               backgroundColor: theme.obsidian,
               appBar: AppBar(title: Text(_destination.title), actions: [_ProfileButton(onPressed: _openProfile), _LogoutButton(onLogout: widget.onLogout)]),
               body: SafeArea(bottom: false, child: body),
-              bottomNavigationBar: NavigationBar(
-                selectedIndex: RodPlayerDestination.values.indexOf(_destination),
-                onDestinationSelected: (index) => _select(RodPlayerDestination.values[index]),
-                destinations: [
-                  for (final destination in RodPlayerDestination.values) NavigationDestination(icon: Icon(destination.icon), selectedIcon: Icon(destination.selectedIcon), label: destination.compactLabel),
-                ],
+              bottomNavigationBar: NautilusBottomNavigation(
+                destination: _destination,
+                onSelect: _select,
               ),
             );
           }
           return Scaffold(
             backgroundColor: theme.obsidian,
             body: SafeArea(
-              child: Row(children: [
-                _SideNav(destination: _destination, directional: directional, onSelect: _select, onProfile: _openProfile, onLogout: widget.onLogout),
-                Expanded(child: body),
-              ]),
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    child: NautilusSideNavigation(
+                      destination: _destination,
+                      focusNodes: _destinationFocusNodes,
+                      expanded: expanded,
+                      canCollapse: !directional,
+                      onToggleExpanded: () => setState(() {
+                        _expandedOverride = !expanded;
+                      }),
+                      onSelect: _select,
+                      onProfile: _openProfile,
+                      onLogout: () => unawaited(widget.onLogout()),
+                    ),
+                  ),
+                  Expanded(child: body),
+                ],
+              ),
             ),
           );
-        }),
-      ),
-    );
-  }
-
-}
-
-class _SideNav extends StatelessWidget {
-  const _SideNav({required this.destination, required this.directional, required this.onSelect, required this.onProfile, required this.onLogout});
-  final RodPlayerDestination destination;
-  final bool directional;
-  final ValueChanged<RodPlayerDestination> onSelect;
-  final VoidCallback onProfile;
-  final Future<void> Function() onLogout;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
-    return DecoratedBox(
-      decoration: BoxDecoration(color: theme.surface1, border: Border(right: BorderSide(color: theme.borderColor(0.1)))),
-      child: SizedBox(
-        width: directional ? 188 : 118,
-        child: Column(children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 18), child: Text('Nautilus', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.accentBright, fontWeight: FontWeight.w800))),
-          Expanded(
-            child: NavigationRail(
-              backgroundColor: Colors.transparent,
-              selectedIndex: RodPlayerDestination.values.indexOf(destination),
-              onDestinationSelected: (index) => onSelect(RodPlayerDestination.values[index]),
-              extended: directional,
-              labelType: directional ? null : NavigationRailLabelType.all,
-              destinations: [
-                for (final destination in RodPlayerDestination.values) NavigationRailDestination(icon: Icon(destination.icon), selectedIcon: Icon(destination.selectedIcon), label: Text(destination.title)),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4, children: [_ProfileButton(onPressed: onProfile), _LogoutButton(onLogout: onLogout)]),
-          ),
-        ]),
+          }),
       ),
     );
   }

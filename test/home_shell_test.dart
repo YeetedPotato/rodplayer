@@ -11,8 +11,10 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
+import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
+import 'package:rodplayer/ui/shell/nautilus_navigation.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -44,6 +46,7 @@ void main() {
   }
 
   testWidgets('authenticated shell defaults to Home and renders before futures finish', (tester) async {
+    setSurface(tester, const Size(1200, 800));
     final client = _FakeHomeClient(pending: true);
     await tester.pumpWidget(app(RodPlayerAppShell(client: client, onLogout: () async {}, onSwitchProfile: () async {})));
 
@@ -70,11 +73,11 @@ void main() {
     await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async {}, onSwitchProfile: () async {})));
     await tester.pumpAndSettle();
 
-    expect(find.byType(NavigationBar), findsOneWidget);
-    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byType(NautilusBottomNavigation), findsOneWidget);
+    expect(find.byType(NautilusSideNavigation), findsNothing);
     expect(find.text('Home'), findsWidgets);
     expect(find.text('Movies'), findsWidgets);
-    expect(find.text('TV'), findsWidgets);
+    expect(find.text('Shows'), findsWidgets);
     expect(find.text('Search'), findsWidgets);
     await tester.tap(find.byIcon(Icons.search).last);
     await tester.pumpAndSettle();
@@ -90,17 +93,17 @@ void main() {
     await tester.pumpWidget(app(RodPlayerAppShell(client: _FakeHomeClient(), onLogout: () async => loggedOut = true, onSwitchProfile: () async {}), navigationMode: NavigationMode.directional));
     await tester.pumpAndSettle();
 
-    expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(NautilusSideNavigation), findsOneWidget);
+    expect(find.byType(NautilusBottomNavigation), findsNothing);
     expect(find.text('Movies'), findsWidgets);
-    expect(find.text('TV Shows'), findsWidgets);
+    expect(find.text('Shows'), findsWidgets);
     await tester.tap(find.text('Movies').first);
     await tester.pumpAndSettle();
     expect(find.text('No movies found'), findsOneWidget);
-    await tester.tap(find.text('TV Shows').first);
+    await tester.tap(find.text('Shows').first);
     await tester.pumpAndSettle();
     expect(find.text('No shows found'), findsOneWidget);
-    await tester.tap(find.byTooltip('Log out'));
+    await tester.tap(find.text('Log out'));
     expect(loggedOut, isTrue);
   });
 
@@ -315,6 +318,200 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Resume Movie'), findsWidgets);
+  });
+
+  testWidgets('wide pointer shell shows expanded Nautilus side navigation',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NautilusSideNavigation), findsOneWidget);
+    expect(find.text('Nautilus'), findsOneWidget);
+    expect(find.byType(NavigationRail), findsNothing);
+  });
+
+  testWidgets('medium sidebar collapses and expands without changing selection',
+      (tester) async {
+    setSurface(tester, const Size(900, 800));
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nautilus'), findsNothing);
+    expect(find.byTooltip('Expand navigation'), findsOneWidget);
+    await tester.tap(find.byTooltip('Expand navigation'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nautilus'), findsOneWidget);
+
+    await tester.tap(find.text('Shows').first);
+    await tester.pumpAndSettle();
+    expect(find.text('No shows found'), findsOneWidget);
+    await tester.tap(find.byTooltip('Collapse navigation'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nautilus'), findsNothing);
+    expect(find.byIcon(Icons.tv), findsOneWidget);
+    expect(find.byTooltip('Shows'), findsOneWidget);
+  });
+
+  testWidgets('collapsed destinations expose tooltips and focusable actions',
+      (tester) async {
+    setSurface(tester, const Size(900, 800));
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    for (final label in <String>['Home', 'Movies', 'Shows', 'Search']) {
+      expect(find.byTooltip(label), findsOneWidget);
+    }
+    final navItems = find.descendant(
+        of: find.byType(NautilusSideNavigation),
+        matching: find.byType(InkWell));
+    expect(navItems, findsNWidgets(7));
+    expect(
+        tester
+            .widgetList<InkWell>(navItems)
+            .every((item) => item.onTap != null),
+        isTrue);
+  });
+
+  testWidgets('Cmd+K selects and focuses embedded Search', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SearchScreen), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+        isTrue);
+  });
+
+  testWidgets('desktop Profile action opens the existing ProfileScreen',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.text('Profile'), findsWidgets);
+  });
+
+  testWidgets(
+      'mobile glass navigation contains only the four real destinations',
+      (tester) async {
+    setSurface(tester, const Size(390, 760));
+    await tester.pumpWidget(app(RodPlayerAppShell(
+        client: _FakeHomeClient(),
+        onLogout: () async {},
+        onSwitchProfile: () async {})));
+    await tester.pumpAndSettle();
+
+    final bar = find.byType(NautilusBottomNavigation);
+    expect(bar, findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.descendant(of: bar, matching: find.byType(InkWell)),
+        findsNWidgets(4));
+    expect(find.text('Discover'), findsNothing);
+    expect(find.text('Favorites'), findsNothing);
+    expect(find.text('Collections'), findsNothing);
+    expect(find.text('Settings'), findsNothing);
+  });
+
+  testWidgets(
+      'directional focus can move from navigation into content and back',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    await tester.pumpWidget(app(
+      RodPlayerAppShell(
+          client: _FakeHomeClient(),
+          onLogout: () async {},
+          onSwitchProfile: () async {}),
+      navigationMode: NavigationMode.directional,
+    ));
+    await tester.pumpAndSettle();
+
+    Focus.of(tester.element(find.text('Home').first)).requestFocus();
+    await tester.pump();
+    final sidebarFocus = FocusManager.instance.primaryFocus;
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    final contentFocus = FocusManager.instance.primaryFocus;
+    expect(contentFocus, isNot(same(sidebarFocus)));
+    final contentWidget = find.byWidget(contentFocus!.context!.widget);
+    expect(
+        find.ancestor(
+            of: contentWidget, matching: find.byType(NautilusSideNavigation)),
+        findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    final returnedWidget =
+        find.byWidget(FocusManager.instance.primaryFocus!.context!.widget);
+    expect(
+        find.ancestor(
+            of: returnedWidget, matching: find.byType(NautilusSideNavigation)),
+        findsOneWidget);
+  });
+
+  testWidgets('Light Dark and OLED shell layouts render without overflow',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    for (final mode in <AppearanceMode>[
+      AppearanceMode.light,
+      AppearanceMode.dark,
+      AppearanceMode.oled
+    ]) {
+      await tester.pumpWidget(app(
+        RodPlayerAppShell(
+            client: _FakeHomeClient(),
+            onLogout: () async {},
+            onSwitchProfile: () async {}),
+        appearance: mode,
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: mode.name);
+    }
+  });
+
+  testWidgets('expanded navigation tolerates larger text and remains focusable',
+      (tester) async {
+    setSurface(tester, const Size(1200, 800));
+    await tester.pumpWidget(app(
+      RodPlayerAppShell(
+          client: _FakeHomeClient(),
+          onLogout: () async {},
+          onSwitchProfile: () async {}),
+      textScale: 1.5,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nautilus'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byType(NautilusSideNavigation),
+            matching: find.byType(InkWell)),
+        findsNWidgets(7));
+    expect(tester.takeException(), isNull);
   });
 }
 
