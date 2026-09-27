@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
@@ -26,7 +29,27 @@ void main() {
     expect(first.deviceId, isNotEmpty);
     expect(second.deviceId, first.deviceId);
     expect(first.clientName, 'Nautilus');
-    expect(first.deviceName, isNot('FireTV'));
+    final expectedDeviceName = kIsWeb ? 'Web device' : switch (Platform.operatingSystem) {
+      'android' => 'Android device',
+      'ios' => 'iOS device',
+      'macos' => 'macOS device',
+      'windows' => 'Windows device',
+      'linux' => 'Linux device',
+      _ => 'Unknown device',
+    };
+    expect(first.deviceName, expectedDeviceName);
     expect(first.appVersion, '2.3.4');
+    expect(prefs.getString(SharedPreferencesInstallationIdentityStore.deviceIdKey), first.deviceId);
+  });
+
+  test('legacy ID is retained and moved to the current preference key', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      SharedPreferencesInstallationIdentityStore.legacyDeviceIdKey: 'existing-id',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final identity = await SharedPreferencesInstallationIdentityStore(prefs).load();
+    expect(identity.deviceId, 'existing-id');
+    expect(prefs.getString(SharedPreferencesInstallationIdentityStore.deviceIdKey), 'existing-id');
+    expect(prefs.containsKey(SharedPreferencesInstallationIdentityStore.legacyDeviceIdKey), isFalse);
   });
 }

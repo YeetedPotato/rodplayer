@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -53,6 +54,7 @@ class SharedPreferencesInstallationIdentityStore implements InstallationIdentity
   }
 
   static String _platformDeviceName() {
+    if (kIsWeb) return 'Web device';
     if (Platform.isAndroid) return 'Android device';
     if (Platform.isIOS) return 'iOS device';
     if (Platform.isMacOS) return 'macOS device';
