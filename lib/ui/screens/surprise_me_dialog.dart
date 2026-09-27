@@ -200,13 +200,12 @@ class _SurpriseMeDialogState extends State<SurpriseMeDialog> {
                     icon: const Icon(Icons.info_outline),
                     label: const Text('Details'),
                   ),
-                  FilledButton.icon(
-                    onPressed: item == null || widget.onPlayItem == null
-                        ? null
-                        : () => widget.onPlayItem!(context, item.id),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Play'),
-                  ),
+                  if (item != null && isDirectlyPlayable(item) && widget.onPlayItem != null)
+                    FilledButton.icon(
+                      onPressed: () => widget.onPlayItem!(context, item.id),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Play'),
+                    ),
                 ]),
           ]),
     );

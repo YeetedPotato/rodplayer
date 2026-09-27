@@ -513,9 +513,9 @@ class _CinematicDetailsHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final backdropUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 90) ?? item.imageUrl(client.baseUrl, type: JellyfinImageType.primary, quality: 90);
-    final expandedOpacity = 1 - ((collapse - .05) / .22).clamp(0.0, 1.0);
-    final collapsedOpacity = ((collapse - .12) / .22).clamp(0.0, 1.0);
-    final compactControlsActive = collapsedOpacity >= .5;
+    final expandedOpacity = 1 - ((collapse - .05) / .18).clamp(0.0, 1.0);
+    final collapsedOpacity = ((collapse - .23) / .11).clamp(0.0, 1.0);
+    final compactControlsActive = collapse >= .23;
     final summaryLeft = (compact ? 22.0 : 40.0) +
         (compact ? 54.0 : 48.0) * (collapse * 2.2).clamp(0.0, 1.0);
     final title = mediaItemTitle(item);

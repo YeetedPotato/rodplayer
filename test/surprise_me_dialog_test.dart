@@ -146,6 +146,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Surprise Me never offers direct Play for a Series', (tester) async {
+    setSurface(tester, const Size(1000, 800));
+    final played = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(builder: (context) => TextButton(
+          onPressed: () => showSurpriseMePicker(
+            context: context,
+            client: _SurpriseClient(count: 10),
+            onPlayItem: (_, id) => played.add(id),
+          ),
+          child: const Text('Open'),
+        )),
+      ),
+    ));
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Play'), findsOneWidget);
+
+    await tester.tap(find.byType(DropdownButton<SurpriseMode>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unwatched shows').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Show pick '), findsOneWidget);
+    expect(find.text('Play'), findsNothing);
+    expect(find.text('Details'), findsOneWidget);
+    expect(played, isEmpty);
+  });
+
   testWidgets('Dark and OLED outlined actions use bright semantic contrast',
       (tester) async {
     setSurface(tester, const Size(900, 760));

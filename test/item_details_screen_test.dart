@@ -76,7 +76,7 @@ void main() {
     expect(played, 'movie');
   });
 
-  testWidgets('crossfading action groups expose only one focus target set', (tester) async {
+  testWidgets('collapsing header paints one title and exposes only its visible actions', (tester) async {
     final client = _DetailClient(
       item: _movie('movie', 'A Film', progress: 42),
       similar: List<JellyfinLibraryItem>.generate(12, (index) => _movie('similar-$index', 'Similar $index')),
@@ -91,17 +91,19 @@ void main() {
     final expandedPlay = find.widgetWithText(FilledButton, 'Resume');
     final compactPlay = find.byTooltip('Resume');
     expect(expandedPlay, findsOneWidget);
-    expect(compactPlay, findsOneWidget);
+    expect(compactPlay, findsNothing);
+    expect(find.text('A Film'), findsOneWidget);
 
     ExcludeFocus focusExclusion(Finder target) =>
         tester.widget<ExcludeFocus>(find.ancestor(of: target, matching: find.byType(ExcludeFocus)).first);
 
     expect(focusExclusion(expandedPlay).excluding, isFalse);
-    expect(focusExclusion(compactPlay).excluding, isTrue);
 
     scrollPosition.jumpTo(100);
     await tester.pumpAndSettle();
-    expect(focusExclusion(expandedPlay).excluding, isTrue);
+    expect(expandedPlay, findsNothing);
+    expect(compactPlay, findsOneWidget);
+    expect(find.text('A Film'), findsOneWidget);
     expect(focusExclusion(compactPlay).excluding, isFalse);
   });
 
