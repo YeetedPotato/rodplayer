@@ -262,7 +262,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     return Scaffold(
       backgroundColor: theme.obsidian,
-      appBar: AppBar(title: Text(_item == null ? 'Details' : mediaItemTitle(_item!)), centerTitle: false),
       body: ColoredBox(
         color: theme.obsidian,
         child: _loadingItem
@@ -356,11 +355,27 @@ class _DetailsBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
         final compact = constraints.maxWidth < 720;
+        final topInset = MediaQuery.paddingOf(context).top;
         return CustomScrollView(slivers: [
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 24, compact ? 20 : 36, 24),
-            sliver: SliverToBoxAdapter(child: _Header(item: item, client: client, compact: compact, onPlay: onPlay, favoriteBusy: favoriteBusy, playedBusy: playedBusy, onFavorite: onFavorite, onPlayed: onPlayed)),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _DetailsHeaderDelegate(
+              item: item,
+              client: client,
+              compact: compact,
+              topInset: topInset,
+              onPlay: onPlay,
+              favoriteBusy: favoriteBusy,
+              playedBusy: playedBusy,
+              onFavorite: onFavorite,
+              onPlayed: onPlayed,
+            ),
           ),
+          if (compact && (item.studios.isNotEmpty || item.people.isNotEmpty))
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 24, compact ? 20 : 36, 24),
+              sliver: SliverToBoxAdapter(child: _DetailFacts(item: item)),
+            ),
           if (item.kind == JellyfinItemKind.series) ...[
             SliverPadding(
               padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 0, compact ? 20 : 36, 16),
@@ -409,10 +424,244 @@ class _DetailsBody extends StatelessWidget {
       });
 }
 
-class _Header extends StatelessWidget {
-  const _Header({required this.item, required this.client, required this.compact, required this.onPlay, required this.favoriteBusy, required this.playedBusy, required this.onFavorite, required this.onPlayed});
+class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _DetailsHeaderDelegate({
+    required this.item,
+    required this.client,
+    required this.compact,
+    required this.topInset,
+    required this.onPlay,
+    required this.favoriteBusy,
+    required this.playedBusy,
+    required this.onFavorite,
+    required this.onPlayed,
+  });
+
   final JellyfinLibraryItem item;
   final JellyfinApiClient client;
+  final bool compact;
+  final double topInset;
+  final VoidCallback? onPlay;
+  final bool favoriteBusy;
+  final bool playedBusy;
+  final VoidCallback? onFavorite;
+  final VoidCallback? onPlayed;
+
+  @override
+  double get minExtent => topInset + 64;
+
+  @override
+  double get maxExtent => topInset + (compact ? 420 : 440);
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final range = maxExtent - minExtent;
+    final collapse = range <= 0 ? 1.0 : (shrinkOffset / range).clamp(0.0, 1.0);
+    return _CinematicDetailsHeader(
+      item: item,
+      client: client,
+      compact: compact,
+      topInset: topInset,
+      collapse: collapse,
+      onPlay: onPlay,
+      favoriteBusy: favoriteBusy,
+      playedBusy: playedBusy,
+      onFavorite: onFavorite,
+      onPlayed: onPlayed,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _DetailsHeaderDelegate oldDelegate) =>
+      item != oldDelegate.item ||
+      client != oldDelegate.client ||
+      compact != oldDelegate.compact ||
+      topInset != oldDelegate.topInset ||
+      onPlay != oldDelegate.onPlay ||
+      favoriteBusy != oldDelegate.favoriteBusy ||
+      playedBusy != oldDelegate.playedBusy ||
+      onFavorite != oldDelegate.onFavorite ||
+      onPlayed != oldDelegate.onPlayed;
+}
+
+class _CinematicDetailsHeader extends StatelessWidget {
+  const _CinematicDetailsHeader({
+    required this.item,
+    required this.client,
+    required this.compact,
+    required this.topInset,
+    required this.collapse,
+    required this.onPlay,
+    required this.favoriteBusy,
+    required this.playedBusy,
+    required this.onFavorite,
+    required this.onPlayed,
+  });
+
+  final JellyfinLibraryItem item;
+  final JellyfinApiClient client;
+  final bool compact;
+  final double topInset;
+  final double collapse;
+  final VoidCallback? onPlay;
+  final bool favoriteBusy;
+  final bool playedBusy;
+  final VoidCallback? onFavorite;
+  final VoidCallback? onPlayed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final backdropUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.backdrop, quality: 90) ?? item.imageUrl(client.baseUrl, type: JellyfinImageType.primary, quality: 90);
+    final expandedOpacity = 1 - ((collapse - .05) / .22).clamp(0.0, 1.0);
+    final collapsedOpacity = ((collapse - .12) / .22).clamp(0.0, 1.0);
+    final compactControlsActive = collapsedOpacity >= .5;
+    final summaryLeft = (compact ? 22.0 : 40.0) +
+        (compact ? 54.0 : 48.0) * (collapse * 2.2).clamp(0.0, 1.0);
+    final title = mediaItemTitle(item);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(color: theme.obsidianGlassStrong),
+      child: ClipRect(
+        child: Stack(fit: StackFit.expand, children: [
+          if (backdropUrl != null)
+            Positioned.fill(
+              child: Opacity(
+                opacity: 1 - collapse,
+                child: RoutedJellyfinImage(
+                  client: client,
+                  url: backdropUrl,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  fallback: ColoredBox(color: theme.surface3),
+                ),
+              ),
+            )
+          else
+            Positioned.fill(child: ColoredBox(color: theme.surface3)),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    Colors.black.withValues(alpha: .42),
+                    Colors.transparent,
+                    theme.artworkScrim.withValues(alpha: .98),
+                  ],
+                  stops: const <double>[0, .34, 1],
+                ),
+              ),
+            ),
+          ),
+          if (collapse > 0)
+            Positioned.fill(
+              child: ColoredBox(color: Colors.black.withValues(alpha: collapse * .72)),
+            ),
+          if (expandedOpacity > 0)
+            Positioned(
+              left: summaryLeft,
+              right: compact ? 22 : 40,
+              bottom: compact ? 18 : 28,
+              child: Opacity(
+                opacity: expandedOpacity,
+                child: IgnorePointer(
+                  ignoring: compactControlsActive,
+                  child: ExcludeFocus(
+                    excluding: compactControlsActive,
+                    child: ExcludeSemantics(
+                      excluding: compactControlsActive,
+                      child: _ExpandedDetailSummary(
+                        item: item,
+                        compact: compact,
+                        onPlay: onPlay,
+                        favoriteBusy: favoriteBusy,
+                        playedBusy: playedBusy,
+                        onFavorite: onFavorite,
+                        onPlayed: onPlayed,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (collapsedOpacity > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: topInset,
+              height: 64,
+              child: Opacity(
+                opacity: collapsedOpacity,
+                child: IgnorePointer(
+                  ignoring: !compactControlsActive,
+                  child: ExcludeFocus(
+                    excluding: !compactControlsActive,
+                    child: ExcludeSemantics(
+                      excluding: !compactControlsActive,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(color: theme.obsidianGlassStrong),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 76, right: 12),
+                          child: Row(children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Color.lerp(Colors.white, theme.textPrimary, collapsedOpacity), fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            if (onPlay != null) ...[
+                              const SizedBox(width: 8),
+                              IconButton.filledTonal(
+                                tooltip: hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play',
+                                onPressed: onPlay,
+                                icon: const Icon(Icons.play_arrow),
+                              ),
+                            ],
+                          ]),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 18,
+            top: topInset + 7,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Color.lerp(Colors.black.withValues(alpha: .46), theme.surface2, collapse),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: Icon(Icons.arrow_back, color: Color.lerp(Colors.white, theme.textPrimary, collapse)),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ExpandedDetailSummary extends StatelessWidget {
+  const _ExpandedDetailSummary({
+    required this.item,
+    required this.compact,
+    required this.onPlay,
+    required this.favoriteBusy,
+    required this.playedBusy,
+    required this.onFavorite,
+    required this.onPlayed,
+  });
+
+  final JellyfinLibraryItem item;
   final bool compact;
   final VoidCallback? onPlay;
   final bool favoriteBusy;
@@ -423,58 +672,133 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
-    final imageUrl = item.imageUrl(client.baseUrl, type: JellyfinImageType.primary, quality: 90);
-    final poster = AspectRatio(
-      aspectRatio: 2 / 3,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: imageUrl == null ? ColoredBox(color: theme.surface3, child: Icon(Icons.movie_outlined, size: 56, color: theme.textMuted)) : RoutedJellyfinImage(client: client, url: imageUrl, fallback: ColoredBox(color: theme.surface3, child: const SizedBox.expand())),
+    final metadata = _detailMetadata(item);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 920),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text(
+          mediaItemTitle(item),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                color: theme.artworkTextPrimary,
+                fontSize: compact ? 32 : 44,
+                height: 1.02,
+                shadows: const <Shadow>[Shadow(color: Colors.black54, blurRadius: 18)],
+              ),
+        ),
+        if (metadata.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: metadata.map((label) => _DetailPill(label: label)).toList()),
+        ],
+        if (item.genres.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          Text(item.genres.take(4).join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.artworkTextSecondary, fontWeight: FontWeight.w600)),
+        ],
+        if (item.tagline != null && item.tagline!.trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(item.tagline!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.artworkTextSecondary, fontStyle: FontStyle.italic)),
+        ],
+        if (item.overview != null && item.overview!.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: compact ? 520 : 780),
+            child: Text(item.overview!, maxLines: compact ? 2 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.artworkTextPrimary, height: 1.35)),
+          ),
+        ],
+        if (!compact && (item.studios.isNotEmpty || item.people.isNotEmpty)) ...[
+          const SizedBox(height: 7),
+          _DetailFacts(item: item, onArtwork: true),
+        ],
+        if (onPlay != null || onFavorite != null || onPlayed != null) ...[
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (onPlay != null)
+              FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
+            if (onFavorite != null)
+              OutlinedButton.icon(
+                onPressed: favoriteBusy ? null : onFavorite,
+                icon: Icon(item.userData.isFavorite ? Icons.favorite : Icons.favorite_border),
+                label: Text(item.userData.isFavorite ? 'Remove from favorites' : 'Add to favorites'),
+              ),
+            if (onPlayed != null)
+              OutlinedButton.icon(
+                onPressed: playedBusy ? null : onPlayed,
+                icon: Icon(item.userData.played ? Icons.check_circle : Icons.check_circle_outline),
+                label: Text(item.kind == JellyfinItemKind.audio ? (item.userData.played ? 'Mark unplayed' : 'Mark played') : (item.userData.played ? 'Mark unwatched' : 'Mark watched')),
+              ),
+          ]),
+        ],
+      ]),
+    );
+  }
+}
+
+class _DetailPill extends StatelessWidget {
+  const _DetailPill({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .38),
+        borderRadius: BorderRadius.circular(theme.radiusPill),
+        border: Border.all(color: Colors.white.withValues(alpha: .18)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        child: Text(label, style: TextStyle(color: theme.artworkTextPrimary, fontSize: 12, fontWeight: FontWeight.w700)),
       ),
     );
-    final details = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      Text(mediaItemTitle(item), maxLines: compact ? 2 : 3, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.headlineMedium),
-      if (_subtitle(item).isNotEmpty) ...[const SizedBox(height: 8), Text(_subtitle(item), style: TextStyle(color: theme.textSecondary))],
-      if (item.tagline != null) ...[const SizedBox(height: 10), Text(item.tagline!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontStyle: FontStyle.italic))],
-      if (item.overview != null) ...[const SizedBox(height: 14), Text(item.overview!, maxLines: compact ? 5 : 8, overflow: TextOverflow.ellipsis)],
-      if (item.genres.isNotEmpty) ...[const SizedBox(height: 12), Text(item.genres.take(4).join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
-      if (item.studios.isNotEmpty) ...[const SizedBox(height: 8), Text('Studios: ${item.studios.take(3).join(', ')}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
-      if (item.people.isNotEmpty) ...[const SizedBox(height: 8), Text('Cast: ${item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textSecondary))],
-      const SizedBox(height: 18),
-      Wrap(spacing: 10, runSpacing: 10, children: [
-        if (onPlay != null) FilledButton.icon(onPressed: onPlay, icon: const Icon(Icons.play_arrow), label: Text(hasMeaningfulResumeProgress(item) ? 'Resume' : 'Play')),
-        if (onFavorite != null)
-          OutlinedButton.icon(
-            onPressed: favoriteBusy ? null : onFavorite,
-            icon: Icon(item.userData.isFavorite ? Icons.favorite : Icons.favorite_border),
-            label: Text(item.userData.isFavorite ? 'Remove from favorites' : 'Add to favorites'),
-          ),
-        if (onPlayed != null)
-          OutlinedButton.icon(
-            onPressed: playedBusy ? null : onPlayed,
-            icon: Icon(item.userData.played ? Icons.check_circle : Icons.check_circle_outline),
-            label: Text(item.kind == JellyfinItemKind.audio ? (item.userData.played ? 'Mark unplayed' : 'Mark played') : (item.userData.played ? 'Mark unwatched' : 'Mark watched')),
-          ),
-      ]),
-    ]);
-    if (compact) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Center(child: SizedBox(width: 190, child: poster)), const SizedBox(height: 20), details]);
-    }
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [SizedBox(width: 220, child: poster), const SizedBox(width: 28), Expanded(child: details)]);
   }
-
-  String _subtitle(JellyfinLibraryItem item) => [
-        item.kind == JellyfinItemKind.episode ? item.seriesName : null,
-        item.kind == JellyfinItemKind.episode ? item.seasonName : null,
-        item.kind == JellyfinItemKind.episode ? episodeCode(item) : null,
-        item.productionYear?.toString(),
-        _dateLabel(item.premiereDate),
-        item.officialRating,
-        item.communityRating == null ? null : '★ ${item.communityRating}',
-        item.status,
-        _dateLabel(item.endDate),
-        if (item.runTime != null) _duration(item.runTime!),
-      ].whereType<String>().where((part) => part.isNotEmpty).join(' · ');
 }
+
+class _DetailFacts extends StatelessWidget {
+  const _DetailFacts({required this.item, this.onArtwork = false});
+  final JellyfinLibraryItem item;
+  final bool onArtwork;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final cast = item.people.take(5).map((person) => person.name).where((name) => name.isNotEmpty).join(', ');
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (item.studios.isNotEmpty) _FactLine(label: 'Studios', value: item.studios.take(3).join(', '), theme: theme, onArtwork: onArtwork),
+      if (cast.isNotEmpty) _FactLine(label: 'Cast', value: cast, theme: theme, onArtwork: onArtwork),
+    ]);
+  }
+}
+
+class _FactLine extends StatelessWidget {
+  const _FactLine({required this.label, required this.value, required this.theme, this.onArtwork = false});
+  final String label;
+  final String value;
+  final RodPlayerTheme theme;
+  final bool onArtwork;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Text.rich(TextSpan(children: [
+          TextSpan(text: '$label: ', style: TextStyle(color: onArtwork ? theme.artworkTextSecondary : theme.textMuted, fontWeight: FontWeight.w700)),
+          TextSpan(text: value, style: TextStyle(color: onArtwork ? theme.artworkTextSecondary : theme.textSecondary)),
+        ])),
+      );
+}
+
+List<String> _detailMetadata(JellyfinLibraryItem item) => <String>[
+      if (item.productionYear != null) item.productionYear.toString(),
+      if (item.officialRating != null && item.officialRating!.isNotEmpty) item.officialRating!,
+      if (item.communityRating != null) 'Rating ${item.communityRating} / 10',
+      if (item.runTime != null) _duration(item.runTime!),
+      if (item.status != null && item.status!.isNotEmpty) item.status!,
+      if (_dateLabel(item.premiereDate) != null) _dateLabel(item.premiereDate)!,
+      if (item.kind == JellyfinItemKind.episode && item.seriesName != null) item.seriesName!,
+      if (item.kind == JellyfinItemKind.episode && item.seasonName != null) item.seasonName!,
+      if (item.kind == JellyfinItemKind.episode && episodeCode(item).isNotEmpty) episodeCode(item),
+    ];
 
 class _SeriesControls extends StatelessWidget {
   const _SeriesControls({

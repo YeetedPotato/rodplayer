@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +11,7 @@ import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
+import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 
 import 'test_support.dart';
 
@@ -47,6 +49,92 @@ void main() {
     await tester.pumpWidget(app(ItemDetailsScreen(client: _DetailClient(item: _movie('zero', 'Zero', progress: 0)), itemId: 'zero')));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
+  });
+
+  testWidgets('cinematic header collapses to a pinned title and keeps resume available', (tester) async {
+    String? played;
+    final client = _DetailClient(
+      item: _movie('movie', 'A Film', progress: 42),
+      similar: List<JellyfinLibraryItem>.generate(12, (index) => _movie('similar-$index', 'Similar $index')),
+    );
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie', onPlayItem: (_, id) => played = id)));
+    await tester.pumpAndSettle();
+
+    final header = find.byType(SliverPersistentHeader).first;
+    final expandedExtent = tester.renderObject<RenderSliver>(header).geometry!.paintExtent;
+    expect(find.widgetWithText(FilledButton, 'Resume'), findsOneWidget);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -640));
+    await tester.pumpAndSettle();
+
+    final collapsedExtent = tester.renderObject<RenderSliver>(header).geometry!.paintExtent;
+    expect(collapsedExtent, lessThan(expandedExtent));
+    expect(collapsedExtent, lessThanOrEqualTo(80));
+    expect(find.byTooltip('Resume'), findsOneWidget);
+    expect(find.text('A Film'), findsWidgets);
+    await tester.tap(find.byTooltip('Resume'));
+    expect(played, 'movie');
+  });
+
+  testWidgets('crossfading action groups expose only one focus target set', (tester) async {
+    final client = _DetailClient(
+      item: _movie('movie', 'A Film', progress: 42),
+      similar: List<JellyfinLibraryItem>.generate(12, (index) => _movie('similar-$index', 'Similar $index')),
+    );
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'movie')));
+    await tester.pumpAndSettle();
+
+    final scrollPosition = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    scrollPosition.jumpTo(80);
+    await tester.pumpAndSettle();
+
+    final expandedPlay = find.widgetWithText(FilledButton, 'Resume');
+    final compactPlay = find.byTooltip('Resume');
+    expect(expandedPlay, findsOneWidget);
+    expect(compactPlay, findsOneWidget);
+
+    ExcludeFocus focusExclusion(Finder target) =>
+        tester.widget<ExcludeFocus>(find.ancestor(of: target, matching: find.byType(ExcludeFocus)).first);
+
+    expect(focusExclusion(expandedPlay).excluding, isFalse);
+    expect(focusExclusion(compactPlay).excluding, isTrue);
+
+    scrollPosition.jumpTo(100);
+    await tester.pumpAndSettle();
+    expect(focusExclusion(expandedPlay).excluding, isTrue);
+    expect(focusExclusion(compactPlay).excluding, isFalse);
+  });
+
+  testWidgets('cinematic header prefers real backdrop art and falls back to primary art', (tester) async {
+    final backdropItem = JellyfinLibraryItem.fromJson(<String, dynamic>{
+      'Id': 'artwork',
+      'Name': 'Artwork',
+      'Type': 'Movie',
+      'ImageTags': <String, dynamic>{'Primary': 'poster-tag'},
+      'BackdropImageTags': <String>['backdrop-tag'],
+    });
+    var client = _DetailClient(item: backdropItem);
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'artwork')));
+    await tester.pumpAndSettle();
+
+    var image = tester.widget<RoutedJellyfinImage>(find.byType(RoutedJellyfinImage).first);
+    expect(image.url, contains('/Images/Backdrop?'));
+    expect(image.url, contains('backdrop-tag'));
+    expect(image.fit, BoxFit.cover);
+
+    final primaryOnlyItem = JellyfinLibraryItem.fromJson(<String, dynamic>{
+      'Id': 'poster',
+      'Name': 'Poster fallback',
+      'Type': 'Movie',
+      'ImageTags': <String, dynamic>{'Primary': 'poster-tag'},
+    });
+    client = _DetailClient(item: primaryOnlyItem);
+    await tester.pumpWidget(app(ItemDetailsScreen(client: client, itemId: 'poster')));
+    await tester.pumpAndSettle();
+
+    image = tester.widget<RoutedJellyfinImage>(find.byType(RoutedJellyfinImage).first);
+    expect(image.url, contains('/Images/Primary?'));
+    expect(image.url, contains('poster-tag'));
   });
 
   testWidgets('favorite and watched actions update state and emit changes', (tester) async {
