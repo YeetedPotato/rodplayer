@@ -11,6 +11,7 @@ import 'package:rodplayer/ui/screens/discover_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
+import 'package:rodplayer/ui/player/player_route.dart';
 import 'package:rodplayer/ui/shell/nautilus_navigation.dart';
 
 class RodPlayerAppShell extends StatefulWidget {
@@ -103,6 +104,22 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
     });
   }
 
+  void _playItem(BuildContext routeContext, String itemId) {
+    unawaited(_playItemAndRefresh(routeContext, itemId));
+  }
+
+  Future<void> _playItemAndRefresh(
+      BuildContext routeContext, String itemId) async {
+    await Navigator.of(routeContext).push<void>(MaterialPageRoute<void>(
+      builder: (_) => PlayerRoute(client: widget.client, itemId: itemId),
+    ));
+    if (!mounted) return;
+    _onUserDataChanged(JellyfinUserDataChange(
+      itemId: itemId,
+      playbackProgressMayHaveChanged: true,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
@@ -124,7 +141,7 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
             HomeScreen(client: widget.client, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.tvShows, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
-            DiscoverScreen(client: widget.client, active: _destination == RodPlayerDestination.discover, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
+            DiscoverScreen(client: widget.client, active: _destination == RodPlayerDestination.discover, onPlayItem: _playItem, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
           ]);
           if (compact) {

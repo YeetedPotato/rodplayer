@@ -5,6 +5,7 @@ import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
+import 'package:rodplayer/ui/screens/surprise_me_dialog.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
@@ -14,6 +15,7 @@ class DiscoverScreen extends StatefulWidget {
   const DiscoverScreen({
     required this.client,
     this.active = true,
+    this.onPlayItem,
     this.onUserDataChanged,
     this.latestUserDataChange,
     this.userDataRevision = 0,
@@ -22,6 +24,7 @@ class DiscoverScreen extends StatefulWidget {
 
   final JellyfinApiClient client;
   final bool active;
+  final DetailPlayItemCallback? onPlayItem;
   final JellyfinUserDataChangedCallback? onUserDataChanged;
   final JellyfinUserDataChange? latestUserDataChange;
   final int userDataRevision;
@@ -146,8 +149,25 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Discover',
-                      style: Theme.of(context).textTheme.headlineMedium),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('Discover',
+                            style: Theme.of(context).textTheme.headlineMedium),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.tonalIcon(
+                        onPressed: () => showSurpriseMePicker(
+                          context: context,
+                          client: widget.client,
+                          onPlayItem: widget.onPlayItem,
+                          onUserDataChanged: widget.onUserDataChanged,
+                        ),
+                        icon: const Icon(Icons.shuffle),
+                        label: const Text('Surprise Me'),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     'Highly rated and recently added movies and shows.',
