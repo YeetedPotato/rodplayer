@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
@@ -22,64 +21,81 @@ class FocusableMediaCard extends StatefulWidget {
 }
 
 class _FocusableMediaCardState extends State<FocusableMediaCard> {
-  late final FocusNode _focusNode;
-  FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode;
-  @override void initState() { super.initState(); _focusNode = FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'); }
-  @override void dispose() { if (widget.focusNode == null) _focusNode.dispose(); super.dispose(); }
+  FocusNode? _ownedFocusNode;
+  bool _hovered = false;
 
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
-      widget.onTap?.call();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
+  FocusNode get _effectiveFocusNode => widget.focusNode ?? (_ownedFocusNode ??= FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'));
+  @override void dispose() { _ownedFocusNode?.dispose(); super.dispose(); }
+
+  void _handleEmptyTap() {}
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final focused = _effectiveFocusNode.hasFocus;
     final radius = BorderRadius.circular(theme.radiusMedium);
-    return Focus(
-      focusNode: _effectiveFocusNode,
-      autofocus: widget.autofocus,
-      onFocusChange: (_) => setState(() {}),
-      onKeyEvent: _handleKey,
-      child: AnimatedScale(
-        scale: focused ? 1.045 : 1,
-        duration: const Duration(milliseconds: 175), curve: Curves.easeOutCubic,
+    final contentRadius = BorderRadius.circular(theme.radiusMedium > 2 ? theme.radiusMedium - 2 : 0);
+    final borderColor = focused
+        ? theme.accentBright
+        : _hovered
+            ? theme.borderColor(0.24)
+            : theme.borderColor(0.09);
+    final boxShadow = focused
+        ? <BoxShadow>[BoxShadow(color: theme.accent.withValues(alpha: 0.18), blurRadius: 12)]
+        : _hovered
+            ? <BoxShadow>[BoxShadow(color: theme.shadowColor, blurRadius: 12, offset: const Offset(0, 4))]
+            : const <BoxShadow>[];
+    return AnimatedScale(
+        scale: focused ? 1.045 : _hovered ? 1.03 : 1,
+        duration: const Duration(milliseconds: 175),
+        curve: Curves.easeOutCubic,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 175), curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 175),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
-            color: theme.obsidianGlass, borderRadius: radius,
-            border: Border.all(color: focused ? theme.accentBright : theme.obsidianGlass, width: focused ? 2 : 1),
-            boxShadow: focused ? [...theme.glassShadow, ...theme.accentGlow] : theme.glassShadow,
-          ), clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: widget.onTap, borderRadius: radius, focusColor: Colors.transparent, hoverColor: Colors.transparent,
-            splashColor: theme.accent.withValues(alpha: 0.16),
-            child: LayoutBuilder(builder: (context, constraints) {
-              final poster = _Poster(
-                aspectRatio: widget.aspectRatio,
-                imageUrl: widget.imageUrl,
-                imageClient: widget.imageClient,
-                progress: widget.progress,
-                mediaInfo: widget.mediaInfo,
-                badge: widget.badge,
-                theme: theme,
-              );
-              final metadata = _Metadata(title: widget.title, subtitle: widget.subtitle, theme: theme);
-              if (!constraints.hasBoundedHeight) {
-                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [poster, metadata]);
-              }
-              return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Expanded(flex: 3, child: poster),
-                Flexible(flex: 1, child: metadata),
-              ]);
-            }),
+            color: theme.obsidianGlass,
+            borderRadius: radius,
+            border: Border.all(color: borderColor, width: focused ? 2 : 1),
+            boxShadow: boxShadow,
+          ),
+          child: ClipRRect(
+            borderRadius: contentRadius,
+            child: InkWell(
+              focusNode: _effectiveFocusNode,
+              autofocus: widget.autofocus,
+              onFocusChange: (_) => setState(() {}),
+              onTap: widget.onTap ?? _handleEmptyTap,
+              excludeFromSemantics: widget.onTap == null,
+              onHover: (value) {
+                if (_hovered != value) setState(() => _hovered = value);
+              },
+              borderRadius: contentRadius,
+              focusColor: Colors.transparent,
+              hoverColor: Colors.transparent,
+              splashColor: theme.accent.withValues(alpha: 0.16),
+              child: LayoutBuilder(builder: (context, constraints) {
+                final poster = _Poster(
+                  aspectRatio: widget.aspectRatio,
+                  imageUrl: widget.imageUrl,
+                  imageClient: widget.imageClient,
+                  progress: widget.progress,
+                  mediaInfo: widget.mediaInfo,
+                  badge: widget.badge,
+                  theme: theme,
+                );
+                final metadata = _Metadata(title: widget.title, subtitle: widget.subtitle, theme: theme);
+                if (!constraints.hasBoundedHeight) {
+                  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [poster, metadata]);
+                }
+                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Expanded(flex: 3, child: poster),
+                  Flexible(flex: 1, child: metadata),
+                ]);
+              }),
+            ),
           ),
         ),
-      ),
     );
   }
 }
@@ -101,7 +117,7 @@ class _Poster extends StatelessWidget {
           _MediaImage(imageUrl: imageUrl, imageClient: imageClient, theme: theme),
           if (mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
           if (badge != null) Positioned(top: 10, right: 10, child: badge!),
-          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: theme.surface3, color: theme.accentDeep)),
+          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 3, backgroundColor: theme.surface3, color: theme.accentBright)),
         ]),
       );
 }

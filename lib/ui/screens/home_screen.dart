@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
         itemCount: state.items.length,
         aspectRatio: aspectRatio,
         autofocusFirstItem: title == 'Continue Watching',
-        itemBuilder: (context, index) {
+        itemBuilder: (context, index, focusNode, {required autofocus}) {
           final item = state.items[index];
           return FocusableMediaCard(
             title: _title(item),
@@ -185,6 +185,8 @@ class _HomeScreenState extends State<HomeScreen> {
             progress: progress?.call(item),
             aspectRatio: aspectRatio,
             badge: userDataBadgeFor(item),
+            focusNode: focusNode,
+            autofocus: autofocus,
             onTap: () => _openDetails(item),
           );
         },

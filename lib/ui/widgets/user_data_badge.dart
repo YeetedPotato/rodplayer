@@ -14,13 +14,13 @@ class UserDataBadge extends StatelessWidget {
     return Semantics(
       label: labels.join(', '),
       child: DecoratedBox(
-        decoration: BoxDecoration(color: theme.obsidianGlassStrong, borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.accent.withValues(alpha: .5))),
+        decoration: BoxDecoration(color: theme.obsidianGlassStrong, borderRadius: BorderRadius.circular(theme.radiusPill), border: Border.all(color: theme.accentBright.withValues(alpha: .34))),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (userData.isFavorite) const Icon(Icons.favorite, size: 15),
+            if (userData.isFavorite) Icon(Icons.favorite, size: 15, color: theme.accentBright),
             if (userData.isFavorite && userData.played) const SizedBox(width: 5),
-            if (userData.played) const Icon(Icons.check_circle, size: 15),
+            if (userData.played) Icon(Icons.check_circle, size: 15, color: theme.accentBright),
           ]),
         ),
       ),
