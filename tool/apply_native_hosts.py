@@ -48,6 +48,20 @@ def patch_windows_cmake() -> None:
         path.write_text(text)
 
 
+def patch_windows_title(root: Path = ROOT) -> None:
+    path = root / "windows" / "runner" / "main.cpp"
+    if not path.exists():
+        return
+    text = path.read_text()
+    generated_title = 'window.Create(L"rodplayer",'
+    branded_title = 'window.Create(L"Nautilus",'
+    if branded_title in text and generated_title not in text:
+        return
+    if text.count(generated_title) != 1:
+        raise RuntimeError("expected one generated Windows window title")
+    path.write_text(text.replace(generated_title, branded_title))
+
+
 def patch_android_gradle() -> None:
     groovy = ROOT / "android" / "app" / "build.gradle"
     kotlin = ROOT / "android" / "app" / "build.gradle.kts"
@@ -197,6 +211,7 @@ def main(platform: str) -> None:
     elif platform == "windows":
         copy("windows/flutter_window.cpp", "windows/runner/flutter_window.cpp")
         patch_windows_cmake()
+        patch_windows_title()
     else:
         raise SystemExit(f"unknown platform: {platform}")
 
