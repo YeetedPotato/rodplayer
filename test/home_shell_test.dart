@@ -10,6 +10,7 @@ import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
+import 'package:rodplayer/ui/screens/discover_screen.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
@@ -79,6 +80,27 @@ void main() {
     expect(find.text('Movies'), findsWidgets);
     expect(find.text('Shows'), findsWidgets);
     expect(find.text('Search'), findsWidgets);
+    final bottomNavigation = find.byType(NautilusBottomNavigation);
+    for (final label in <String>['Home', 'Movies', 'Shows', 'Search']) {
+      expect(
+          find.descendant(
+              of: bottomNavigation, matching: find.text(label)),
+          findsOneWidget);
+    }
+    expect(
+        find.descendant(
+            of: bottomNavigation, matching: find.text('Discover')),
+        findsNothing);
+    expect(find.byTooltip('Discover'), findsOneWidget);
+    await tester.tap(find.byTooltip('Discover'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DiscoverScreen), findsOneWidget);
+    expect(find.text('Discover'), findsWidgets);
+    expect(
+        find.descendant(
+            of: bottomNavigation, matching: find.text('Discover')),
+        findsNothing);
+    expect(find.byIcon(Icons.explore), findsOneWidget);
     await tester.tap(find.byIcon(Icons.search).last);
     await tester.pumpAndSettle();
     expect(find.byType(SearchScreen), findsOneWidget);
@@ -332,6 +354,10 @@ void main() {
     expect(find.byType(NautilusSideNavigation), findsOneWidget);
     expect(find.text('Nautilus'), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
+    await tester.tap(find.text('Discover').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(DiscoverScreen), findsOneWidget);
+    expect(find.byIcon(Icons.explore), findsOneWidget);
   });
 
   testWidgets('medium sidebar collapses and expands without changing selection',
@@ -368,13 +394,13 @@ void main() {
         onSwitchProfile: () async {})));
     await tester.pumpAndSettle();
 
-    for (final label in <String>['Home', 'Movies', 'Shows', 'Search']) {
+    for (final label in <String>['Home', 'Movies', 'Shows', 'Discover', 'Search']) {
       expect(find.byTooltip(label), findsOneWidget);
     }
     final navItems = find.descendant(
         of: find.byType(NautilusSideNavigation),
         matching: find.byType(InkWell));
-    expect(navItems, findsNWidgets(7));
+    expect(navItems, findsNWidgets(8));
     expect(
         tester
             .widgetList<InkWell>(navItems)
@@ -416,7 +442,7 @@ void main() {
   });
 
   testWidgets(
-      'mobile glass navigation contains only the four real destinations',
+      'mobile glass navigation has four tabs and a Discover app bar action',
       (tester) async {
     setSurface(tester, const Size(390, 760));
     await tester.pumpWidget(app(RodPlayerAppShell(
@@ -430,7 +456,13 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.descendant(of: bar, matching: find.byType(InkWell)),
         findsNWidgets(4));
-    expect(find.text('Discover'), findsNothing);
+    for (final label in <String>['Home', 'Movies', 'Shows', 'Search']) {
+      expect(find.descendant(of: bar, matching: find.text(label)),
+          findsOneWidget);
+    }
+    expect(find.descendant(of: bar, matching: find.text('Discover')),
+        findsNothing);
+    expect(find.byTooltip('Discover'), findsOneWidget);
     expect(find.text('Favorites'), findsNothing);
     expect(find.text('Collections'), findsNothing);
     expect(find.text('Settings'), findsNothing);
@@ -510,7 +542,7 @@ void main() {
         find.descendant(
             of: find.byType(NautilusSideNavigation),
             matching: find.byType(InkWell)),
-        findsNWidgets(7));
+        findsNWidgets(8));
     expect(tester.takeException(), isNull);
   });
 }

@@ -5,6 +5,7 @@ enum RodPlayerDestination {
   home('Home', 'Home', Icons.home_outlined, Icons.home),
   movies('Movies', 'Movies', Icons.movie_outlined, Icons.movie),
   tvShows('Shows', 'Shows', Icons.tv_outlined, Icons.tv),
+  discover('Discover', 'Discover', Icons.explore_outlined, Icons.explore),
   search('Search', 'Search', Icons.search, Icons.search);
 
   const RodPlayerDestination(
@@ -14,6 +15,13 @@ enum RodPlayerDestination {
   final IconData icon;
   final IconData selectedIcon;
 }
+
+const compactRodPlayerDestinations = <RodPlayerDestination>[
+  RodPlayerDestination.home,
+  RodPlayerDestination.movies,
+  RodPlayerDestination.tvShows,
+  RodPlayerDestination.search,
+];
 
 class NautilusSideNavigation extends StatelessWidget {
   const NautilusSideNavigation({
@@ -193,7 +201,7 @@ class NautilusBottomNavigation extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
           child: Row(
             children: [
-              for (final item in RodPlayerDestination.values)
+              for (final item in compactRodPlayerDestinations)
                 Expanded(
                   child: _NavigationItem(
                     label: item.compactLabel,

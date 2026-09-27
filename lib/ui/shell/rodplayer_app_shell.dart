@@ -7,6 +7,7 @@ import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/ui/screens/home_screen.dart';
+import 'package:rodplayer/ui/screens/discover_screen.dart';
 import 'package:rodplayer/ui/screens/media_library_screen.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 import 'package:rodplayer/ui/screens/search_screen.dart';
@@ -123,12 +124,26 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
             HomeScreen(client: widget.client, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.movies, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             MediaLibraryScreen(client: widget.client, kind: JellyfinLibraryKind.tvShows, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
+            DiscoverScreen(client: widget.client, active: _destination == RodPlayerDestination.discover, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
             SearchScreen(client: widget.client, embedded: true, focusNode: _searchFocusNode, autofocus: false, userDataRevision: _userDataRevision, latestUserDataChange: _latestUserDataChange, onUserDataChanged: _onUserDataChanged),
           ]);
           if (compact) {
             return Scaffold(
               backgroundColor: theme.obsidian,
-              appBar: AppBar(title: Text(_destination.title), actions: [_ProfileButton(onPressed: _openProfile), _LogoutButton(onLogout: widget.onLogout)]),
+              appBar: AppBar(
+                title: Text(_destination.title),
+                actions: [
+                  IconButton(
+                    tooltip: 'Discover',
+                    onPressed: () => _select(RodPlayerDestination.discover),
+                    icon: Icon(_destination == RodPlayerDestination.discover
+                        ? Icons.explore
+                        : Icons.explore_outlined),
+                  ),
+                  _ProfileButton(onPressed: _openProfile),
+                  _LogoutButton(onLogout: widget.onLogout),
+                ],
+              ),
               body: SafeArea(bottom: false, child: body),
               bottomNavigationBar: NautilusBottomNavigation(
                 destination: _destination,
