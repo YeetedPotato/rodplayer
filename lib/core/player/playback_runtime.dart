@@ -9,7 +9,13 @@ import 'package:rodplayer/core/player/track_controller.dart';
 /// Read-only, backend-neutral view binding for the currently active runtime.
 /// The coordinator replaces this atomically whenever it replaces a runtime.
 class PlaybackRuntimeViewBinding {
-  const PlaybackRuntimeViewBinding({this.engine, this.surface, this.tracks, this.advanced, this.plan, this.runtimeId});
+  const PlaybackRuntimeViewBinding(
+      {this.engine,
+      this.surface,
+      this.tracks,
+      this.advanced,
+      this.plan,
+      this.runtimeId});
 
   const PlaybackRuntimeViewBinding.unavailable()
       : engine = null,
@@ -27,15 +33,19 @@ class PlaybackRuntimeViewBinding {
   final String? runtimeId;
 
   AdvancedPlaybackCapabilities get capabilities {
-    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
-    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    final base = advanced?.capabilities ??
+        const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities =
+        tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
     return base.withTrackSelection(
       audioTrackSwitching: trackCapabilities.audioSelection,
       subtitleTrackSwitching: trackCapabilities.subtitleSelection,
     );
   }
 
-  factory PlaybackRuntimeViewBinding.fromSession(PlaybackRuntimeSession session) => PlaybackRuntimeViewBinding(
+  factory PlaybackRuntimeViewBinding.fromSession(
+          PlaybackRuntimeSession session) =>
+      PlaybackRuntimeViewBinding(
         engine: session.engine,
         surface: session.surface,
         tracks: session.tracks,
@@ -45,7 +55,8 @@ class PlaybackRuntimeViewBinding {
       );
 }
 
-typedef PlaybackRuntimePreparation = Future<void> Function(PlaybackRuntimeSession session);
+typedef PlaybackRuntimePreparation = Future<void> Function(
+    PlaybackRuntimeSession session);
 
 class PlaybackRuntimeUnavailableException implements Exception {
   const PlaybackRuntimeUnavailableException(this.backendId);
@@ -53,7 +64,8 @@ class PlaybackRuntimeUnavailableException implements Exception {
   final String backendId;
 
   @override
-  String toString() => 'PlaybackRuntimeUnavailableException: no runtime registered for "$backendId"';
+  String toString() =>
+      'PlaybackRuntimeUnavailableException: no runtime registered for "$backendId"';
 }
 
 class PlaybackActivationException implements Exception {
@@ -63,7 +75,8 @@ class PlaybackActivationException implements Exception {
   final Object error;
 
   @override
-  String toString() => 'PlaybackActivationException: failed to activate "$backendId": $error';
+  String toString() =>
+      'PlaybackActivationException: failed to activate "$backendId": $error';
 }
 
 class PlaybackActivationAggregateException implements Exception {
@@ -72,7 +85,8 @@ class PlaybackActivationAggregateException implements Exception {
   final Map<String, Object> failures;
 
   @override
-  String toString() => 'PlaybackActivationAggregateException: ${failures.entries.map((entry) => '${entry.key}: ${entry.value}').join('; ')}';
+  String toString() =>
+      'PlaybackActivationAggregateException: ${failures.entries.map((entry) => '${entry.key}: ${entry.value}').join('; ')}';
 }
 
 abstract interface class PlaybackBackendRuntime {
@@ -102,8 +116,10 @@ class PlaybackRuntimeSession {
   /// Runtime controls and track selection have separate owners. Track support
   /// is always derived from [tracks], never declared independently by controls.
   AdvancedPlaybackCapabilities get advancedCapabilities {
-    final base = advanced?.capabilities ?? const AdvancedPlaybackCapabilities.unavailable();
-    final trackCapabilities = tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
+    final base = advanced?.capabilities ??
+        const AdvancedPlaybackCapabilities.unavailable();
+    final trackCapabilities =
+        tracks?.capabilities ?? const TrackSelectionCapabilities.unavailable();
     return base.withTrackSelection(
       audioTrackSwitching: trackCapabilities.audioSelection,
       subtitleTrackSwitching: trackCapabilities.subtitleSelection,
@@ -128,17 +144,42 @@ class PlaybackRuntimeSession {
   void bindLogicalSession(LogicalPlaybackSession session) {
     final tracks = _tracks;
     if (tracks != null && tracks is! LogicalSessionTrackSelectionController) {
-      _tracks = LogicalSessionTrackSelectionController(delegate: tracks, session: session);
+      _tracks = LogicalSessionTrackSelectionController(
+          delegate: tracks,
+          session: session,
+          isCurrent: () => !_disposed && _logicalAuthority);
     }
   }
+
   var _disposed = false;
+  var _logicalAuthority = false;
+
+  bool get hasLogicalWriteAuthority => !_disposed && _logicalAuthority;
+  void claimLogicalAuthority() => _logicalAuthority = true;
+  void retireLogicalAuthority() => _logicalAuthority = false;
 
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    retireLogicalAuthority();
     await engine.stop();
     await engine.dispose();
   }
+}
+
+/// Seeks a newly opened backend before playback continues at a resume point.
+Future<void> preparePlaybackStartPosition({
+  required PlaybackRuntimeSession candidate,
+  required LogicalPlaybackSession session,
+  required Duration startPosition,
+  bool startPlayingAfterSeek = true,
+}) async {
+  if (startPosition <= Duration.zero) return;
+  final engine = candidate.engine;
+  if (engine.playing.value) await engine.pause();
+  await engine.seek(startPosition);
+  session.position = startPosition;
+  if (startPlayingAfterSeek) await engine.play();
 }
 
 class PlaybackRuntimeRegistry {
@@ -157,5 +198,6 @@ class PlaybackRuntimeRegistry {
     return null;
   }
 
-  bool canExecute(String backendId) => executableBackendIds.contains(backendId) || resolve(backendId) != null;
+  bool canExecute(String backendId) =>
+      executableBackendIds.contains(backendId) || resolve(backendId) != null;
 }

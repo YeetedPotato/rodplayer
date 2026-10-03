@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
@@ -14,138 +18,437 @@ import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 
 import 'fakes/test_playback_engine.dart';
+import 'test_support.dart';
 
 void main() {
+  test(
+    'dispose during commit notification never republishes disposed runtime',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: [runtime]),
+      );
+      await coordinator.activate(_plan('A'));
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final published = <String?>[];
+      coordinator.activeBinding.addListener(
+        () =>
+            published.add(coordinator.activeBinding.value.plan?.mediaSourceId),
+      );
+      final activation = coordinator.activate(
+        _plan('B'),
+        onCommit: (_, next) async {
+          expect(coordinator.activeBinding.value.engine, same(next.engine));
+          expect(coordinator.session.activePlan, same(next.plan));
+          entered.complete();
+          await release.future;
+        },
+      );
+      final failed = expectLater(activation, throwsStateError);
+      await entered.future;
+      await coordinator.dispose();
+      release.complete();
+      await failed;
+      expect(published, ['B', null]);
+      expect(coordinator.activeBinding.value.engine, isNull);
+      expect(runtime.created.map((engine) => engine.disposeCount), [1, 1]);
+    },
+  );
+
+  test(
+    'supersession during notification cannot republish the committed binding',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: [runtime]),
+      );
+      addTearDown(coordinator.dispose);
+      await coordinator.activate(_plan('A'));
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final published = <String?>[];
+      coordinator.activeBinding.addListener(
+        () =>
+            published.add(coordinator.activeBinding.value.plan?.mediaSourceId),
+      );
+      final b = coordinator.activate(
+        _plan('B'),
+        onCommit: (_, __) async {
+          entered.complete();
+          await release.future;
+        },
+      );
+      final superseded = expectLater(
+        b,
+        throwsA(isA<PlaybackActivationSupersededException>()),
+      );
+      await entered.future;
+      final c = coordinator.activate(_plan('C'));
+      release.complete();
+      await superseded;
+      await c;
+      expect(published, ['B', 'C']);
+      expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'C');
+      expect(coordinator.session.activePlan.mediaSourceId, 'C');
+      expect(runtime.created[1].disposeCount, 1);
+    },
+  );
+
+  test(
+    'commit notification failure does not undo the published transaction',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: [runtime]),
+      );
+      addTearDown(coordinator.dispose);
+      await coordinator.activate(_plan('A'));
+      final next = await coordinator.activate(
+        _plan('B'),
+        onCommit: (_, __) async => throw StateError('observer'),
+      );
+      expect(coordinator.active, same(next));
+      expect(coordinator.activeBinding.value.engine, same(next.engine));
+      expect(
+        coordinator.activeBinding.value.plan,
+        same(coordinator.session.activePlan),
+      );
+      expect(coordinator.diagnostics?.observerFailure, isA<StateError>());
+      expect(runtime.created[0].disposeCount, 1);
+    },
+  );
+
   test('selected media kit plan resolves to media kit runtime', () {
     final runtime = MediaKitPlaybackRuntime();
-    final registry = PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]);
+    final registry = PlaybackRuntimeRegistry(
+      runtimes: <PlaybackBackendRuntime>[runtime],
+    );
 
     expect(registry.resolve('media_kit'), same(runtime));
   });
 
   test('missing runtime returns typed unavailable failure', () async {
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(executableBackendIds: const <String>{}));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(executableBackendIds: const <String>{}),
+    );
 
-    await expectLater(coordinator.activate(_plan('missing', engineId: 'missing')), throwsA(isA<PlaybackRuntimeUnavailableException>()));
+    await expectLater(
+      coordinator.activate(_plan('missing', engineId: 'missing')),
+      throwsA(isA<PlaybackRuntimeUnavailableException>()),
+    );
   });
 
   test('future unavailable backend cannot execute', () {
-    final registry = PlaybackRuntimeRegistry(executableBackendIds: const <String>{'media_kit'});
+    final registry = PlaybackRuntimeRegistry(
+      executableBackendIds: const <String>{'media_kit'},
+    );
 
     expect(registry.canExecute('android_native'), isFalse);
   });
 
-  test('runtime open receives exact authoritative PlaybackPlan and URL', () async {
-    final runtime = _FakeRuntime('media_kit');
-    final plan = _plan('one', uri: Uri.parse('https://server/transcode.m3u8'));
+  test(
+    'runtime open receives exact authoritative PlaybackPlan and URL',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final plan = _plan(
+        'one',
+        uri: Uri.parse('https://server/transcode.m3u8'),
+      );
 
-    await _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime])).activate(plan);
+      await _coordinator(
+        PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+      ).activate(plan);
 
-    expect(runtime.opened.single, same(plan));
-    expect(runtime.opened.single.playbackUri.toString(), 'https://server/transcode.m3u8');
-  });
+      expect(runtime.opened.single, same(plan));
+      expect(
+        runtime.opened.single.playbackUri.toString(),
+        'https://server/transcode.m3u8',
+      );
+    },
+  );
 
-  test('replacing plan preserves logical session and updates server fields', () async {
-    final runtime = _FakeRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+  test(
+    'replacing plan preserves logical session and updates server fields',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+      );
 
-    await coordinator.activate(_plan('one', playSessionId: 'play-one', audio: 1, subtitle: 2));
-    await coordinator.activate(_plan('two', playSessionId: 'play-two', audio: 3, subtitle: 4));
+      await coordinator.activate(
+        _plan('one', playSessionId: 'play-one', audio: 1, subtitle: 2),
+      );
+      await coordinator.activate(
+        _plan('two', playSessionId: 'play-two', audio: 3, subtitle: 4),
+      );
 
-    expect(coordinator.session.id, 'logical');
-    expect(coordinator.session.activePlan.playSessionId, 'play-two');
-    expect(coordinator.session.selectedAudio, 3);
-    expect(coordinator.session.selectedSubtitle, 4);
-  });
+      expect(coordinator.session.id, 'logical');
+      expect(coordinator.session.activePlan.playSessionId, 'play-two');
+      expect(coordinator.session.selectedAudio, 3);
+      expect(coordinator.session.selectedSubtitle, 4);
+    },
+  );
 
-  test('active runtime binding follows replacement and clears on disposal', () async {
-    final firstTracks = _SelectableTracks();
-    final secondTracks = _SelectableTracks();
-    final firstSurface = _FakeSurface();
-    final secondSurface = _FakeSurface();
-    final first = _FakeRuntime('first', surface: firstSurface, tracks: firstTracks);
-    final second = _FakeRuntime('second', surface: secondSurface, tracks: secondTracks);
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+  test(
+    'active runtime binding follows replacement and clears on disposal',
+    () async {
+      final firstTracks = _SelectableTracks();
+      final secondTracks = _SelectableTracks();
+      final firstSurface = _FakeSurface();
+      final secondSurface = _FakeSurface();
+      final first = _FakeRuntime(
+        'first',
+        surface: firstSurface,
+        tracks: firstTracks,
+      );
+      final second = _FakeRuntime(
+        'second',
+        surface: secondSurface,
+        tracks: secondTracks,
+      );
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[first, second],
+        ),
+      );
 
-    await coordinator.activate(_plan('one', engineId: 'first'));
-    expect(
-      coordinator.activeBinding.value.tracks,
-      isA<LogicalSessionTrackSelectionController>(),
+      await coordinator.activate(_plan('one', engineId: 'first'));
+      expect(
+        coordinator.activeBinding.value.tracks,
+        isA<LogicalSessionTrackSelectionController>(),
+      );
+      expect(
+        (coordinator.activeBinding.value.tracks!
+                as LogicalSessionTrackSelectionController)
+            .delegate,
+        same(firstTracks),
+      );
+      expect(
+        coordinator.activeBinding.value.engine,
+        same(first.created.single),
+      );
+      expect(coordinator.activeBinding.value.surface, same(firstSurface));
+      expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'one');
+      expect(coordinator.activeBinding.value.runtimeId, 'first');
+      await coordinator.activate(_plan('two', engineId: 'second'));
+      expect(
+        coordinator.activeBinding.value.tracks,
+        isA<LogicalSessionTrackSelectionController>(),
+      );
+      expect(
+        (coordinator.activeBinding.value.tracks!
+                as LogicalSessionTrackSelectionController)
+            .delegate,
+        same(secondTracks),
+      );
+      expect(
+        coordinator.activeBinding.value.engine,
+        same(second.created.single),
+      );
+      expect(coordinator.activeBinding.value.surface, same(secondSurface));
+      expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'two');
+      expect(coordinator.activeBinding.value.runtimeId, 'second');
+      await coordinator.dispose();
+      expect(coordinator.activeBinding.value.engine, isNull);
+      expect(coordinator.activeBinding.value.surface, isNull);
+      expect(coordinator.activeBinding.value.tracks, isNull);
+      expect(coordinator.activeBinding.value.advanced, isNull);
+      expect(coordinator.activeBinding.value.plan, isNull);
+      expect(coordinator.activeBinding.value.runtimeId, isNull);
+    },
+  );
+
+  test(
+    'preparation failure leaves the old runtime and logical plan active',
+    () async {
+      final first = _FakeRuntime('first');
+      final second = _FakeRuntime('second');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[first, second],
+        ),
+      );
+      await coordinator.activate(_plan('one', engineId: 'first', subtitle: 2));
+
+      await expectLater(
+        coordinator.activate(
+          _plan('two', engineId: 'second', subtitle: 8),
+          prepare: (_) async => throw StateError('seek failed'),
+        ),
+        throwsA(isA<PlaybackActivationException>()),
+      );
+
+      expect(coordinator.active?.engine, same(first.created.single));
+      expect(first.created.single.disposeCount, 0);
+      expect(second.created.single.disposeCount, 1);
+      expect(coordinator.session.activePlan.mediaSourceId, 'one');
+      expect(coordinator.session.selectedSubtitle, 2);
+    },
+  );
+
+  test(
+    'preparation completes before publishing a replacement runtime',
+    () async {
+      final first = _FakeRuntime('first');
+      final second = _FakeRuntime('second');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[first, second],
+        ),
+      );
+      await coordinator.activate(_plan('one', engineId: 'first'));
+      var preparedWhileFirstWasActive = false;
+
+      await coordinator.activate(
+        _plan('two', engineId: 'second'),
+        prepare: (candidate) async {
+          preparedWhileFirstWasActive =
+              identical(coordinator.active?.engine, first.created.single) &&
+              identical(
+                coordinator.activeBinding.value.engine,
+                first.created.single,
+              ) &&
+              identical(candidate.engine, second.created.single);
+        },
+      );
+
+      expect(preparedWhileFirstWasActive, isTrue);
+      expect(coordinator.active?.engine, same(second.created.single));
+      expect(first.created.single.disposeCount, 1);
+    },
+  );
+
+  test(
+    'resume startup pauses, seeks, and plays from saved server position',
+    () async {
+      const resumePosition = Duration(microseconds: 545933000);
+      final plan = _plan('resume');
+      final engine = _ResumeOrderEngine()..playing.value = true;
+      addTearDown(engine.dispose);
+      final session = LogicalPlaybackSession(
+        id: 'resume-session',
+        itemId: 'item',
+        activePlan: plan,
+      );
+      final candidate = PlaybackRuntimeSession(
+        runtimeId: 'media_kit',
+        plan: plan,
+        engine: engine,
+      );
+
+      await preparePlaybackStartPosition(
+        candidate: candidate,
+        session: session,
+        startPosition: resumePosition,
+      );
+
+      expect(engine.commands, <String>['pause', 'seek:545933', 'play']);
+      expect(engine.position, resumePosition);
+      expect(session.position, resumePosition);
+      expect(engine.playing.value, isTrue);
+    },
+  );
+
+  test(
+    'resume activation reports and advances from the actual saved position',
+    () async {
+      const resumePosition = Duration(microseconds: 545933000);
+      final reports = <Map<String, dynamic>>[];
+      final client = JellyfinApiClient(
+        baseUrl: 'https://server.invalid',
+        identity: testIdentity,
+        serverId: testServerId,
+        userId: 'user',
+        accessToken: 'test-token',
+        client: MockClient((request) async {
+          reports.add(
+            Map<String, dynamic>.from(
+              (jsonDecode(request.body) as Map).cast<String, dynamic>(),
+            ),
+          );
+          return http.Response('', 204);
+        }),
+      );
+      final plan = _plan('resume');
+      final session = LogicalPlaybackSession(
+        id: 'resume-e2e',
+        itemId: 'item',
+        activePlan: plan,
+        position: resumePosition,
+      );
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = PlaybackRuntimeCoordinator(
+        registry: PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[runtime],
+        ),
+        session: session,
+      );
+      final reporter = PlaybackReporter(client: client, session: session);
+      addTearDown(() async {
+        await reporter.stopped(session.position);
+        await coordinator.dispose();
+        client.close();
+      });
+
+      final active = await coordinator.activate(
+        plan,
+        prepare: (candidate) => preparePlaybackStartPosition(
+          candidate: candidate,
+          session: session,
+          startPosition: resumePosition,
+        ),
+      );
+      expect(active.engine.position, resumePosition);
+      expect(active.engine.playing.value, isTrue);
+      await reporter.started(active.engine.position);
+      await reporter.progress(
+        active.engine.position,
+        const Duration(minutes: 90),
+      );
+      expect(reports[0]['PositionTicks'], 5459330000);
+      expect(reports[1]['PositionTicks'], 5459330000);
+
+      await active.engine.seek(resumePosition + const Duration(seconds: 20));
+      session.position = active.engine.position;
+      await reporter.progress(
+        active.engine.position,
+        const Duration(minutes: 90),
+      );
+      expect(reports[2]['PositionTicks'], 5659330000);
+    },
+  );
+
+  test('ordinary Play startup does not seek away from zero', () async {
+    final plan = _plan('ordinary-play');
+    final engine = _ResumeOrderEngine()..playing.value = true;
+    addTearDown(engine.dispose);
+    final session = LogicalPlaybackSession(
+      id: 'play-session',
+      itemId: 'item',
+      activePlan: plan,
     );
-    expect(
-      (coordinator.activeBinding.value.tracks!
-              as LogicalSessionTrackSelectionController)
-          .delegate,
-      same(firstTracks),
-    );
-    expect(coordinator.activeBinding.value.engine, same(first.created.single));
-    expect(coordinator.activeBinding.value.surface, same(firstSurface));
-    expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'one');
-    expect(coordinator.activeBinding.value.runtimeId, 'first');
-    await coordinator.activate(_plan('two', engineId: 'second'));
-    expect(
-      coordinator.activeBinding.value.tracks,
-      isA<LogicalSessionTrackSelectionController>(),
-    );
-    expect(
-      (coordinator.activeBinding.value.tracks!
-              as LogicalSessionTrackSelectionController)
-          .delegate,
-      same(secondTracks),
-    );
-    expect(coordinator.activeBinding.value.engine, same(second.created.single));
-    expect(coordinator.activeBinding.value.surface, same(secondSurface));
-    expect(coordinator.activeBinding.value.plan?.mediaSourceId, 'two');
-    expect(coordinator.activeBinding.value.runtimeId, 'second');
-    await coordinator.dispose();
-    expect(coordinator.activeBinding.value.engine, isNull);
-    expect(coordinator.activeBinding.value.surface, isNull);
-    expect(coordinator.activeBinding.value.tracks, isNull);
-    expect(coordinator.activeBinding.value.advanced, isNull);
-    expect(coordinator.activeBinding.value.plan, isNull);
-    expect(coordinator.activeBinding.value.runtimeId, isNull);
-  });
 
-  test('preparation failure leaves the old runtime and logical plan active', () async {
-    final first = _FakeRuntime('first');
-    final second = _FakeRuntime('second');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
-    await coordinator.activate(_plan('one', engineId: 'first', subtitle: 2));
-
-    await expectLater(
-      coordinator.activate(_plan('two', engineId: 'second', subtitle: 8), prepare: (_) async => throw StateError('seek failed')),
-      throwsA(isA<PlaybackActivationException>()),
+    await preparePlaybackStartPosition(
+      candidate: PlaybackRuntimeSession(
+        runtimeId: 'media_kit',
+        plan: plan,
+        engine: engine,
+      ),
+      session: session,
+      startPosition: Duration.zero,
     );
 
-    expect(coordinator.active?.engine, same(first.created.single));
-    expect(first.created.single.disposeCount, 0);
-    expect(second.created.single.disposeCount, 1);
-    expect(coordinator.session.activePlan.mediaSourceId, 'one');
-    expect(coordinator.session.selectedSubtitle, 2);
-  });
-
-  test('preparation completes before publishing a replacement runtime', () async {
-    final first = _FakeRuntime('first');
-    final second = _FakeRuntime('second');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
-    await coordinator.activate(_plan('one', engineId: 'first'));
-    var preparedWhileFirstWasActive = false;
-
-    await coordinator.activate(
-      _plan('two', engineId: 'second'),
-      prepare: (candidate) async {
-        preparedWhileFirstWasActive = identical(coordinator.active?.engine, first.created.single) && identical(coordinator.activeBinding.value.engine, first.created.single) && identical(candidate.engine, second.created.single);
-      },
-    );
-
-    expect(preparedWhileFirstWasActive, isTrue);
-    expect(coordinator.active?.engine, same(second.created.single));
-    expect(first.created.single.disposeCount, 1);
+    expect(engine.commands, isEmpty);
+    expect(session.position, Duration.zero);
+    expect(engine.playing.value, isTrue);
   });
 
   test('activation is serialized and newest plan wins', () async {
     final runtime = _ControlledRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+    );
 
     final first = coordinator.activate(_plan('one'));
     final second = coordinator.activate(_plan('two'));
@@ -161,21 +464,28 @@ void main() {
     expect(coordinator.session.activePlan.mediaSourceId, 'two');
   });
 
-  test('dispose during activation is safe and disposes opened runtime once', () async {
-    final runtime = _ControlledRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+  test(
+    'dispose during activation is safe and disposes opened runtime once',
+    () async {
+      final runtime = _ControlledRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+      );
 
-    final activation = coordinator.activate(_plan('one'));
-    await coordinator.dispose();
-    runtime.completeNext();
+      final activation = coordinator.activate(_plan('one'));
+      await coordinator.dispose();
+      runtime.completeNext();
 
-    await expectLater(activation, throwsA(isA<StateError>()));
-    expect(runtime.created.single.disposeCount, 1);
-  });
+      await expectLater(activation, throwsA(isA<StateError>()));
+      expect(runtime.created.single.disposeCount, 1);
+    },
+  );
 
   test('queued activation after dispose never opens', () async {
     final runtime = _ControlledRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+    );
 
     final first = coordinator.activate(_plan('one'));
     final second = coordinator.activate(_plan('two'));
@@ -189,7 +499,9 @@ void main() {
 
   test('cleanup failure does not wedge queued activation drain', () async {
     final runtime = _ThrowingFirstDisposeRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+    );
 
     await coordinator.activate(_plan('one'));
     final secondSession = await coordinator.activate(_plan('two'));
@@ -202,29 +514,47 @@ void main() {
     expect(coordinator.session.activePlan.mediaSourceId, 'three');
   });
 
-  test('runtime is disposed exactly once on replacement and coordinator dispose', () async {
-    final runtime = _FakeRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+  test(
+    'runtime is disposed exactly once on replacement and coordinator dispose',
+    () async {
+      final runtime = _FakeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+      );
 
-    await coordinator.activate(_plan('one'));
-    await coordinator.activate(_plan('two'));
-    await coordinator.dispose();
-    await coordinator.dispose();
+      await coordinator.activate(_plan('one'));
+      await coordinator.activate(_plan('two'));
+      await coordinator.dispose();
+      await coordinator.dispose();
 
-    expect(runtime.created.map((engine) => engine.disposeCount), <int>[1, 1]);
-  });
+      expect(runtime.created.map((engine) => engine.disposeCount), <int>[1, 1]);
+    },
+  );
 
   test('video surface and track switch mode survive routing', () async {
-    final runtime = _FakeRuntime('media_kit', surface: const _FakeSurface(), tracks: const _FakeTracks());
-    final session = await _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime])).activate(_plan('one'));
+    final runtime = _FakeRuntime(
+      'media_kit',
+      surface: const _FakeSurface(),
+      tracks: const _FakeTracks(),
+    );
+    final session = await _coordinator(
+      PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+    ).activate(_plan('one'));
 
     expect(session.surface, isA<PlaybackVideoSurface>());
-    expect((await session.tracks!.selectAudio(const RodPlayerTrack(engineTrackId: 'a', label: 'A'))).mode, TrackSwitchMode.local);
+    expect(
+      (await session.tracks!.selectAudio(
+        const RodPlayerTrack(engineTrackId: 'a', label: 'A'),
+      )).mode,
+      TrackSwitchMode.local,
+    );
   });
 
   test('reporting reads newest active plan', () async {
     final runtime = _FakeRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime]),
+    );
     await coordinator.activate(_plan('one', playSessionId: 'play-one'));
     await coordinator.activate(_plan('two', playSessionId: 'play-two'));
 
@@ -240,43 +570,100 @@ void main() {
     expect(state.toJson(), containsPair('MediaSourceId', 'two'));
   });
 
-  test('activation failover tries second candidate after first open fails', () async {
-    final first = _FailingRuntime('apple_native');
-    final second = _FakeRuntime('apple_compatibility');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[first, second]));
+  test(
+    'activation failover tries second candidate after first open fails',
+    () async {
+      final first = _FailingRuntime('apple_native');
+      final second = _FakeRuntime('apple_compatibility');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[first, second],
+        ),
+      );
 
-    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('one', engineId: 'apple_native'), _plan('two', engineId: 'apple_compatibility')]);
+      final session = await coordinator.activateFirst(<PlaybackPlan>[
+        _plan('one', engineId: 'apple_native'),
+        _plan('two', engineId: 'apple_compatibility'),
+      ]);
 
-    expect(session.runtimeId, 'apple_compatibility');
-    expect(coordinator.session.activePlan.engineId, 'apple_compatibility');
-    expect(coordinator.diagnostics?.attemptedRuntimeIds, <String>['apple_native', 'apple_compatibility']);
-    expect(coordinator.diagnostics?.activationFailures.keys, contains('apple_native'));
-  });
+      expect(session.runtimeId, 'apple_compatibility');
+      expect(coordinator.session.activePlan.engineId, 'apple_compatibility');
+      expect(coordinator.diagnostics?.attemptedRuntimeIds, <String>[
+        'apple_native',
+        'apple_compatibility',
+      ]);
+      expect(
+        coordinator.diagnostics?.activationFailures.keys,
+        contains('apple_native'),
+      );
+    },
+  );
 
   test('activation failover can skip two failed candidates', () async {
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('a'), _FailingRuntime('b'), _FakeRuntime('c')]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(
+        runtimes: <PlaybackBackendRuntime>[
+          _FailingRuntime('a'),
+          _FailingRuntime('b'),
+          _FakeRuntime('c'),
+        ],
+      ),
+    );
 
-    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('a', engineId: 'a'), _plan('b', engineId: 'b'), _plan('c', engineId: 'c')]);
+    final session = await coordinator.activateFirst(<PlaybackPlan>[
+      _plan('a', engineId: 'a'),
+      _plan('b', engineId: 'b'),
+      _plan('c', engineId: 'c'),
+    ]);
 
     expect(session.runtimeId, 'c');
     expect(coordinator.session.activePlan.engineId, 'c');
-    expect(coordinator.diagnostics?.activationFailures.keys, containsAll(<String>['a', 'b']));
+    expect(
+      coordinator.diagnostics?.activationFailures.keys,
+      containsAll(<String>['a', 'b']),
+    );
   });
 
   test('all activation failover attempts fail with aggregate error', () async {
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('a'), _FailingRuntime('b')]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(
+        runtimes: <PlaybackBackendRuntime>[
+          _FailingRuntime('a'),
+          _FailingRuntime('b'),
+        ],
+      ),
+    );
 
-    await expectLater(coordinator.activateFirst(<PlaybackPlan>[_plan('a', engineId: 'a'), _plan('b', engineId: 'b')]), throwsA(isA<PlaybackActivationAggregateException>()));
+    await expectLater(
+      coordinator.activateFirst(<PlaybackPlan>[
+        _plan('a', engineId: 'a'),
+        _plan('b', engineId: 'b'),
+      ]),
+      throwsA(isA<PlaybackActivationAggregateException>()),
+    );
   });
 
   test('superseded failover cannot commit', () async {
     final slow = _ControlledRuntime('fallback');
     final replacement = _FakeRuntime('replacement');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow, replacement]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(
+        runtimes: <PlaybackBackendRuntime>[
+          _FailingRuntime('failed'),
+          slow,
+          replacement,
+        ],
+      ),
+    );
 
-    final first = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    final first = coordinator.activateFirst(<PlaybackPlan>[
+      _plan('failed', engineId: 'failed'),
+      _plan('fallback', engineId: 'fallback'),
+    ]);
     await slow.waitUntilOpenStarted();
-    final second = coordinator.activate(_plan('replacement', engineId: 'replacement'));
+    final second = coordinator.activate(
+      _plan('replacement', engineId: 'replacement'),
+    );
     slow.completeNext();
 
     await expectLater(first, throwsA(isA<StateError>()));
@@ -287,9 +674,16 @@ void main() {
 
   test('dispose during failover prevents later commit', () async {
     final slow = _ControlledRuntime('fallback');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(
+        runtimes: <PlaybackBackendRuntime>[_FailingRuntime('failed'), slow],
+      ),
+    );
 
-    final activation = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    final activation = coordinator.activateFirst(<PlaybackPlan>[
+      _plan('failed', engineId: 'failed'),
+      _plan('fallback', engineId: 'fallback'),
+    ]);
     await slow.waitUntilOpenStarted();
     await coordinator.dispose();
     slow.completeNext();
@@ -302,11 +696,20 @@ void main() {
     final failed = _ControlledFailingRuntime('failed');
     final fallback = _FakeRuntime('fallback');
     final replacement = _FakeRuntime('replacement');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[failed, fallback, replacement]));
+    final coordinator = _coordinator(
+      PlaybackRuntimeRegistry(
+        runtimes: <PlaybackBackendRuntime>[failed, fallback, replacement],
+      ),
+    );
 
-    final first = coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('fallback', engineId: 'fallback')]);
+    final first = coordinator.activateFirst(<PlaybackPlan>[
+      _plan('failed', engineId: 'failed'),
+      _plan('fallback', engineId: 'fallback'),
+    ]);
     await failed.waitUntilOpenStarted();
-    final second = coordinator.activate(_plan('replacement', engineId: 'replacement'));
+    final second = coordinator.activate(
+      _plan('replacement', engineId: 'replacement'),
+    );
     failed.completeNext();
 
     await expectLater(first, throwsA(isA<StateError>()));
@@ -315,36 +718,67 @@ void main() {
     expect(coordinator.session.activePlan.engineId, 'replacement');
   });
 
-  test('cleanup failure after successful failover is diagnostic only', () async {
-    final runtime = _ThrowingFirstDisposeRuntime('media_kit');
-    final coordinator = _coordinator(PlaybackRuntimeRegistry(runtimes: <PlaybackBackendRuntime>[runtime, _FailingRuntime('failed')]));
+  test(
+    'cleanup failure after successful failover is diagnostic only',
+    () async {
+      final runtime = _ThrowingFirstDisposeRuntime('media_kit');
+      final coordinator = _coordinator(
+        PlaybackRuntimeRegistry(
+          runtimes: <PlaybackBackendRuntime>[
+            runtime,
+            _FailingRuntime('failed'),
+          ],
+        ),
+      );
 
-    await coordinator.activate(_plan('one'));
-    final session = await coordinator.activateFirst(<PlaybackPlan>[_plan('failed', engineId: 'failed'), _plan('two')]);
+      await coordinator.activate(_plan('one'));
+      final session = await coordinator.activateFirst(<PlaybackPlan>[
+        _plan('failed', engineId: 'failed'),
+        _plan('two'),
+      ]);
 
-    expect(session.plan.mediaSourceId, 'two');
-    expect(coordinator.diagnostics?.cleanupFailure, isA<StateError>());
-    expect(coordinator.diagnostics?.activationFailures.keys, contains('failed'));
-    expect(coordinator.session.activePlan.mediaSourceId, 'two');
-  });
+      expect(session.plan.mediaSourceId, 'two');
+      expect(coordinator.diagnostics?.cleanupFailure, isA<StateError>());
+      expect(
+        coordinator.diagnostics?.activationFailures.keys,
+        contains('failed'),
+      );
+      expect(coordinator.session.activePlan.mediaSourceId, 'two');
+    },
+  );
 }
 
-PlaybackRuntimeCoordinator _coordinator(PlaybackRuntimeRegistry registry) => PlaybackRuntimeCoordinator(
+PlaybackRuntimeCoordinator _coordinator(PlaybackRuntimeRegistry registry) =>
+    PlaybackRuntimeCoordinator(
       registry: registry,
-      session: LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: _plan('initial')),
+      session: LogicalPlaybackSession(
+        id: 'logical',
+        itemId: 'item',
+        activePlan: _plan('initial'),
+      ),
     );
 
-PlaybackPlan _plan(String sourceId, {String engineId = 'media_kit', Uri? uri, String? playSessionId, int? audio, int? subtitle}) => PlaybackPlan(
-      itemId: 'item',
-      mediaSourceId: sourceId,
-      playSessionId: playSessionId ?? 'play-$sourceId',
-      playMethod: PlayMethod.directPlay,
-      playbackUri: uri ?? Uri.parse('https://media/$sourceId'),
-      engineId: engineId,
-      selectedAudioStreamIndex: audio,
-      selectedSubtitleStreamIndex: subtitle,
-      source: MediaSourceInfo.fromJson(<String, dynamic>{'Id': sourceId, 'MediaStreams': <dynamic>[]}),
-    );
+PlaybackPlan _plan(
+  String sourceId, {
+  String engineId = 'media_kit',
+  Uri? uri,
+  String? playSessionId,
+  int? audio,
+  int? subtitle,
+}) => PlaybackPlan(
+  itemId: 'item',
+  mediaSourceId: sourceId,
+  playSessionId: playSessionId ?? 'play-$sourceId',
+  playMethod: PlayMethod.directPlay,
+  playbackUri: uri ?? Uri.parse('https://media/$sourceId'),
+  engineId: engineId,
+  selectedAudioStreamIndex: audio,
+  selectedSubtitleStreamIndex: subtitle,
+  source: MediaSourceInfo.fromJson(<String, dynamic>{
+    'Id': sourceId,
+    'MediaStreams': <dynamic>[],
+  }),
+);
 
 class _FakeRuntime implements PlaybackBackendRuntime {
   _FakeRuntime(this.backendId, {this.surface, this.tracks});
@@ -365,7 +799,13 @@ class _FakeRuntime implements PlaybackBackendRuntime {
     final engine = _CountingEngine(id: backendId);
     created.add(engine);
     await engine.load(plan);
-    return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine, surface: surface, tracks: tracks);
+    return PlaybackRuntimeSession(
+      runtimeId: backendId,
+      plan: plan,
+      engine: engine,
+      surface: surface,
+      tracks: tracks,
+    );
   }
 }
 
@@ -406,10 +846,16 @@ class _ThrowingFirstDisposeRuntime extends _FakeRuntime {
   @override
   Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async {
     opened.add(plan);
-    final engine = created.isEmpty ? _ThrowingDisposeEngine(id: backendId) : _CountingEngine(id: backendId);
+    final engine = created.isEmpty
+        ? _ThrowingDisposeEngine(id: backendId)
+        : _CountingEngine(id: backendId);
     created.add(engine);
     await engine.load(plan);
-    return PlaybackRuntimeSession(runtimeId: backendId, plan: plan, engine: engine);
+    return PlaybackRuntimeSession(
+      runtimeId: backendId,
+      plan: plan,
+      engine: engine,
+    );
   }
 }
 
@@ -423,7 +869,8 @@ class _FailingRuntime implements PlaybackBackendRuntime {
   bool get isAvailable => true;
 
   @override
-  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async => throw StateError('open failed $backendId');
+  Future<PlaybackRuntimeSession> open(PlaybackPlan plan) async =>
+      throw StateError('open failed $backendId');
 }
 
 class _ControlledFailingRuntime implements PlaybackBackendRuntime {
@@ -479,6 +926,30 @@ class _ThrowingDisposeEngine extends _CountingEngine {
   }
 }
 
+class _ResumeOrderEngine extends TestPlaybackEngine {
+  _ResumeOrderEngine() : super(id: 'media_kit');
+
+  final commands = <String>[];
+
+  @override
+  Future<void> pause() async {
+    commands.add('pause');
+    await super.pause();
+  }
+
+  @override
+  Future<void> seek(Duration position) async {
+    commands.add('seek:${position.inMilliseconds}');
+    await super.seek(position);
+  }
+
+  @override
+  Future<void> play() async {
+    commands.add('play');
+    await super.play();
+  }
+}
+
 class _FakeSurface implements PlaybackVideoSurface {
   const _FakeSurface();
 
@@ -488,7 +959,8 @@ class _FakeSurface implements PlaybackVideoSurface {
 
 class _FakeTracks implements TrackSelectionController {
   @override
-  TrackSelectionCapabilities get capabilities => const TrackSelectionCapabilities.unavailable();
+  TrackSelectionCapabilities get capabilities =>
+      const TrackSelectionCapabilities.unavailable();
 
   const _FakeTracks();
 
@@ -505,10 +977,18 @@ class _FakeTracks implements TrackSelectionController {
   RodPlayerTrack? get selectedSubtitle => null;
 
   @override
-  Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async => TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: track.serverStreamIndex);
+  Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async =>
+      TrackSwitchResult(
+        mode: TrackSwitchMode.local,
+        serverStreamIndex: track.serverStreamIndex,
+      );
 
   @override
-  Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async => TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: track?.serverStreamIndex);
+  Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async =>
+      TrackSwitchResult(
+        mode: TrackSwitchMode.local,
+        serverStreamIndex: track?.serverStreamIndex,
+      );
 }
 
 class _SelectableTracks extends _FakeTracks {

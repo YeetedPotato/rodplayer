@@ -9,56 +9,78 @@ import 'package:rodplayer/core/player/track_controller.dart';
 class MediaKitTrackSelectionController implements TrackSelectionController {
   MediaKitTrackSelectionController(this.player, {required this.plan});
 
-  factory MediaKitTrackSelectionController.forPlan(Player player, PlaybackPlan plan) => MediaKitTrackSelectionController(player, plan: plan);
+  factory MediaKitTrackSelectionController.forPlan(
+          Player player, PlaybackPlan plan) =>
+      MediaKitTrackSelectionController(player, plan: plan);
 
   final Player player;
   final PlaybackPlan plan;
 
   @override
-  final TrackSelectionCapabilities capabilities = const TrackSelectionCapabilities(
+  final TrackSelectionCapabilities capabilities =
+      const TrackSelectionCapabilities(
     audioSelection: CapabilitySupport.supported,
     subtitleSelection: CapabilitySupport.supported,
   );
 
   TrackServerIndexMappings get _mappings => TrackServerIndexMappings.fromPlan(
         plan: plan,
-        audioTracks: player.state.tracks.audio.map((track) => EngineTrackMetadata(id: track.id, language: track.language, title: track.title)).toList(growable: false),
-        subtitleTracks: player.state.tracks.subtitle.map((track) => EngineTrackMetadata(id: track.id, language: track.language, title: track.title)).toList(growable: false),
+        audioTracks: player.state.tracks.audio
+            .map((track) => EngineTrackMetadata(
+                id: track.id, language: track.language, title: track.title))
+            .toList(growable: false),
+        subtitleTracks: player.state.tracks.subtitle
+            .map((track) => EngineTrackMetadata(
+                id: track.id, language: track.language, title: track.title))
+            .toList(growable: false),
       );
 
   @override
   List<RodPlayerTrack> get audioTracks {
     final mappings = _mappings;
-    return player.state.tracks.audio.map((track) => _audioDescriptor(track, mappings.audioIndexFor(track.id))).toList(growable: false);
+    return player.state.tracks.audio
+        .where((track) => !isSyntheticEngineTrackId(track.id))
+        .map((track) =>
+            _audioDescriptor(track, mappings.audioIndexFor(track.id)))
+        .toList(growable: false);
   }
 
   @override
   List<RodPlayerTrack> get subtitleTracks {
     final mappings = _mappings;
-    return player.state.tracks.subtitle.map((track) => _subtitleDescriptor(track, mappings.subtitleIndexFor(track.id))).toList(growable: false);
+    return player.state.tracks.subtitle
+        .where((track) => !isSyntheticEngineTrackId(track.id))
+        .map((track) =>
+            _subtitleDescriptor(track, mappings.subtitleIndexFor(track.id)))
+        .toList(growable: false);
   }
 
   @override
   RodPlayerTrack? get selectedAudio {
     final track = player.state.track.audio;
-    if (track.id.isEmpty) return null;
+    if (isSyntheticEngineTrackId(track.id)) return null;
     return _audioDescriptor(track, _mappings.audioIndexFor(track.id));
   }
 
   @override
   RodPlayerTrack? get selectedSubtitle {
     final track = player.state.track.subtitle;
-    if (track.id.isEmpty) return null;
+    if (isSyntheticEngineTrackId(track.id)) return null;
     return _subtitleDescriptor(track, _mappings.subtitleIndexFor(track.id));
   }
 
   @override
   Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async {
     final native = _audioTracksById[track.engineTrackId];
-    if (native == null) return TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation, serverStreamIndex: track.serverStreamIndex);
+    if (native == null) {
+      return TrackSwitchResult(
+          mode: TrackSwitchMode.serverRenegotiation,
+          serverStreamIndex: track.serverStreamIndex);
+    }
     final index = _mappings.audioIndexFor(native.id);
     await player.setAudioTrack(native);
-    return TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: index);
+    return TrackSwitchResult(
+        mode: TrackSwitchMode.local, serverStreamIndex: index);
   }
 
   @override
@@ -68,10 +90,15 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
       return const TrackSwitchResult(mode: TrackSwitchMode.local);
     }
     final native = _subtitleTracksById[track.engineTrackId];
-    if (native == null) return TrackSwitchResult(mode: TrackSwitchMode.serverRenegotiation, serverStreamIndex: track.serverStreamIndex);
+    if (native == null) {
+      return TrackSwitchResult(
+          mode: TrackSwitchMode.serverRenegotiation,
+          serverStreamIndex: track.serverStreamIndex);
+    }
     final index = _mappings.subtitleIndexFor(native.id);
     await player.setSubtitleTrack(native);
-    return TrackSwitchResult(mode: TrackSwitchMode.local, serverStreamIndex: index);
+    return TrackSwitchResult(
+        mode: TrackSwitchMode.local, serverStreamIndex: index);
   }
 
   Map<String, AudioTrack> get _audioTracksById => <String, AudioTrack>{
@@ -89,12 +116,15 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
     return RodPlayerTrack(
       engineTrackId: track.id,
       serverStreamIndex: serverIndex,
-      label: _label(title ?? stream?.displayTitle ?? stream?.title, language ?? stream?.language),
+      label: _label(title ?? stream?.displayTitle ?? stream?.title,
+          language ?? stream?.language),
       language: language ?? stream?.language,
       title: title ?? stream?.title,
+      displayTitle: stream?.displayTitle,
       codec: stream?.codec,
       isDefault: stream?.isDefault,
       channels: stream?.channels,
+      channelLayout: stream?.channelLayout,
     );
   }
 
@@ -105,9 +135,11 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
     return RodPlayerTrack(
       engineTrackId: track.id,
       serverStreamIndex: serverIndex,
-      label: _label(title ?? stream?.displayTitle ?? stream?.title, language ?? stream?.language),
+      label: _label(title ?? stream?.displayTitle ?? stream?.title,
+          language ?? stream?.language),
       language: language ?? stream?.language,
       title: title ?? stream?.title,
+      displayTitle: stream?.displayTitle,
       codec: stream?.codec,
       isDefault: stream?.isDefault,
       isForced: stream?.isForced,
@@ -116,8 +148,10 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
     );
   }
 
-  MediaStream? _audioStream(int? index) => _streamFor(plan.source.audioStreams, index);
-  MediaStream? _subtitleStream(int? index) => _streamFor(plan.source.subtitleStreams, index);
+  MediaStream? _audioStream(int? index) =>
+      _streamFor(plan.source.audioStreams, index);
+  MediaStream? _subtitleStream(int? index) =>
+      _streamFor(plan.source.subtitleStreams, index);
 
   MediaStream? _streamFor(Iterable<MediaStream> streams, int? index) {
     for (final stream in streams) {
@@ -127,7 +161,10 @@ class MediaKitTrackSelectionController implements TrackSelectionController {
   }
 
   String _label(String? title, String? language) {
-    final values = <String?>[title, language].whereType<String>().where((value) => value.trim().isNotEmpty).toList(growable: false);
+    final values = <String?>[title, language]
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
     return values.isEmpty ? 'Unknown track' : values.join(' • ');
   }
 

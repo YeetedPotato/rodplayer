@@ -1,5 +1,6 @@
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/jellyfin_device_profile_mapper.dart';
+import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/playback/multi_backend_playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
@@ -14,7 +15,10 @@ class PlaybackNegotiator {
     PlaybackRuntimeRegistry? runtimeRegistry,
     // TODO(phase-2): app composition should inject the platform runtime provider
     // from lib/platform/playback so display probes do not create a core->platform dependency.
-  })  : environmentProvider = environmentProvider ?? RuntimePlaybackEnvironmentProvider(identityProbe: PersistentDeviceIdentityProbe(identity: client.identity)),
+  })  : environmentProvider = environmentProvider ??
+            RuntimePlaybackEnvironmentProvider(
+                identityProbe:
+                    PersistentDeviceIdentityProbe(identity: client.identity)),
         profileMapper = profileMapper ?? const JellyfinDeviceProfileMapper(),
         runtimeRegistry = runtimeRegistry ?? const PlaybackRuntimeRegistry();
 
@@ -27,12 +31,20 @@ class PlaybackNegotiator {
     required String itemId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
-  }) async => (await negotiateDecision(itemId: itemId, audioStreamIndex: audioStreamIndex, subtitleStreamIndex: subtitleStreamIndex)).plan;
+    String? selectedMediaSourceId,
+  }) async =>
+      (await negotiateDecision(
+              itemId: itemId,
+              audioStreamIndex: audioStreamIndex,
+              subtitleStreamIndex: subtitleStreamIndex,
+              selectedMediaSourceId: selectedMediaSourceId))
+          .plan;
 
   Future<PlaybackPlanDecision> negotiateDecision({
     required String itemId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
+    String? selectedMediaSourceId,
   }) async {
     final environment = await environmentProvider.load();
     return MultiBackendPlaybackNegotiator(
@@ -44,6 +56,17 @@ class PlaybackNegotiator {
       itemId: itemId,
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
+      selectedMediaSourceId: selectedMediaSourceId,
     );
+  }
+
+  Future<List<MediaSourceInfo>> listMediaSources(
+      {required String itemId}) async {
+    final environment = await environmentProvider.load();
+    return MultiBackendPlaybackNegotiator(
+      requester: JellyfinPlaybackInfoRequester(client),
+      profileMapper: profileMapper,
+      runtimeRegistry: runtimeRegistry,
+    ).listMediaSources(environment: environment, itemId: itemId);
   }
 }

@@ -5,19 +5,36 @@ import 'package:rodplayer/core/player/playback_runtime.dart';
 import 'package:rodplayer/core/player/playback_runtime_coordinator.dart';
 
 /// One backend-neutral recovery operation for the active runtime session.
-typedef RuntimeRecoveryNegotiation = Future<List<PlaybackBackendCandidate>> Function({required String itemId, int? audioStreamIndex, int? subtitleStreamIndex});
+typedef RuntimeRecoveryNegotiation
+    = Future<List<PlaybackBackendCandidate>> Function(
+        {required String itemId,
+        int? audioStreamIndex,
+        int? subtitleStreamIndex});
 
 class RuntimePlaybackRecovery {
-  RuntimePlaybackRecovery({required this.coordinator, required this.session, this.negotiator, this.negotiate, this.maxRetries = 1}) : assert(negotiator != null || negotiate != null);
+  RuntimePlaybackRecovery(
+      {required this.coordinator,
+      required this.session,
+      this.negotiator,
+      this.negotiate,
+      this.selectedMediaSourceId,
+      this.maxRetries = 1})
+      : assert(negotiator != null || negotiate != null);
 
   final PlaybackRuntimeCoordinator coordinator;
   final LogicalPlaybackSession session;
   final PlaybackNegotiator? negotiator;
   final RuntimeRecoveryNegotiation? negotiate;
+  String? selectedMediaSourceId;
   final int maxRetries;
   var _generation = 0;
   var _recovering = false;
   var _disposed = false;
+
+  void updateSelectedMediaSourceId(String? value) {
+    selectedMediaSourceId = value;
+    invalidate();
+  }
 
   Future<void> recover() async {
     if (_disposed || _recovering) return;
@@ -36,7 +53,11 @@ class RuntimePlaybackRecovery {
           if (engine.error.value?.isNotEmpty == true) continue;
           await engine.seek(position);
           if (!_active(generation, active)) return;
-          if (wasPlaying) { await engine.play(); } else { await engine.pause(); }
+          if (wasPlaying) {
+            await engine.play();
+          } else {
+            await engine.pause();
+          }
           if (!_active(generation, active)) return;
           return;
         } on Object {
@@ -45,16 +66,33 @@ class RuntimePlaybackRecovery {
       }
       if (!_active(generation, active)) return;
       final candidates = negotiate != null
-          ? await negotiate!(itemId: session.itemId, audioStreamIndex: session.selectedAudio, subtitleStreamIndex: session.selectedSubtitle)
-          : (await negotiator!.negotiateDecision(itemId: session.itemId, audioStreamIndex: session.selectedAudio, subtitleStreamIndex: session.selectedSubtitle)).orderedUsableCandidates;
+          ? await negotiate!(
+              itemId: session.itemId,
+              audioStreamIndex: session.selectedAudio,
+              subtitleStreamIndex: session.selectedSubtitle)
+          : (await negotiator!.negotiateDecision(
+                  itemId: session.itemId,
+                  audioStreamIndex: session.selectedAudio,
+                  subtitleStreamIndex: session.selectedSubtitle,
+                  selectedMediaSourceId: selectedMediaSourceId))
+              .orderedUsableCandidates;
       if (!_active(generation, active)) return;
-      final activated = await coordinator.activateCandidates(candidates, prepare: (candidate) async {
+      final activated = await coordinator.activateCandidates(candidates,
+          prepare: (candidate) async {
         await candidate.engine.seek(position);
-        if (!_active(generation, active)) throw StateError('Recovery was superseded');
-        if (wasPlaying) { await candidate.engine.play(); } else { await candidate.engine.pause(); }
-        if (!_active(generation, active)) throw StateError('Recovery was superseded');
+        if (!_active(generation, active))
+          throw StateError('Recovery was superseded');
+        if (wasPlaying) {
+          await candidate.engine.play();
+        } else {
+          await candidate.engine.pause();
+        }
+        if (!_active(generation, active))
+          throw StateError('Recovery was superseded');
       });
-      if (!_disposed && generation == _generation && identical(coordinator.active, activated)) session.position = position;
+      if (!_disposed &&
+          generation == _generation &&
+          identical(coordinator.active, activated)) session.position = position;
     } on Object {
       // The existing runtime remains authoritative when fallback activation fails.
     } finally {
@@ -62,7 +100,17 @@ class RuntimePlaybackRecovery {
     }
   }
 
-  void invalidate() { _generation += 1; _recovering = false; }
-  bool _active(int generation, PlaybackRuntimeSession active) => !_disposed && generation == _generation && identical(coordinator.active, active);
-  void dispose() { _disposed = true; invalidate(); }
+  void invalidate() {
+    _generation += 1;
+    _recovering = false;
+  }
+
+  bool _active(int generation, PlaybackRuntimeSession active) =>
+      !_disposed &&
+      generation == _generation &&
+      identical(coordinator.active, active);
+  void dispose() {
+    _disposed = true;
+    invalidate();
+  }
 }

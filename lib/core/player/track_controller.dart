@@ -28,12 +28,14 @@ class RodPlayerTrack {
     this.serverStreamIndex,
     this.language,
     this.title,
+    this.displayTitle,
     this.codec,
     this.isDefault,
     this.isForced,
     this.isExternal,
     this.isTextSubtitle,
     this.channels,
+    this.channelLayout,
   });
 
   final String engineTrackId;
@@ -41,19 +43,29 @@ class RodPlayerTrack {
   final int? serverStreamIndex;
   final String? language;
   final String? title;
+  final String? displayTitle;
   final String? codec;
   final bool? isDefault;
   final bool? isForced;
   final bool? isExternal;
   final bool? isTextSubtitle;
   final int? channels;
+  final String? channelLayout;
 
   @override
-  bool operator ==(Object other) => other is RodPlayerTrack && other.engineTrackId == engineTrackId && other.serverStreamIndex == serverStreamIndex;
+  bool operator ==(Object other) =>
+      other is RodPlayerTrack &&
+      other.engineTrackId == engineTrackId &&
+      other.serverStreamIndex == serverStreamIndex;
 
   @override
   int get hashCode => Object.hash(engineTrackId, serverStreamIndex);
 }
+
+/// media_kit exposes these selection sentinels in its enumerated lists even
+/// though they are not actual audio or subtitle streams.
+bool isSyntheticEngineTrackId(String id) =>
+    const <String>{'', 'auto', 'no'}.contains(id.trim().toLowerCase());
 
 class TrackSwitchResult {
   const TrackSwitchResult({required this.mode, this.serverStreamIndex});
@@ -64,7 +76,8 @@ class TrackSwitchResult {
 /// Stable engine-visible metadata used only to correlate a backend track with
 /// a Jellyfin stream. Missing or ambiguous evidence remains unmapped.
 class EngineTrackMetadata {
-  const EngineTrackMetadata({required this.id, this.language, this.title, this.codec});
+  const EngineTrackMetadata(
+      {required this.id, this.language, this.title, this.codec});
 
   final String id;
   final String? language;
@@ -87,19 +100,26 @@ class TrackServerIndexMappings {
     required List<EngineTrackMetadata> subtitleTracks,
   }) =>
       TrackServerIndexMappings(
-        audioServerIndexesByEngineTrackId: _mapEngineTracks(audioTracks, plan.source.audioStreams),
-        subtitleServerIndexesByEngineTrackId: _mapEngineTracks(subtitleTracks, plan.source.subtitleStreams),
+        audioServerIndexesByEngineTrackId:
+            _mapEngineTracks(audioTracks, plan.source.audioStreams),
+        subtitleServerIndexesByEngineTrackId:
+            _mapEngineTracks(subtitleTracks, plan.source.subtitleStreams),
       );
 
-  int? audioIndexFor(String engineTrackId) => audioServerIndexesByEngineTrackId[engineTrackId];
-  int? subtitleIndexFor(String engineTrackId) => subtitleServerIndexesByEngineTrackId[engineTrackId];
+  int? audioIndexFor(String engineTrackId) =>
+      audioServerIndexesByEngineTrackId[engineTrackId];
+  int? subtitleIndexFor(String engineTrackId) =>
+      subtitleServerIndexesByEngineTrackId[engineTrackId];
 }
 
-Map<String, int> _mapEngineTracks(List<EngineTrackMetadata> engineTracks, List<MediaStream> serverStreams) {
+Map<String, int> _mapEngineTracks(
+    List<EngineTrackMetadata> engineTracks, List<MediaStream> serverStreams) {
   final mapped = <String, int>{};
   for (final engine in engineTracks) {
     if (engine.id.isEmpty) continue;
-    final candidates = serverStreams.where((stream) => _matches(engine, stream)).toList(growable: false);
+    final candidates = serverStreams
+        .where((stream) => _matches(engine, stream))
+        .toList(growable: false);
     if (candidates.length == 1 && candidates.single.index != null) {
       mapped[engine.id] = candidates.single.index!;
     }
@@ -112,9 +132,15 @@ bool _matches(EngineTrackMetadata engine, MediaStream stream) {
   final title = _normalized(engine.title);
   final codec = _normalized(engine.codec);
   if (language == null && title == null && codec == null) return false;
-  if (language != null && language != _normalized(stream.language)) return false;
+  if (language != null && language != _normalized(stream.language)) {
+    return false;
+  }
   if (codec != null && codec != _normalized(stream.codec)) return false;
-  if (title != null && title != _normalized(stream.title) && title != _normalized(stream.displayTitle)) return false;
+  if (title != null &&
+      title != _normalized(stream.title) &&
+      title != _normalized(stream.displayTitle)) {
+    return false;
+  }
   return true;
 }
 
@@ -124,7 +150,8 @@ String? _normalized(String? value) {
 }
 
 abstract class TrackSelectionController {
-  TrackSelectionCapabilities get capabilities => const TrackSelectionCapabilities.unavailable();
+  TrackSelectionCapabilities get capabilities =>
+      const TrackSelectionCapabilities.unavailable();
   List<RodPlayerTrack> get audioTracks;
   List<RodPlayerTrack> get subtitleTracks;
   RodPlayerTrack? get selectedAudio;
@@ -133,11 +160,14 @@ abstract class TrackSelectionController {
   Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track);
 }
 
-class LogicalSessionTrackSelectionController implements TrackSelectionController {
-  LogicalSessionTrackSelectionController({required this.delegate, required this.session});
+class LogicalSessionTrackSelectionController
+    implements TrackSelectionController {
+  LogicalSessionTrackSelectionController(
+      {required this.delegate, required this.session, this.isCurrent});
 
   final TrackSelectionController delegate;
   final LogicalPlaybackSession session;
+  final bool Function()? isCurrent;
 
   @override
   TrackSelectionCapabilities get capabilities => delegate.capabilities;
@@ -153,14 +183,20 @@ class LogicalSessionTrackSelectionController implements TrackSelectionController
   @override
   Future<TrackSwitchResult> selectAudio(RodPlayerTrack track) async {
     final result = await delegate.selectAudio(track);
-    if (result.mode == TrackSwitchMode.local) session.selectedAudio = result.serverStreamIndex ?? track.serverStreamIndex;
+    if (result.mode == TrackSwitchMode.local && (isCurrent?.call() ?? true)) {
+      session.selectedAudio =
+          result.serverStreamIndex ?? track.serverStreamIndex;
+    }
     return result;
   }
 
   @override
   Future<TrackSwitchResult> selectSubtitle(RodPlayerTrack? track) async {
     final result = await delegate.selectSubtitle(track);
-    if (result.mode == TrackSwitchMode.local) session.selectedSubtitle = result.serverStreamIndex ?? track?.serverStreamIndex;
+    if (result.mode == TrackSwitchMode.local && (isCurrent?.call() ?? true)) {
+      session.selectedSubtitle =
+          result.serverStreamIndex ?? track?.serverStreamIndex;
+    }
     return result;
   }
 }

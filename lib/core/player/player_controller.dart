@@ -42,9 +42,11 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   @override
   final ValueNotifier<bool> buffering = ValueNotifier<bool>(false);
   @override
-  final ValueNotifier<Duration> positionListenable = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> positionListenable =
+      ValueNotifier<Duration>(Duration.zero);
   @override
-  final ValueNotifier<Duration> durationListenable = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> durationListenable =
+      ValueNotifier<Duration>(Duration.zero);
   @override
   final ValueNotifier<double> volume = ValueNotifier<double>(100);
 
@@ -61,7 +63,8 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   Duration get duration => player.state.duration;
 
   @override
-  Stream<String> get statuses => coordinator?.statuses ?? const Stream<String>.empty();
+  Stream<String> get statuses =>
+      coordinator?.statuses ?? const Stream<String>.empty();
 
   static const Map<String, String> mpvProperties = {
     'hwdec': 'auto-safe',
@@ -83,24 +86,37 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
 
   static Map<String, String> get effectiveMpvProperties {
     if (kIsWeb) {
-      return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-spdif': 'no', 'audio-passthrough': 'no'});
+      return Map<String, String>.unmodifiable(<String, String>{
+        ...mpvProperties,
+        'audio-spdif': 'no',
+        'audio-passthrough': 'no'
+      });
     }
-    return Map<String, String>.unmodifiable(<String, String>{...mpvProperties, 'audio-device': 'auto'});
+    return Map<String, String>.unmodifiable(
+        <String, String>{...mpvProperties, 'audio-device': 'auto'});
   }
 
   @override
-  Future<void> load(PlaybackPlan plan) => open(plan.playbackUri);
+  // Open paused so runtime preparation (including resume/source-switch seeks)
+  // completes before the decoder starts producing audio or video.
+  Future<void> load(PlaybackPlan plan) =>
+      open(plan.playbackUri, startPlaying: false);
 
-  Future<void> open(Uri uri, {String? title, Map<String, String>? headers, String? authToken}) async {
+  Future<void> open(Uri uri,
+      {String? title,
+      Map<String, String>? headers,
+      String? authToken,
+      bool startPlaying = true}) async {
     _uri = uri;
     error.value = null;
     _headers = <String, String>{...?headers};
-    if (authToken != null && authToken.isNotEmpty) _headers['Authorization'] = 'Bearer $authToken';
+    if (authToken != null && authToken.isNotEmpty)
+      _headers['Authorization'] = 'Bearer $authToken';
     coordinator?.attach();
-    await _openAtPosition();
+    await _openAtPosition(startPlaying: startPlaying);
   }
 
-  Future<void> _openAtPosition() async {
+  Future<void> _openAtPosition({bool startPlaying = true}) async {
     final uri = _uri;
     if (_disposed || uri == null) return;
     final position = player.state.position;
@@ -108,7 +124,7 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
     for (final entry in effectiveMpvProperties.entries) {
       media.extras?[entry.key] = entry.value;
     }
-    await player.open(media, play: true);
+    await player.open(media, play: startPlaying);
     if (position > Duration.zero) await player.seek(position);
   }
 
@@ -126,7 +142,8 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
     if (_disposed) return;
     error.value = message;
     onError?.call(message);
-    unawaited(coordinator?.handleStreamFailure(networkDrop: true) ?? Future<void>.value());
+    unawaited(coordinator?.handleStreamFailure(networkDrop: true) ??
+        Future<void>.value());
   }
 
   @override
@@ -143,7 +160,10 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   void _handlePositionChanged(Duration value) {
     if (_disposed) return;
     positionListenable.value = value;
-    coordinator?.stallDetector.update(position: value, isPlaying: playing.value, isBuffering: buffering.value);
+    coordinator?.stallDetector.update(
+        position: value,
+        isPlaying: playing.value,
+        isBuffering: buffering.value);
   }
 
   void _handleDurationChanged(Duration value) {
@@ -154,13 +174,19 @@ class MediaKitPlaybackEngine implements PlaybackEngine {
   void _handlePlayingChanged(bool value) {
     if (_disposed) return;
     playing.value = value;
-    coordinator?.stallDetector.update(position: player.state.position, isPlaying: value, isBuffering: buffering.value);
+    coordinator?.stallDetector.update(
+        position: player.state.position,
+        isPlaying: value,
+        isBuffering: buffering.value);
   }
 
   void _handleBufferingChanged(bool value) {
     if (_disposed) return;
     buffering.value = value;
-    coordinator?.stallDetector.update(position: player.state.position, isPlaying: playing.value, isBuffering: value);
+    coordinator?.stallDetector.update(
+        position: player.state.position,
+        isPlaying: playing.value,
+        isBuffering: value);
   }
 
   void _handleVolumeChanged(double value) {
@@ -213,7 +239,14 @@ class MediaKitPlaybackVideoSurface implements PlaybackVideoSurface {
   final MediaKitPlaybackEngine engine;
 
   @override
-  Widget build(BuildContext context) => Video(controller: engine.controller, controls: AdaptiveVideoControls);
+  Widget build(BuildContext context) => Video(
+        // Replace the native video surface with the runtime that owns it.
+        key: ValueKey<MediaKitPlaybackEngine>(engine),
+        controller: engine.controller,
+        // Nautilus owns the playback OSD and timeline. Media Kit's adaptive
+        // desktop controls add a second progress bar on Windows/macOS/Linux.
+        controls: (_) => const SizedBox.shrink(),
+      );
 }
 
 class MediaKitPlaybackRuntime implements PlaybackBackendRuntime {

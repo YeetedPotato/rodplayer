@@ -13,6 +13,7 @@ class PlaybackMetadata {
     Iterable<PlaybackMarker> markers = const <PlaybackMarker>[],
     Iterable<MediaStream> serverStreams = const <MediaStream>[],
     this.duration,
+    this.title,
   })  : chapters = List<PlaybackChapter>.unmodifiable(chapters),
         markers = List<PlaybackMarker>.unmodifiable(markers),
         serverStreams = List<MediaStream>.unmodifiable(serverStreams);
@@ -21,34 +22,45 @@ class PlaybackMetadata {
   final List<PlaybackMarker> markers;
   final List<MediaStream> serverStreams;
   final Duration? duration;
+  final String? title;
 
-  factory PlaybackMetadata.fromPlan(PlaybackPlan plan) => _fromSource(plan.source);
+  factory PlaybackMetadata.fromPlan(PlaybackPlan plan) =>
+      _fromSource(plan.source);
 
-  factory PlaybackMetadata.fromLibraryItem(JellyfinLibraryItem item) => PlaybackMetadata(
+  factory PlaybackMetadata.fromLibraryItem(JellyfinLibraryItem item) =>
+      PlaybackMetadata(
         chapters: _chapters(item.raw['Chapters']),
         markers: _markers(item.raw),
         serverStreams: _streams(item.raw['MediaStreams']),
-      duration: item.runTime,
+        duration: item.runTime,
+        title: item.title.isEmpty ? null : item.title,
       );
 
   PlaybackMetadata mergeLibraryItem(JellyfinLibraryItem item) {
     final raw = item.raw;
-    final itemChapters = raw.containsKey('Chapters') ? _chapters(raw['Chapters']) : chapters;
-    final itemMarkers = raw.containsKey('MediaSegments') || raw.containsKey('Markers') ? _markers(raw) : markers;
+    final itemChapters =
+        raw.containsKey('Chapters') ? _chapters(raw['Chapters']) : chapters;
+    final itemMarkers =
+        raw.containsKey('MediaSegments') || raw.containsKey('Markers')
+            ? _markers(raw)
+            : markers;
     final itemStreams = _streams(raw['MediaStreams']);
     return PlaybackMetadata(
       chapters: itemChapters,
       markers: itemMarkers,
       serverStreams: itemStreams.isEmpty ? serverStreams : itemStreams,
       duration: item.runTime ?? duration,
+      title: item.title.isEmpty ? title : item.title,
     );
   }
 
-  PlaybackMetadata withMediaSegments(Iterable<PlaybackMarker> values) => PlaybackMetadata(
+  PlaybackMetadata withMediaSegments(Iterable<PlaybackMarker> values) =>
+      PlaybackMetadata(
         chapters: chapters,
         markers: _deduplicateMarkers(values),
         serverStreams: serverStreams,
         duration: duration,
+        title: title,
       );
 
   PlaybackMetadata withPlanSource(PlaybackPlan plan) {
@@ -56,12 +68,15 @@ class PlaybackMetadata {
     return PlaybackMetadata(
       chapters: chapters.isEmpty ? source.chapters : chapters,
       markers: markers.isEmpty ? source.markers : markers,
-      serverStreams: source.serverStreams.isEmpty ? serverStreams : source.serverStreams,
+      serverStreams:
+          source.serverStreams.isEmpty ? serverStreams : source.serverStreams,
       duration: source.duration ?? duration,
+      title: title ?? source.title,
     );
   }
 
-  static PlaybackMetadata _fromSource(MediaSourceInfo source) => PlaybackMetadata(
+  static PlaybackMetadata _fromSource(MediaSourceInfo source) =>
+      PlaybackMetadata(
         chapters: _chapters(source.raw['Chapters']),
         markers: _markers(source.raw),
         serverStreams: source.mediaStreams,
@@ -72,9 +87,11 @@ class PlaybackMetadata {
 List<PlaybackChapter> _chapters(Object? value) {
   final parsed = <_ParsedChapter>[];
   for (final entry in _maps(value)) {
-    final start = _ticksToDuration(entry['StartPositionTicks'] ?? entry['StartTicks']);
+    final start =
+        _ticksToDuration(entry['StartPositionTicks'] ?? entry['StartTicks']);
     if (start == null) continue;
-    final end = _ticksToDuration(entry['EndPositionTicks'] ?? entry['EndTicks']);
+    final end =
+        _ticksToDuration(entry['EndPositionTicks'] ?? entry['EndTicks']);
     parsed.add(_ParsedChapter(
       title: _text(entry['Name'] ?? entry['Title']) ?? '',
       start: start,
@@ -87,18 +104,30 @@ List<PlaybackChapter> _chapters(Object? value) {
       PlaybackChapter(
         title: parsed[index].title,
         start: parsed[index].start,
-        end: parsed[index].end ?? (index + 1 < parsed.length ? parsed[index + 1].start : null),
+        end: parsed[index].end ??
+            (index + 1 < parsed.length ? parsed[index + 1].start : null),
       ),
   ]);
 }
 
 List<PlaybackMarker> _markers(Map<String, dynamic> raw) {
   final parsed = <PlaybackMarker>[];
-  for (final entry in <Map<String, dynamic>>[..._maps(raw['MediaSegments']), ..._maps(raw['Markers'])]) {
+  for (final entry in <Map<String, dynamic>>[
+    ..._maps(raw['MediaSegments']),
+    ..._maps(raw['Markers'])
+  ]) {
     final kind = _text(entry['Type'] ?? entry['Kind'] ?? entry['Name']);
-    final start = _ticksToDuration(entry['StartPositionTicks'] ?? entry['StartTicks']);
-    final end = _ticksToDuration(entry['EndPositionTicks'] ?? entry['EndTicks']);
-    if (kind == null || start == null || end == null || start.isNegative || end <= start) continue;
+    final start =
+        _ticksToDuration(entry['StartPositionTicks'] ?? entry['StartTicks']);
+    final end =
+        _ticksToDuration(entry['EndPositionTicks'] ?? entry['EndTicks']);
+    if (kind == null ||
+        start == null ||
+        end == null ||
+        start.isNegative ||
+        end <= start) {
+      continue;
+    }
     parsed.add(PlaybackMarker(kind: kind, start: start, end: end));
   }
   return List<PlaybackMarker>.unmodifiable(parsed);
@@ -106,7 +135,8 @@ List<PlaybackMarker> _markers(Map<String, dynamic> raw) {
 
 List<PlaybackMarker> _deduplicateMarkers(Iterable<PlaybackMarker> values) {
   final seen = <String>{};
-  return List<PlaybackMarker>.unmodifiable(values.where((marker) => seen.add('${marker.kind}|${marker.start.inMicroseconds}|${marker.end.inMicroseconds}')));
+  return List<PlaybackMarker>.unmodifiable(values.where((marker) => seen.add(
+      '${marker.kind}|${marker.start.inMicroseconds}|${marker.end.inMicroseconds}')));
 }
 
 List<MediaStream> _streams(Object? value) => List<MediaStream>.unmodifiable(
@@ -114,12 +144,17 @@ List<MediaStream> _streams(Object? value) => List<MediaStream>.unmodifiable(
     );
 
 List<Map<String, dynamic>> _maps(Object? value) => value is List
-    ? value.whereType<Map>().map((entry) => Map<String, dynamic>.from(entry)).toList(growable: false)
+    ? value
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false)
     : const <Map<String, dynamic>>[];
 
 Duration? _ticksToDuration(Object? value) {
   final ticks = value is num ? value.toInt() : int.tryParse('$value');
-  return ticks == null || ticks < 0 ? null : Duration(microseconds: ticks ~/ 10);
+  return ticks == null || ticks < 0
+      ? null
+      : Duration(microseconds: ticks ~/ 10);
 }
 
 String? _text(Object? value) {

@@ -11,8 +11,14 @@ import 'package:rodplayer/core/player/playback_runtime.dart';
 abstract interface class PlaybackInfoRequester {
   String? get userId;
   Future<PlaybackInfoResponse> getPlaybackInfo(PlaybackInfoRequest request);
-  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(PlaybackBackendDescriptor backend, PlaybackInfoRequest request);
-  Uri buildDirectPlayUri({required String itemId, required String mediaSourceId, String? playSessionId, int? audioStreamIndex, int? subtitleStreamIndex});
+  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(
+      PlaybackBackendDescriptor backend, PlaybackInfoRequest request);
+  Uri buildDirectPlayUri(
+      {required String itemId,
+      required String mediaSourceId,
+      String? playSessionId,
+      int? audioStreamIndex,
+      int? subtitleStreamIndex});
   Uri? resolvePlaybackUri(String uriText);
 }
 
@@ -25,13 +31,22 @@ class JellyfinPlaybackInfoRequester implements PlaybackInfoRequester {
   String? get userId => client.userId;
 
   @override
-  Future<PlaybackInfoResponse> getPlaybackInfo(PlaybackInfoRequest request) => client.getPlaybackInfo(request);
+  Future<PlaybackInfoResponse> getPlaybackInfo(PlaybackInfoRequest request) =>
+      client.getPlaybackInfo(request);
 
   @override
-  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(PlaybackBackendDescriptor backend, PlaybackInfoRequest request) => getPlaybackInfo(request);
+  Future<PlaybackInfoResponse> getPlaybackInfoForBackend(
+          PlaybackBackendDescriptor backend, PlaybackInfoRequest request) =>
+      getPlaybackInfo(request);
 
   @override
-  Uri buildDirectPlayUri({required String itemId, required String mediaSourceId, String? playSessionId, int? audioStreamIndex, int? subtitleStreamIndex}) => client.buildDirectPlayUri(
+  Uri buildDirectPlayUri(
+          {required String itemId,
+          required String mediaSourceId,
+          String? playSessionId,
+          int? audioStreamIndex,
+          int? subtitleStreamIndex}) =>
+      client.buildDirectPlayUri(
         itemId: itemId,
         mediaSourceId: mediaSourceId,
         playSessionId: playSessionId,
@@ -84,9 +99,13 @@ class PlaybackPlanDecision {
   PlaybackPlan get plan => selected.plan!;
   String get selectedBackendId => selected.backend.id;
   PlaybackPlanScore get score => selected.score!;
-  List<PlaybackBackendCandidate> get rejectedCandidates => candidates.where((candidate) => !candidate.isUsable).toList(growable: false);
+  List<PlaybackBackendCandidate> get rejectedCandidates => candidates
+      .where((candidate) => !candidate.isUsable)
+      .toList(growable: false);
   List<PlaybackBackendCandidate> get orderedUsableCandidates {
-    final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
+    final usable = candidates
+        .where((candidate) => candidate.isUsable)
+        .toList(growable: false)
       ..sort(_compareCandidates);
     return usable;
   }
@@ -95,7 +114,8 @@ class PlaybackPlanDecision {
 class PlaybackPlanScorer {
   const PlaybackPlanScorer();
 
-  PlaybackPlanScore score(PlaybackPlan plan, EffectivePlaybackProfile effectiveProfile) {
+  PlaybackPlanScore score(
+      PlaybackPlan plan, EffectivePlaybackProfile effectiveProfile) {
     final c = <String, int>{};
     c['preservationTier'] = _preservationTier(plan) * 10000;
     c['video'] = switch (plan.videoOperation) {
@@ -124,24 +144,33 @@ class PlaybackPlanScorer {
       HdrHandling.unknown => 0,
     };
     c['container'] = plan.containerChanged ? -30 : 0;
-    c['hardwareDecode'] = switch (effectiveProfile.capabilities.hardwareDecode) {
+    c['hardwareDecode'] =
+        switch (effectiveProfile.capabilities.hardwareDecode) {
       CapabilitySupport.supported => 20,
       CapabilitySupport.unsupported => -20,
       CapabilitySupport.unknown => 0,
     };
-    c['audioPreservation'] = effectiveProfile.capabilities.passthrough == CapabilitySupport.supported ? 20 : 0;
-    return PlaybackPlanScore(total: c.values.fold<int>(0, (sum, value) => sum + value), components: Map<String, int>.unmodifiable(c));
+    c['audioPreservation'] =
+        effectiveProfile.capabilities.passthrough == CapabilitySupport.supported
+            ? 20
+            : 0;
+    return PlaybackPlanScore(
+        total: c.values.fold<int>(0, (sum, value) => sum + value),
+        components: Map<String, int>.unmodifiable(c));
   }
 }
 
 int _preservationTier(PlaybackPlan plan) {
   final deliveryMode = plan.deliveryMode ?? _deliveryMode(plan.playMethod);
   if (deliveryMode == PlaybackDeliveryMode.directPlay) return 7;
-  if (plan.videoOperation == VideoOperation.copy && plan.audioOperation == AudioOperation.transcode) return 6;
+  if (plan.videoOperation == VideoOperation.copy &&
+      plan.audioOperation == AudioOperation.transcode) return 6;
   if (deliveryMode == PlaybackDeliveryMode.directStream) return 5;
   if (plan.videoOperation == VideoOperation.copy) return 4;
-  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.copy) return 3;
-  if (plan.videoOperation == VideoOperation.transcode && plan.audioOperation == AudioOperation.transcode) return 2;
+  if (plan.videoOperation == VideoOperation.transcode &&
+      plan.audioOperation == AudioOperation.copy) return 3;
+  if (plan.videoOperation == VideoOperation.transcode &&
+      plan.audioOperation == AudioOperation.transcode) return 2;
   return 1;
 }
 
@@ -163,11 +192,15 @@ class MultiBackendPlaybackNegotiator {
     required String itemId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
+    String? selectedMediaSourceId,
   }) async {
     final candidates = <PlaybackBackendCandidate>[];
-    for (final backend in environment.backends.where((backend) => backend.availability == BackendAvailability.available)) {
+    for (final backend in environment.backends.where(
+        (backend) => backend.availability == BackendAvailability.available)) {
       if (!runtimeRegistry.canExecute(backend.id)) {
-        candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'No playback runtime registered'));
+        candidates.add(PlaybackBackendCandidate(
+            backend: backend,
+            rejectionReason: 'No playback runtime registered'));
         continue;
       }
       try {
@@ -177,19 +210,31 @@ class MultiBackendPlaybackNegotiator {
           itemId: itemId,
           audioStreamIndex: audioStreamIndex,
           subtitleStreamIndex: subtitleStreamIndex,
+          selectedMediaSourceId: selectedMediaSourceId,
         ));
       } on Object catch (error) {
-        candidates.add(PlaybackBackendCandidate(backend: backend, rejectionReason: 'PlaybackInfo request failed: $error'));
+        candidates.add(PlaybackBackendCandidate(
+            backend: backend,
+            rejectionReason: 'PlaybackInfo request failed: $error'));
       }
     }
-    final usable = candidates.where((candidate) => candidate.isUsable).toList(growable: false)
+    final usable = candidates
+        .where((candidate) => candidate.isUsable)
+        .toList(growable: false)
       ..sort(_compareCandidates);
     if (usable.isEmpty) {
-      final failures = candidates.where((candidate) => candidate.rejectionReason?.startsWith('PlaybackInfo request failed:') == true).toList(growable: false);
+      final failures = candidates
+          .where((candidate) =>
+              candidate.rejectionReason
+                  ?.startsWith('PlaybackInfo request failed:') ==
+              true)
+          .toList(growable: false);
       if (failures.isNotEmpty && failures.length == candidates.length) {
-        throw ServerConnectionException('PlaybackInfo failed for all executable backends: ${failures.map((c) => '${c.backend.id}: ${c.rejectionReason}').join('; ')}');
+        throw ServerConnectionException(
+            'PlaybackInfo failed for all executable backends: ${failures.map((c) => '${c.backend.id}: ${c.rejectionReason}').join('; ')}');
       }
-      throw ServerConnectionException('Server returned no playable media source: ${candidates.map((c) => '${c.backend.id}: ${c.rejectionReason ?? 'no usable candidate'}').join('; ')}');
+      throw ServerConnectionException(
+          'Server returned no playable media source: ${candidates.map((c) => '${c.backend.id}: ${c.rejectionReason ?? 'no usable candidate'}').join('; ')}');
     }
     return PlaybackPlanDecision(selected: usable.first, candidates: candidates);
   }
@@ -200,18 +245,27 @@ class MultiBackendPlaybackNegotiator {
     required String itemId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
+    String? selectedMediaSourceId,
   }) async {
     final profile = environment.effectiveProfileFor(backend.id);
-    final response = await requester.getPlaybackInfoForBackend(backend, PlaybackInfoRequest(
-      itemId: itemId,
-      userId: requester.userId,
-      deviceProfile: profileMapper.map(environment, backend.capabilities),
-      audioStreamIndex: audioStreamIndex,
-      subtitleStreamIndex: subtitleStreamIndex,
-      maxStreamingBitrate: environment.network.maxStreamingBitrate,
-    ));
+    final response = await requester.getPlaybackInfoForBackend(
+        backend,
+        PlaybackInfoRequest(
+          itemId: itemId,
+          userId: requester.userId,
+          deviceProfile: profileMapper.map(environment, backend.capabilities),
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+          mediaSourceId: selectedMediaSourceId,
+          maxStreamingBitrate: environment.network.maxStreamingBitrate,
+        ));
     final candidates = <PlaybackBackendCandidate>[];
-    for (final source in response.mediaSources) {
+    final sources = selectedMediaSourceId == null
+        ? response.mediaSources
+        : response.mediaSources
+            .where((source) => source.id == selectedMediaSourceId)
+            .toList(growable: false);
+    for (final source in sources) {
       final plan = _planFor(
         itemId: itemId,
         playSessionId: response.playSessionId,
@@ -227,13 +281,56 @@ class MultiBackendPlaybackNegotiator {
         source: source,
         plan: plan,
         score: plan == null ? null : scorer.score(plan, profile),
-        rejectionReason: plan == null ? 'Server response had no authoritative playback URL' : null,
+        rejectionReason: plan == null
+            ? 'Server response had no authoritative playback URL'
+            : null,
       ));
     }
     if (candidates.isEmpty) {
-      candidates.add(PlaybackBackendCandidate(backend: backend, effectiveProfile: profile, response: response, rejectionReason: 'Server returned no media sources'));
+      candidates.add(PlaybackBackendCandidate(
+        backend: backend,
+        effectiveProfile: profile,
+        response: response,
+        rejectionReason: selectedMediaSourceId == null
+            ? 'Server returned no media sources'
+            : 'Server did not return the selected media source',
+      ));
     }
     return candidates;
+  }
+
+  Future<List<MediaSourceInfo>> listMediaSources({
+    required PlaybackEnvironment environment,
+    required String itemId,
+  }) async {
+    final sourcesById = <String, MediaSourceInfo>{};
+    var successfulResponses = 0;
+    for (final backend in environment.backends.where(
+        (backend) => backend.availability == BackendAvailability.available)) {
+      if (!runtimeRegistry.canExecute(backend.id)) continue;
+      try {
+        final response = await requester.getPlaybackInfoForBackend(
+          backend,
+          PlaybackInfoRequest(
+            itemId: itemId,
+            userId: requester.userId,
+            deviceProfile: profileMapper.map(environment, backend.capabilities),
+            maxStreamingBitrate: environment.network.maxStreamingBitrate,
+          ),
+        );
+        successfulResponses++;
+        for (final source in response.mediaSources) {
+          if (source.id.isNotEmpty)
+            sourcesById.putIfAbsent(source.id, () => source);
+        }
+      } on Object {
+        // A source list can still be useful when an optional backend request fails.
+      }
+    }
+    if (successfulResponses == 0) {
+      throw ServerConnectionException('Unable to load playback versions');
+    }
+    return List<MediaSourceInfo>.unmodifiable(sourcesById.values);
   }
 
   PlaybackPlan? _planFor({
@@ -246,7 +343,8 @@ class MultiBackendPlaybackNegotiator {
   }) {
     final method = source.playMethod ?? _methodFromSource(source);
     final selectedAudio = audioStreamIndex ?? source.defaultAudioStreamIndex;
-    final selectedSubtitle = subtitleStreamIndex ?? source.defaultSubtitleStreamIndex;
+    final selectedSubtitle =
+        subtitleStreamIndex ?? source.defaultSubtitleStreamIndex;
     final playbackUri = switch (method) {
       PlayMethod.directPlay => requester.buildDirectPlayUri(
           itemId: itemId,
@@ -255,7 +353,8 @@ class MultiBackendPlaybackNegotiator {
           audioStreamIndex: selectedAudio,
           subtitleStreamIndex: selectedSubtitle,
         ),
-      PlayMethod.directStream => _resolvedServerUri(source.directStreamUrl ?? source.transcodingUrl),
+      PlayMethod.directStream =>
+        _resolvedServerUri(source.directStreamUrl ?? source.transcodingUrl),
       PlayMethod.transcode => _resolvedServerUri(source.transcodingUrl),
     };
     if (playbackUri == null) return null;
@@ -290,8 +389,10 @@ class MultiBackendPlaybackNegotiator {
     if (source.supportsDirectPlay == true) return PlayMethod.directPlay;
     if (source.supportsDirectStream == true) return PlayMethod.directStream;
     if (source.supportsTranscoding == true) return PlayMethod.transcode;
-    if (source.directStreamUrl != null && source.directStreamUrl!.isNotEmpty) return PlayMethod.directStream;
-    if (source.transcodingUrl != null && source.transcodingUrl!.isNotEmpty) return PlayMethod.transcode;
+    if (source.directStreamUrl != null && source.directStreamUrl!.isNotEmpty)
+      return PlayMethod.directStream;
+    if (source.transcodingUrl != null && source.transcodingUrl!.isNotEmpty)
+      return PlayMethod.transcode;
     return PlayMethod.directPlay;
   }
 }
@@ -332,33 +433,57 @@ AudioOperation _audioOperation(PlayMethod method, MediaSourceInfo source) {
   return AudioOperation.copy;
 }
 
-SubtitleOperation _subtitleOperation(MediaSourceInfo source, int? selectedSubtitle) {
+SubtitleOperation _subtitleOperation(
+    MediaSourceInfo source, int? selectedSubtitle) {
   final subtitles = source.subtitleStreams;
-  if (selectedSubtitle == null && subtitles.isEmpty) return SubtitleOperation.none;
-  final selected = subtitles.where((stream) => stream.index == selectedSubtitle).firstOrNull;
-  if (selected == null) return subtitles.isEmpty ? SubtitleOperation.none : SubtitleOperation.unknown;
-  if (selected.deliveryUrl != null || selected.isExternal == true) return SubtitleOperation.external;
+  if (selectedSubtitle == null && subtitles.isEmpty)
+    return SubtitleOperation.none;
+  final selected =
+      subtitles.where((stream) => stream.index == selectedSubtitle).firstOrNull;
+  if (selected == null)
+    return subtitles.isEmpty
+        ? SubtitleOperation.none
+        : SubtitleOperation.unknown;
+  if (selected.deliveryUrl != null || selected.isExternal == true)
+    return SubtitleOperation.external;
   if (selected.isTextSubtitleStream == true) return SubtitleOperation.native;
   return SubtitleOperation.burnIn;
 }
 
 HdrHandling _hdrHandling(MediaSourceInfo source) {
   final hasHdr = source.videoStreams.any((stream) {
-    final range = '${stream.videoRange ?? ''} ${stream.videoRangeType ?? ''} ${stream.profile ?? ''}'.toLowerCase();
-    return range.contains('hdr') || range.contains('dolby vision') || range.contains('hlg');
+    final range =
+        '${stream.videoRange ?? ''} ${stream.videoRangeType ?? ''} ${stream.profile ?? ''}'
+            .toLowerCase();
+    return range.contains('hdr') ||
+        range.contains('dolby vision') ||
+        range.contains('hlg');
   });
   if (!hasHdr) return HdrHandling.none;
   final reasons = source.transcodingReasons.join(' ').toLowerCase();
-  if (reasons.contains('tonemap') || reasons.contains('tone map')) return HdrHandling.toneMapToSdr;
-  if (_hasAffirmativeRawFlag(source.raw, const <String>{'tonemap', 'tone_map', 'toneMap'})) return HdrHandling.toneMapToSdr;
-  if (_hasAffirmativeRawFlag(source.raw, const <String>{'hdrpreserved', 'hdr_preserved', 'preservehdr', 'preserve_hdr'})) return HdrHandling.preserve;
+  if (reasons.contains('tonemap') || reasons.contains('tone map'))
+    return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(
+      source.raw, const <String>{'tonemap', 'tone_map', 'toneMap'}))
+    return HdrHandling.toneMapToSdr;
+  if (_hasAffirmativeRawFlag(source.raw, const <String>{
+    'hdrpreserved',
+    'hdr_preserved',
+    'preservehdr',
+    'preserve_hdr'
+  })) return HdrHandling.preserve;
   return HdrHandling.unknown;
 }
 
 bool _hasAffirmativeRawFlag(Map<String, dynamic> raw, Set<String> names) {
   for (final entry in raw.entries) {
-    final normalized = entry.key.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
-    if (names.map((name) => name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase()).contains(normalized) && _isAffirmative(entry.value)) {
+    final normalized =
+        entry.key.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+    if (names
+            .map((name) =>
+                name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase())
+            .contains(normalized) &&
+        _isAffirmative(entry.value)) {
       return true;
     }
   }
@@ -369,7 +494,14 @@ bool _isAffirmative(Object? value) {
   if (value is bool) return value;
   if (value is num) return value != 0;
   final text = value?.toString().trim().toLowerCase();
-  return text == 'true' || text == '1' || text == 'yes' || text == 'y' || text == 'preserve' || text == 'preserved' || text == 'tonemap' || text == 'tone map';
+  return text == 'true' ||
+      text == '1' ||
+      text == 'yes' ||
+      text == 'y' ||
+      text == 'preserve' ||
+      text == 'preserved' ||
+      text == 'tonemap' ||
+      text == 'tone map';
 }
 
 extension _FirstOrNull<T> on Iterable<T> {
