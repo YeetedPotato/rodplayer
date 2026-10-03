@@ -225,6 +225,14 @@ ThemeData rodPlayerThemeData({AppearanceMode mode = AppearanceMode.oled}) {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: t.obsidian,
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: t.surface3,
+      contentTextStyle: TextStyle(color: t.textPrimary),
+      actionTextColor: t.accentBright,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(t.radiusMedium)),
+    ),
     appBarTheme: AppBarTheme(
         backgroundColor: t.obsidian,
         foregroundColor: t.textPrimary,

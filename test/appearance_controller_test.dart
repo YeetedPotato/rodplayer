@@ -49,6 +49,22 @@ void main() {
         controller.themeData.scaffoldBackgroundColor, const Color(0xFF000000));
   });
 
+  test('transient feedback is theme-aware in Light, Dark, and OLED', () {
+    for (final mode in <AppearanceMode>[
+      AppearanceMode.light,
+      AppearanceMode.dark,
+      AppearanceMode.oled,
+    ]) {
+      final theme = rodPlayerThemeData(mode: mode);
+      expect(theme.snackBarTheme.behavior, SnackBarBehavior.floating);
+      expect(theme.snackBarTheme.backgroundColor, isNotNull);
+      expect(theme.snackBarTheme.contentTextStyle?.color, isNotNull);
+      expect(theme.snackBarTheme.actionTextColor,
+          theme.extension<RodPlayerTheme>()!.accentBright);
+      expect(theme.snackBarTheme.shape, isA<RoundedRectangleBorder>());
+    }
+  });
+
   test('System follows platform light and dark without selecting OLED',
       () async {
     final binding = TestWidgetsFlutterBinding.ensureInitialized();

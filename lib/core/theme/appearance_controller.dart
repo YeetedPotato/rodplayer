@@ -23,6 +23,8 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
 
   final SharedPreferences _preferences;
   late AppearanceMode _mode;
+  Future<void> _writes = Future<void>.value();
+  bool _disposed = false;
 
   AppearanceMode get mode => _mode;
   Brightness get platformBrightness =>
@@ -36,12 +38,23 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
 
   ThemeData get themeData => rodPlayerThemeData(mode: effectiveMode);
 
-  Future<void> setMode(AppearanceMode mode) async {
-    if (_mode != mode) {
+  Future<void> setMode(AppearanceMode mode) {
+    final result = _writes.then((_) async {
+      if (_disposed) return;
+      try {
+        if (!await _preferences.setString(preferenceKey, mode.name)) {
+          throw StateError('Appearance could not be saved');
+        }
+      } on Object {
+        await _preferences.reload();
+        rethrow;
+      }
+      if (_disposed) return;
       _mode = mode;
       notifyListeners();
-    }
-    await _preferences.setString(preferenceKey, mode.name);
+    });
+    _writes = result.then((_) {}, onError: (Object _) {});
+    return result;
   }
 
   @override
@@ -51,6 +64,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

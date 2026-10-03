@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:rodplayer/core/home_shelf_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
@@ -27,6 +28,7 @@ class RodPlayerAppShell extends StatefulWidget {
 
 class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   RodPlayerDestination _destination = RodPlayerDestination.home;
+  HomeShelfPreferences _homeShelfPreferences = HomeShelfPreferences.defaults;
   bool? _expandedOverride;
   late final Map<RodPlayerDestination, FocusNode> _destinationFocusNodes = {
     for (final destination in RodPlayerDestination.values)
@@ -35,6 +37,19 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'RodPlayer search');
   JellyfinUserDataChange? _latestUserDataChange;
   int _userDataRevision = 0;
+
+  Future<void> _loadHomeShelfPreferences() async {
+    try {
+      final preferences = await HomeShelfPreferences.load();
+      if (mounted) setState(() => _homeShelfPreferences = preferences);
+    } on Object {
+      // Default Home order remains usable if local preferences are unavailable.
+    }
+  }
+
+  void _onHomeShelfPreferencesChanged(HomeShelfPreferences preferences) {
+    if (mounted) setState(() => _homeShelfPreferences = preferences);
+  }
 
   @override
   void dispose() {
@@ -92,9 +107,17 @@ class _RodPlayerAppShellState extends State<RodPlayerAppShell> {
   }
 
   void _openProfile() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ProfileScreen(client: widget.client, onSwitchProfile: widget.onSwitchProfile, onLogout: widget.onLogout, appearanceController: widget.appearanceController),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileScreen(
+          client: widget.client,
+          onSwitchProfile: widget.onSwitchProfile,
+          onLogout: widget.onLogout,
+          appearanceController: widget.appearanceController,
+          onHomeShelfPreferencesChanged: _onHomeShelfPreferencesChanged,
+        ),
+      ),
+    );
   }
 
   void _onUserDataChanged(JellyfinUserDataChange change) {

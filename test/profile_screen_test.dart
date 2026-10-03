@@ -10,6 +10,7 @@ import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:rodplayer/ui/screens/profile_screen.dart';
 
 import 'test_support.dart';
@@ -140,6 +141,90 @@ void main() {
     pendingSave.complete();
     await tester.pumpAndSettle();
   });
+
+  testWidgets('Profile appearance failure remains scoped and retains mode',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final storage = _AppearanceStorage();
+    SharedPreferencesStorePlatform.instance = storage;
+    final appearance = AppearanceController(preferences);
+    final client = _ProfileClient();
+    addTearDown(appearance.dispose);
+    addTearDown(client.close);
+    await tester.pumpWidget(app(ProfileScreen(
+        client: client,
+        onSwitchProfile: () async {},
+        onLogout: () async {},
+        appearanceController: appearance)));
+    await tester.pumpAndSettle();
+    storage.fail = true;
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Light'));
+    await tester.pumpAndSettle();
+    expect(appearance.mode, AppearanceMode.oled);
+    expect(preferences.getString(AppearanceController.preferenceKey), isNull);
+    expect(find.text('Unable to save appearance. Previous mode retained.'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Profile rapid appearance choices follow durable write order',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(
+        {AppearanceController.preferenceKey: 'light'});
+    final preferences = await SharedPreferences.getInstance();
+    final storage = _AppearanceStorage(initial: 'light');
+    SharedPreferencesStorePlatform.instance = storage;
+    final appearance = AppearanceController(preferences);
+    final client = _ProfileClient();
+    addTearDown(appearance.dispose);
+    addTearDown(client.close);
+    await tester.pumpWidget(app(ProfileScreen(
+        client: client,
+        onSwitchProfile: () async {},
+        onLogout: () async {},
+        appearanceController: appearance)));
+    await tester.pumpAndSettle();
+    storage.gate = Completer<void>();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Dark'));
+    await tester.pump();
+    await storage.entered.future;
+    await tester.tap(find.widgetWithText(ChoiceChip, 'OLED'));
+    await tester.pump();
+    expect(storage.values, ['dark']);
+    expect(appearance.mode, AppearanceMode.light,
+        reason: 'held write has not yet been applied');
+    storage.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(storage.values, ['dark', 'oled']);
+    expect(preferences.getString(AppearanceController.preferenceKey), 'oled');
+    expect(appearance.mode, AppearanceMode.oled);
+    expect(tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'OLED'))
+        .selected, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+final class _AppearanceStorage extends InMemorySharedPreferencesStore {
+  _AppearanceStorage({String? initial}) : super.withData({
+    if (initial != null) 'flutter.${AppearanceController.preferenceKey}': initial,
+  });
+  bool fail = false;
+  Completer<void>? gate;
+  final entered = Completer<void>();
+  final values = <String>[];
+  @override
+  Future<bool> setValue(String type, String key, Object value) async {
+    if (key == 'flutter.${AppearanceController.preferenceKey}') {
+      values.add(value as String);
+      if (!entered.isCompleted) {
+        entered.complete();
+        await gate?.future;
+      }
+      if (fail) return false;
+    }
+    return super.setValue(type, key, value);
+  }
 }
 
 class _ProfileClient extends JellyfinApiClient {

@@ -1,20 +1,30 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:rodplayer/core/home_shelf_preferences.dart';
 import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
+import 'package:rodplayer/ui/screens/settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({required this.client, required this.onSwitchProfile, required this.onLogout, this.appearanceController, super.key});
+  const ProfileScreen({
+    required this.client,
+    required this.onSwitchProfile,
+    required this.onLogout,
+    this.appearanceController,
+    this.onHomeShelfPreferencesChanged,
+    super.key,
+  });
 
   final JellyfinApiClient client;
   final Future<void> Function() onSwitchProfile;
   final Future<void> Function() onLogout;
   final AppearanceController? appearanceController;
+  final ValueChanged<HomeShelfPreferences>? onHomeShelfPreferencesChanged;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -79,6 +89,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _error = error;
           _loading = false;
         });
+      }
+    }
+  }
+
+  Future<void> _setAppearance(AppearanceMode mode) async {
+    final appearance = widget.appearanceController;
+    if (appearance == null) return;
+    try {
+      await appearance.setMode(mode);
+      if (mounted) setState(() {});
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Unable to save appearance. Previous mode retained.')));
       }
     }
   }
@@ -180,6 +204,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ]),
             ),
           ]),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => SettingsScreen(
+                  appearanceController: widget.appearanceController,
+                  onHomeShelfPreferencesChanged:
+                      widget.onHomeShelfPreferencesChanged,
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.settings_outlined),
+            label: const Text('App settings'),
+          ),
           const SizedBox(height: 24),
           if (widget.appearanceController != null) ...[
             Text('Appearance', style: Theme.of(context).textTheme.titleLarge),
@@ -192,7 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: Text(_appearanceLabel(mode)),
                   selected: widget.appearanceController!.mode == mode,
                   onSelected: (selected) {
-                    if (selected) unawaited(widget.appearanceController!.setMode(mode));
+                    if (selected) unawaited(_setAppearance(mode));
                   },
                 ),
             ]),
