@@ -256,7 +256,8 @@ class _DiscoverClient extends JellyfinApiClient {
         Completer<JellyfinItemsPage<JellyfinLibraryItem>>>{},
   }) : super(
             baseUrl: 'https://server/jellyfin',
-            identity: testIdentity, serverId: testServerId,
+            identity: testIdentity,
+            serverId: testServerId,
             client:
                 http_testing.MockClient((_) async => http.Response('{}', 200)));
 

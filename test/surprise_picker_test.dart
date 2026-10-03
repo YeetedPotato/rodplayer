@@ -253,7 +253,7 @@ JellyfinLibraryItem _item(String id, {String type = 'Movie'}) =>
 class _LibraryCall {
   const _LibraryCall(this.kind, this.filter, this.startIndex, this.limit);
 
-  final JellyfinLibraryKind kind;
+  final JellyfinLibraryKind? kind;
   final JellyfinLibraryFilter filter;
   final int startIndex;
   final int limit;
@@ -266,7 +266,8 @@ class _PickerClient extends JellyfinApiClient {
     this.omitTotalCount = false,
   }) : super(
           baseUrl: 'https://server/jellyfin',
-          identity: testIdentity, serverId: testServerId,
+          identity: testIdentity,
+          serverId: testServerId,
           client:
               http_testing.MockClient((_) async => http.Response('{}', 200)),
         );
@@ -278,12 +279,13 @@ class _PickerClient extends JellyfinApiClient {
 
   @override
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
-    required JellyfinLibraryKind kind,
+    JellyfinLibraryKind? kind,
     JellyfinLibrarySort sort = JellyfinLibrarySort.title,
     JellyfinLibraryFilter filter = JellyfinLibraryFilter.all,
     int startIndex = 0,
     int limit = 48,
     String? parentId,
+    String? genre,
   }) async {
     calls.add(_LibraryCall(kind, filter, startIndex, limit));
     final items = kind == JellyfinLibraryKind.movies ? movies : shows;

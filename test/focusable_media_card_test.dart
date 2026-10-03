@@ -8,9 +8,15 @@ import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/smart_shelf.dart';
 
 void main() {
-  Widget app(Widget child, {AppearanceMode? appearance, double textScale = 1}) => MaterialApp(
+  Widget app(Widget child,
+          {AppearanceMode? appearance, double textScale = 1}) =>
+      MaterialApp(
         theme: appearance == null
-            ? ThemeData(brightness: Brightness.dark, extensions: const <ThemeExtension<RodPlayerTheme>>[RodPlayerTheme()])
+            ? ThemeData(
+                brightness: Brightness.dark,
+                extensions: const <ThemeExtension<RodPlayerTheme>>[
+                    RodPlayerTheme()
+                  ])
             : rodPlayerThemeData(mode: appearance),
         home: Builder(builder: (context) {
           final media = MediaQuery.of(context);
@@ -21,11 +27,15 @@ void main() {
         }),
       );
 
-  testWidgets('constrained landscape metadata hides subtitle without overflow', (tester) async {
+  testWidgets('constrained landscape metadata hides subtitle without overflow',
+      (tester) async {
     await tester.pumpWidget(app(const SizedBox(
       width: 280,
       height: 170,
-      child: FocusableMediaCard(title: 'Landscape title', subtitle: 'Hidden subtitle', aspectRatio: 16 / 9),
+      child: FocusableMediaCard(
+          title: 'Landscape title',
+          subtitle: 'Hidden subtitle',
+          aspectRatio: 16 / 9),
     )));
     await tester.pumpAndSettle();
 
@@ -34,11 +44,15 @@ void main() {
     expect(find.text('Hidden subtitle'), findsNothing);
   });
 
-  testWidgets('landscape metadata shows subtitle when height is sufficient', (tester) async {
+  testWidgets('landscape metadata shows subtitle when height is sufficient',
+      (tester) async {
     await tester.pumpWidget(app(const SizedBox(
       width: 280,
       height: 360,
-      child: FocusableMediaCard(title: 'Landscape title', subtitle: 'Visible subtitle', aspectRatio: 16 / 9),
+      child: FocusableMediaCard(
+          title: 'Landscape title',
+          subtitle: 'Visible subtitle',
+          aspectRatio: 16 / 9),
     )));
     await tester.pumpAndSettle();
 
@@ -47,14 +61,17 @@ void main() {
     expect(find.text('Visible subtitle'), findsOneWidget);
   });
 
-  testWidgets('missing image URL uses placeholder without network image', (tester) async {
-    await tester.pumpWidget(app(const SizedBox(width: 160, height: 240, child: FocusableMediaCard(title: 'No Art'))));
+  testWidgets('missing image URL uses placeholder without network image',
+      (tester) async {
+    await tester.pumpWidget(app(const SizedBox(
+        width: 160, height: 240, child: FocusableMediaCard(title: 'No Art'))));
     await tester.pumpAndSettle();
 
     expect(find.text('No Art'), findsOneWidget);
     expect(find.byType(Image), findsNothing);
   });
-  testWidgets('pointer hover scales the card without changing its layout', (tester) async {
+  testWidgets('pointer hover scales the card without changing its layout',
+      (tester) async {
     var taps = 0;
     await tester.pumpWidget(app(SizedBox(
       width: 160,
@@ -64,7 +81,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final card = find.byType(FocusableMediaCard);
-    final scale = find.descendant(of: card, matching: find.byType(AnimatedScale));
+    final scale =
+        find.descendant(of: card, matching: find.byType(AnimatedScale));
     final layoutSize = tester.getSize(card);
     final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await pointer.addPointer(location: tester.getCenter(card));
@@ -80,37 +98,61 @@ void main() {
     await pointer.removePointer();
   });
 
-  testWidgets('focused card uses semantic accent in Light Dark and OLED', (tester) async {
-    for (final mode in <AppearanceMode>[AppearanceMode.light, AppearanceMode.dark, AppearanceMode.oled]) {
+  testWidgets('focused card uses semantic accent in Light Dark and OLED',
+      (tester) async {
+    for (final mode in <AppearanceMode>[
+      AppearanceMode.light,
+      AppearanceMode.dark,
+      AppearanceMode.oled
+    ]) {
       final focusNode = FocusNode(debugLabel: 'appearance card');
-      await tester.pumpWidget(app(SizedBox(
-        width: 160,
-        height: 240,
-        child: FocusableMediaCard(title: 'Focused card', focusNode: focusNode, autofocus: true, onTap: () {}),
-      ), appearance: mode));
+      await tester.pumpWidget(app(
+          SizedBox(
+            width: 160,
+            height: 240,
+            child: FocusableMediaCard(
+                title: 'Focused card',
+                focusNode: focusNode,
+                autofocus: true,
+                onTap: () {}),
+          ),
+          appearance: mode));
       focusNode.requestFocus();
       await tester.pumpAndSettle();
 
       final card = find.byType(FocusableMediaCard);
-      final scale = find.descendant(of: card, matching: find.byType(AnimatedScale));
-      final decoration = tester.widget<AnimatedContainer>(find.descendant(of: card, matching: find.byType(AnimatedContainer)).first).decoration as BoxDecoration;
+      final scale =
+          find.descendant(of: card, matching: find.byType(AnimatedScale));
+      final decoration = tester
+          .widget<AnimatedContainer>(find
+              .descendant(of: card, matching: find.byType(AnimatedContainer))
+              .first)
+          .decoration as BoxDecoration;
       final theme = rodPlayerPalette(mode);
-      expect(tester.widget<AnimatedScale>(scale).scale, 1.045, reason: mode.name);
-      expect((decoration.border! as Border).top.color, theme.accentBright, reason: mode.name);
+      expect(tester.widget<AnimatedScale>(scale).scale, 1.045,
+          reason: mode.name);
+      expect((decoration.border! as Border).top.color, theme.accentBright,
+          reason: mode.name);
       expect(tester.takeException(), isNull, reason: mode.name);
       await tester.pumpWidget(const SizedBox.shrink());
       focusNode.dispose();
     }
   });
 
-  testWidgets('card keyboard activation and pointer tap share the existing callback', (tester) async {
+  testWidgets(
+      'card keyboard activation and pointer tap share the existing callback',
+      (tester) async {
     final focusNode = FocusNode(debugLabel: 'activation card');
     addTearDown(focusNode.dispose);
     var activations = 0;
     await tester.pumpWidget(app(SizedBox(
       width: 160,
       height: 240,
-      child: FocusableMediaCard(title: 'Activate card', focusNode: focusNode, autofocus: true, onTap: () => activations++),
+      child: FocusableMediaCard(
+          title: 'Activate card',
+          focusNode: focusNode,
+          autofocus: true,
+          onTap: () => activations++),
     )));
     await tester.pumpAndSettle();
     expect(focusNode.hasFocus, isTrue);
@@ -127,7 +169,38 @@ void main() {
     expect(activations, 5);
   });
 
-  testWidgets('shelf traversal focuses and activates each card directly', (tester) async {
+  testWidgets(
+      'focused card opens the same context action from menu and Shift+F10',
+      (tester) async {
+    final focusNode = FocusNode(debugLabel: 'context card');
+    addTearDown(focusNode.dispose);
+    var actions = 0;
+    var activations = 0;
+    await tester.pumpWidget(app(SizedBox(
+      width: 160,
+      height: 240,
+      child: FocusableMediaCard(
+        title: 'Context card',
+        focusNode: focusNode,
+        autofocus: true,
+        onTap: () => activations++,
+        onLongPress: () => actions++,
+      ),
+    )));
+    await tester.pumpAndSettle();
+    expect(focusNode.hasFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(actions, 2);
+    expect(activations, 0);
+    expect(find.byType(InkWell), findsOneWidget);
+  });
+
+  testWidgets('shelf traversal focuses and activates each card directly',
+      (tester) async {
     final focusNodes = <int, FocusNode>{};
     final activations = <int>[];
     await tester.pumpWidget(app(SizedBox(
@@ -163,33 +236,40 @@ void main() {
     expect(activations, <int>[0, 1]);
   });
 
-  testWidgets('card progress is clamped and uses the semantic accent', (tester) async {
+  testWidgets('card progress is clamped and uses the semantic accent',
+      (tester) async {
     await tester.pumpWidget(app(const SizedBox(
       width: 160,
       height: 240,
       child: FocusableMediaCard(title: 'Progress card', progress: 1.4),
     )));
-    final progress = tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
+    final progress = tester
+        .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
     expect(progress.value, 1);
     expect(progress.color, rodPlayerPalette(AppearanceMode.oled).accentBright);
   });
 
-  testWidgets('poster metadata remains usable at larger text scale', (tester) async {
+  testWidgets('poster metadata remains usable at larger text scale',
+      (tester) async {
     await tester.pumpWidget(app(
       const SizedBox(
         width: 160,
         height: 260,
-        child: FocusableMediaCard(title: 'A long title that should truncate safely', subtitle: '2026 · Unrated'),
+        child: FocusableMediaCard(
+            title: 'A long title that should truncate safely',
+            subtitle: '2026 · Unrated'),
       ),
       textScale: 1.8,
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('A long title that should truncate safely'), findsOneWidget);
+    expect(
+        find.text('A long title that should truncate safely'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('shelf gutter keeps a focused scaled card inside its viewport', (tester) async {
+  testWidgets('shelf gutter keeps a focused scaled card inside its viewport',
+      (tester) async {
     late FocusNode focusNode;
     await tester.pumpWidget(app(SizedBox(
       width: 390,
@@ -214,14 +294,16 @@ void main() {
     focusNode.requestFocus();
     await tester.pumpAndSettle();
     final viewport = tester.getRect(find.byType(ListView));
-    final card = tester.getRect(find.byWidgetPredicate((widget) => widget is FocusableMediaCard && widget.title == 'Movie 0'));
+    final card = tester.getRect(find.byWidgetPredicate(
+        (widget) => widget is FocusableMediaCard && widget.title == 'Movie 0'));
     expect(card.left - viewport.left, greaterThanOrEqualTo(12));
     expect(card.top, greaterThanOrEqualTo(viewport.top - 1));
     expect(card.bottom, lessThanOrEqualTo(viewport.bottom + 1));
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('rapid shelf focus changes keep the newest item as reveal target', (tester) async {
+  testWidgets('rapid shelf focus changes keep the newest item as reveal target',
+      (tester) async {
     final focusNodes = <int, FocusNode>{};
     await tester.pumpWidget(app(SizedBox(
       width: 390,
@@ -274,13 +356,18 @@ void main() {
     expect(currentCard.right, lessThan(viewport.right));
     expect(tester.takeException(), isNull);
   });
-  testWidgets('last focused poster and landscape cards reserve trailing paint room', (tester) async {
+  testWidgets(
+      'last focused poster and landscape cards reserve trailing paint room',
+      (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(760, 900);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    for (final (aspectRatio, itemWidth) in <(double, double)>[(2 / 3, 176), (16 / 9, 280)]) {
+    for (final (aspectRatio, itemWidth) in <(double, double)>[
+      (2 / 3, 176),
+      (16 / 9, 280)
+    ]) {
       late FocusNode focusNode;
       const itemCount = 4;
       await tester.pumpWidget(app(SizedBox(
@@ -310,13 +397,15 @@ void main() {
 
       final viewport = tester.getRect(find.byType(ListView));
       final card = tester.getRect(find.byWidgetPredicate(
-        (widget) => widget is FocusableMediaCard && widget.title == 'Movie ${itemCount - 1}',
+        (widget) =>
+            widget is FocusableMediaCard &&
+            widget.title == 'Movie ${itemCount - 1}',
       ));
       final trailingGap = viewport.right - card.right;
-      expect(trailingGap, inInclusiveRange(12, 24), reason: 'aspect ratio: $aspectRatio');
+      expect(trailingGap, inInclusiveRange(12, 24),
+          reason: 'aspect ratio: $aspectRatio');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     }
   });
-
 }

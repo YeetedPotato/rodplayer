@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
+import 'package:rodplayer/ui/screens/playback_callbacks.dart';
 import 'package:rodplayer/ui/screens/surprise_me_dialog.dart';
 import 'package:rodplayer/ui/widgets/focusable_media_card.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
@@ -16,18 +18,22 @@ class DiscoverScreen extends StatefulWidget {
     required this.client,
     this.active = true,
     this.onPlayItem,
+    this.onResumeItem,
     this.onUserDataChanged,
     this.latestUserDataChange,
     this.userDataRevision = 0,
+    this.serverDataRevision,
     super.key,
   });
 
   final JellyfinApiClient client;
   final bool active;
   final DetailPlayItemCallback? onPlayItem;
+  final ResumeItemCallback? onResumeItem;
   final JellyfinUserDataChangedCallback? onUserDataChanged;
   final JellyfinUserDataChange? latestUserDataChange;
   final int userDataRevision;
+  final ValueListenable<int>? serverDataRevision;
 
   @override
   State<DiscoverScreen> createState() => _DiscoverScreenState();
@@ -66,12 +72,19 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   @override
   void initState() {
     super.initState();
+    widget.serverDataRevision?.addListener(_onServerDataInvalidated);
     if (widget.active) _reloadAll();
   }
 
   @override
   void didUpdateWidget(covariant DiscoverScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final revisionSourceChanged =
+        oldWidget.serverDataRevision != widget.serverDataRevision;
+    if (revisionSourceChanged) {
+      oldWidget.serverDataRevision?.removeListener(_onServerDataInvalidated);
+      widget.serverDataRevision?.addListener(_onServerDataInvalidated);
+    }
     if (oldWidget.client != widget.client) {
       _generation++;
       _hasLoaded = false;
@@ -79,6 +92,16 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       _errors.clear();
       _loading.clear();
       if (widget.active) _reloadAll();
+    } else if (revisionSourceChanged) {
+      _items.clear();
+      _errors.clear();
+      _loading.clear();
+      _hasLoaded = false;
+      if (widget.active) {
+        _reloadAll();
+      } else {
+        setState(() {});
+      }
     } else if (!oldWidget.active && widget.active && !_hasLoaded) {
       _reloadAll();
     } else if (oldWidget.userDataRevision != widget.userDataRevision) {
@@ -86,14 +109,36 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    widget.serverDataRevision?.removeListener(_onServerDataInvalidated);
+    super.dispose();
+  }
+
+  void _onServerDataInvalidated() {
+    if (!mounted) return;
+    if (widget.active) {
+      _reloadAll();
+    } else {
+      setState(() {
+        _items.clear();
+        _errors.clear();
+        _loading.clear();
+        _hasLoaded = false;
+      });
+    }
+  }
+
   void _reloadAll() {
     final generation = ++_generation;
-    _items.clear();
-    _errors.clear();
-    _loading
-      ..clear()
-      ..addAll(_shelves);
-    _hasLoaded = true;
+    setState(() {
+      _items.clear();
+      _errors.clear();
+      _loading
+        ..clear()
+        ..addAll(_shelves);
+      _hasLoaded = true;
+    });
     for (final shelf in _shelves) {
       unawaited(_load(shelf, generation));
     }
@@ -161,7 +206,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                           context: context,
                           client: widget.client,
                           onPlayItem: widget.onPlayItem,
+                          onResumeItem: widget.onResumeItem,
                           onUserDataChanged: widget.onUserDataChanged,
+                          serverDataRevision: widget.serverDataRevision,
                         ),
                         icon: const Icon(Icons.shuffle),
                         label: const Text('Surprise Me'),
@@ -299,6 +346,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         client: widget.client,
         itemId: item.id,
         onUserDataChanged: widget.onUserDataChanged,
+        serverDataRevision: widget.serverDataRevision,
       ),
     ));
   }

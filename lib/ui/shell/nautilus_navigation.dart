@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rodplayer/core/models/jellyfin_library_item.dart';
+import 'package:rodplayer/core/home_library_views.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 enum RodPlayerDestination {
@@ -23,6 +25,14 @@ const compactRodPlayerDestinations = <RodPlayerDestination>[
   RodPlayerDestination.search,
 ];
 
+const desktopRodPlayerDestinations = <RodPlayerDestination>[
+  RodPlayerDestination.home,
+  RodPlayerDestination.search,
+  RodPlayerDestination.discover,
+  RodPlayerDestination.movies,
+  RodPlayerDestination.tvShows,
+];
+
 class NautilusSideNavigation extends StatelessWidget {
   const NautilusSideNavigation({
     required this.destination,
@@ -33,6 +43,11 @@ class NautilusSideNavigation extends StatelessWidget {
     required this.onSelect,
     required this.onProfile,
     required this.onLogout,
+    this.libraries = const <JellyfinLibraryItem>[],
+    this.librariesExpanded = true,
+    this.onToggleLibraries,
+    this.selectedLibraryId,
+    this.onSelectLibrary,
     super.key,
   });
 
@@ -44,6 +59,11 @@ class NautilusSideNavigation extends StatelessWidget {
   final ValueChanged<RodPlayerDestination> onSelect;
   final VoidCallback onProfile;
   final VoidCallback onLogout;
+  final List<JellyfinLibraryItem> libraries;
+  final bool librariesExpanded;
+  final VoidCallback? onToggleLibraries;
+  final String? selectedLibraryId;
+  final ValueChanged<JellyfinLibraryItem>? onSelectLibrary;
 
   @override
   Widget build(BuildContext context) {
@@ -101,24 +121,77 @@ class NautilusSideNavigation extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                FocusTraversalGroup(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final item in RodPlayerDestination.values)
-                        _SideNavigationItem(
-                          label: item.title,
-                          icon: item.icon,
-                          selectedIcon: item.selectedIcon,
-                          selected: destination == item,
-                          expanded: showExpanded,
-                          focusNode: focusNodes[item],
-                          onPressed: () => onSelect(item),
-                        ),
-                    ],
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: FocusTraversalGroup(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final item in desktopRodPlayerDestinations)
+                            _SideNavigationItem(
+                              label: item.title,
+                              icon: item.icon,
+                              selectedIcon: item.selectedIcon,
+                              selected: selectedLibraryId == null &&
+                                  destination == item,
+                              expanded: showExpanded,
+                              focusNode: focusNodes[item],
+                              onPressed: () => onSelect(item),
+                            ),
+                          if (libraries.isNotEmpty && showExpanded) ...[
+                            const SizedBox(height: 18),
+                            Semantics(
+                              button: false,
+                              expanded: librariesExpanded,
+                              label: 'Libraries',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text('LIBRARIES',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(
+                                                    color: theme.textMuted,
+                                                    letterSpacing: 1.1)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (showExpanded)
+                            for (final library in orderedLibraryViews(
+                              libraries,
+                              showAll: librariesExpanded,
+                            ).where(_isDistinctLibrary))
+                              _SideNavigationItem(
+                                label: library.title,
+                                icon: _libraryIcon(library),
+                                selectedIcon: _libraryIcon(library),
+                                selected: selectedLibraryId == library.id,
+                                expanded: true,
+                                onPressed: () => onSelectLibrary?.call(library),
+                              ),
+                          if (showExpanded &&
+                              additionalLibraryViews(libraries).isNotEmpty)
+                            TextButton(
+                              onPressed: onToggleLibraries,
+                              child: Text(librariesExpanded
+                                  ? 'Show less'
+                                  : 'Show more'),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                const Spacer(),
                 Divider(color: theme.borderColor(.12), height: 24),
                 FocusTraversalGroup(
                   child: Column(
@@ -149,6 +222,22 @@ class NautilusSideNavigation extends StatelessWidget {
     );
   }
 }
+
+bool _isDistinctLibrary(JellyfinLibraryItem item) {
+  return item.id.isNotEmpty;
+}
+
+String _libraryType(JellyfinLibraryItem item) =>
+    '${item.raw['CollectionType'] ?? ''}'.trim().toLowerCase();
+
+IconData _libraryIcon(JellyfinLibraryItem item) => switch (_libraryType(item)) {
+      'movies' => Icons.movie_outlined,
+      'tvshows' => Icons.tv_outlined,
+      'music' => Icons.music_note_outlined,
+      'homevideos' => Icons.video_library_outlined,
+      'books' => Icons.menu_book_outlined,
+      _ => Icons.video_library_outlined,
+    };
 
 class _SideNavigationItem extends StatelessWidget {
   const _SideNavigationItem({

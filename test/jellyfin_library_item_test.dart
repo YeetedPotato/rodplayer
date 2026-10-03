@@ -15,17 +15,37 @@ void main() {
       'CommunityRating': 7.5,
       'Taglines': <String>['Tag', 'Second'],
       'Genres': <String>['Drama', 'Sci-Fi'],
-      'Studios': <Map<String, dynamic>>[<String, dynamic>{'Name': 'Studio'}],
-      'People': <Map<String, dynamic>>[<String, dynamic>{'Id': 'p1', 'Name': 'Actor', 'Role': 'Lead', 'Type': 'Actor', 'ImageTags': <String, dynamic>{'Primary': 'person-p'}}],
+      'Studios': <Map<String, dynamic>>[
+        <String, dynamic>{'Name': 'Studio'}
+      ],
+      'People': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'Id': 'p1',
+          'Name': 'Actor',
+          'Role': 'Lead',
+          'Type': 'Actor',
+          'ImageTags': <String, dynamic>{'Primary': 'person-p'}
+        }
+      ],
       'RunTimeTicks': 1200000000,
       'Status': 'Continuing',
       'EndDate': '2025-02-03T00:00:00Z',
       'ChildCount': 3,
       'RecursiveItemCount': 7,
       'PrimaryImageAspectRatio': 0.7,
-      'ImageTags': <String, dynamic>{'Primary': 'p', 'Thumb': 't'},
+      'ImageTags': <String, dynamic>{
+        'Primary': 'p',
+        'Thumb': 't',
+        'Logo': 'logo-tag'
+      },
       'BackdropImageTags': <String>['b'],
-      'UserData': <String, dynamic>{'IsFavorite': true, 'Played': true, 'PlaybackPositionTicks': 1000, 'PlayedPercentage': 50.5, 'UnplayedItemCount': 4},
+      'UserData': <String, dynamic>{
+        'IsFavorite': true,
+        'Played': true,
+        'PlaybackPositionTicks': 1000,
+        'PlayedPercentage': 50.5,
+        'UnplayedItemCount': 4
+      },
     });
 
     expect(item.id, 'movie 1');
@@ -42,6 +62,8 @@ void main() {
     expect(item.studios, <String>['Studio']);
     expect(item.people.single.name, 'Actor');
     expect(item.people.single.primaryImageTag, 'person-p');
+    expect(item.people.single.imageUrl('https://server'),
+        'https://server/Items/p1/Images/Primary?tag=person-p&quality=85');
     expect(item.status, 'Continuing');
     expect(item.endDate, DateTime.utc(2025, 2, 3));
     expect(item.childCount, 3);
@@ -50,6 +72,9 @@ void main() {
     expect(item.primaryImageTag, 'p');
     expect(item.backdropImageTag, 'b');
     expect(item.thumbImageTag, 't');
+    expect(item.logoImageTag, 'logo-tag');
+    expect(item.imageUrl('https://server', type: JellyfinImageType.logo),
+        'https://server/Items/movie%201/Images/Logo?tag=logo-tag&quality=90');
     expect(item.primaryImageAspectRatio, 0.7);
     expect(item.isFavorite, isTrue);
     expect(item.played, isTrue);
@@ -58,21 +83,41 @@ void main() {
     expect(item.userData.unplayedItemCount, 4);
     expect(() => item.genres.add('x'), throwsUnsupportedError);
     expect(() => item.studios.add('x'), throwsUnsupportedError);
-    expect(() => item.people.add(const JellyfinPerson(id: 'x', name: 'x')), throwsUnsupportedError);
+    expect(() => item.people.add(const JellyfinPerson(id: 'x', name: 'x')),
+        throwsUnsupportedError);
     expect(() => item.backdropImageTags.add('x'), throwsUnsupportedError);
-    expect(item.imageUrl('https://server'), 'https://server/Items/movie%201/Images/Primary?tag=p&quality=90');
-    expect(item.imageUrl('https://server/jellyfin'), 'https://server/jellyfin/Items/movie%201/Images/Primary?tag=p&quality=90');
+    expect(item.imageUrl('https://server'),
+        'https://server/Items/movie%201/Images/Primary?tag=p&quality=90');
+    expect(item.imageUrl('https://server/jellyfin'),
+        'https://server/jellyfin/Items/movie%201/Images/Primary?tag=p&quality=90');
     expect(item.raw['Name'], 'Film');
   });
 
   test('parses taglines conservatively', () {
-    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Taglines': <String>['First', 'Second']}).tagline, 'First');
-    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Taglines': <String>['', '  ']}).tagline, isNull);
-    expect(JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'a', 'Name': 'A', 'Tagline': 'Legacy'}).tagline, 'Legacy');
+    expect(
+        JellyfinLibraryItem.fromJson(<String, dynamic>{
+          'Id': 'a',
+          'Name': 'A',
+          'Taglines': <String>['First', 'Second']
+        }).tagline,
+        'First');
+    expect(
+        JellyfinLibraryItem.fromJson(<String, dynamic>{
+          'Id': 'a',
+          'Name': 'A',
+          'Taglines': <String>['', '  ']
+        }).tagline,
+        isNull);
+    expect(
+        JellyfinLibraryItem.fromJson(
+                <String, dynamic>{'Id': 'a', 'Name': 'A', 'Tagline': 'Legacy'})
+            .tagline,
+        'Legacy');
   });
 
   test('parses series and episode hierarchy', () {
-    final series = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 's', 'Name': 'Show', 'Type': 'Series'});
+    final series = JellyfinLibraryItem.fromJson(
+        <String, dynamic>{'Id': 's', 'Name': 'Show', 'Type': 'Series'});
     final episode = JellyfinLibraryItem.fromJson(<String, dynamic>{
       'Id': 'e',
       'Name': 'Episode',
@@ -111,7 +156,14 @@ void main() {
   });
 
   test('missing optional fields and unknown type stay conservative', () {
-    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'x', 'Name': 'Mystery', 'Type': 'Weird', 'ProductionYear': 'not-a-number', 'EndDate': 'not-a-date', 'BackdropImageTag': 'single'});
+    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{
+      'Id': 'x',
+      'Name': 'Mystery',
+      'Type': 'Weird',
+      'ProductionYear': 'not-a-number',
+      'EndDate': 'not-a-date',
+      'BackdropImageTag': 'single'
+    });
 
     expect(item.kind, JellyfinItemKind.unknown);
     expect(item.rawType, 'Weird');
@@ -125,7 +177,13 @@ void main() {
   });
 
   test('sparse M4 collections stay conservative', () {
-    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'x', 'Name': 'Sparse', 'Genres': 'bad', 'Studios': 'bad', 'People': 'bad'});
+    final item = JellyfinLibraryItem.fromJson(<String, dynamic>{
+      'Id': 'x',
+      'Name': 'Sparse',
+      'Genres': 'bad',
+      'Studios': 'bad',
+      'People': 'bad'
+    });
     expect(item.genres, isEmpty);
     expect(item.studios, isEmpty);
     expect(item.people, isEmpty);
@@ -138,22 +196,33 @@ void main() {
       'Type': 'Movie',
       'Overview': 'Story',
       'RunTimeTicks': 1000,
-      'UserData': <String, dynamic>{'IsFavorite': false, 'Played': false, 'PlayedPercentage': 25},
+      'UserData': <String, dynamic>{
+        'IsFavorite': false,
+        'Played': false,
+        'PlayedPercentage': 25
+      },
     });
 
-    final favorite = item.withUserDataChange(const JellyfinUserDataChange(itemId: 'item', isFavorite: true));
+    final favorite = item.withUserDataChange(
+        const JellyfinUserDataChange(itemId: 'item', isFavorite: true));
     expect(favorite.userData.isFavorite, isTrue);
     expect(favorite.userData.played, isFalse);
     expect(favorite.playedPercentage, 25);
     expect(favorite.overview, 'Story');
     expect(favorite.raw['Overview'], 'Story');
+    expect(favorite.logoImageTag, item.logoImageTag);
 
-    final played = favorite.withUserDataChange(const JellyfinUserDataChange(itemId: 'item', played: true));
+    final played = favorite.withUserDataChange(
+        const JellyfinUserDataChange(itemId: 'item', played: true));
     expect(played.userData.isFavorite, isTrue);
     expect(played.userData.played, isTrue);
     expect(played.playedPercentage, 25);
 
-    final unrelated = played.withUserDataChange(const JellyfinUserDataChange(itemId: 'other', isFavorite: false, played: false, playbackProgressMayHaveChanged: true));
+    final unrelated = played.withUserDataChange(const JellyfinUserDataChange(
+        itemId: 'other',
+        isFavorite: false,
+        played: false,
+        playbackProgressMayHaveChanged: true));
     expect(unrelated.userData.isFavorite, isTrue);
     expect(unrelated.userData.played, isTrue);
     expect(unrelated.playedPercentage, 25);

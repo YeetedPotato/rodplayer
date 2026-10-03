@@ -146,19 +146,21 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Surprise Me never offers direct Play for a Series', (tester) async {
+  testWidgets('Surprise Me never offers direct Play for a Series',
+      (tester) async {
     setSurface(tester, const Size(1000, 800));
     final played = <String>[];
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: Builder(builder: (context) => TextButton(
-          onPressed: () => showSurpriseMePicker(
-            context: context,
-            client: _SurpriseClient(count: 10),
-            onPlayItem: (_, id) => played.add(id),
-          ),
-          child: const Text('Open'),
-        )),
+        body: Builder(
+            builder: (context) => TextButton(
+                  onPressed: () => showSurpriseMePicker(
+                    context: context,
+                    client: _SurpriseClient(count: 10),
+                    onPlayItem: (_, id) => played.add(id),
+                  ),
+                  child: const Text('Open'),
+                )),
       ),
     ));
     await tester.tap(find.text('Open'));
@@ -249,7 +251,8 @@ class _SurpriseClient extends JellyfinApiClient {
   _SurpriseClient({required this.count, this.delayedMovie})
       : super(
           baseUrl: 'https://server/jellyfin',
-          identity: testIdentity, serverId: testServerId,
+          identity: testIdentity,
+          serverId: testServerId,
           client:
               http_testing.MockClient((_) async => http.Response('{}', 200)),
         );
@@ -262,12 +265,13 @@ class _SurpriseClient extends JellyfinApiClient {
 
   @override
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
-    required JellyfinLibraryKind kind,
+    JellyfinLibraryKind? kind,
     JellyfinLibrarySort sort = JellyfinLibrarySort.title,
     JellyfinLibraryFilter filter = JellyfinLibraryFilter.all,
     int startIndex = 0,
     int limit = 48,
     String? parentId,
+    String? genre,
   }) async {
     calls.add(startIndex);
     if (kind == JellyfinLibraryKind.movies &&

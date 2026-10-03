@@ -285,7 +285,10 @@ class _SearchClient extends JellyfinApiClient {
   }
 
   @override
-  Future<List<String>> getGenres() => failGenres ? Future<List<String>>.error(StateError('genres')) : Future<List<String>>.value(genres);
+  Future<List<String>> getGenres({
+    JellyfinLibraryKind? kind,
+    String? parentId,
+  }) => failGenres ? Future<List<String>>.error(StateError('genres')) : Future<List<String>>.value(genres);
 
   @override
   Future<JellyfinLibraryItem> getItem(String itemId) async {

@@ -598,6 +598,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
         onLogout: _logout,
         onSwitchProfile: _switchProfile,
         appearanceController: widget.appearanceController,
+        serverEventRevision: _serverEventRevision,
       ),
     );
   }

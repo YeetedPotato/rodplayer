@@ -54,11 +54,11 @@ void main() {
     final client = _ControlledHomeClient();
     await tester.pumpWidget(app(HomeScreen(client: client)));
     await tester.pump();
-    expect((client.resumeRequests.length, client.nextUpRequests.length, client.movieCalls, client.showCalls), (1, 1, 1, 1));
+    expect((client.resumeRequests.length, client.nextUpRequests.length), (1, 1));
 
     await tester.pumpWidget(app(HomeScreen(client: client, latestUserDataChange: const JellyfinUserDataChange(itemId: 'episode', played: true), userDataRevision: 1)));
     await tester.pump();
-    expect((client.resumeRequests.length, client.nextUpRequests.length, client.movieCalls, client.showCalls), (2, 2, 1, 1));
+    expect((client.resumeRequests.length, client.nextUpRequests.length), (2, 2));
 
     client.resumeRequests[1].complete(<ResumableItem>[_resume('resume', 'Resume')]);
     client.nextUpRequests[1].complete(<NextUpItem>[_nextUp('fresh', 'Fresh Next')]);
@@ -73,7 +73,7 @@ void main() {
 
     await tester.pumpWidget(app(HomeScreen(client: client, latestUserDataChange: const JellyfinUserDataChange(itemId: 'movie', isFavorite: true), userDataRevision: 2)));
     await tester.pump();
-    expect((client.resumeRequests.length, client.nextUpRequests.length, client.movieCalls, client.showCalls), (2, 2, 1, 1));
+    expect((client.resumeRequests.length, client.nextUpRequests.length), (2, 2));
   });
 }
 
@@ -82,8 +82,6 @@ class _ControlledHomeClient extends JellyfinApiClient {
 
   final resumeRequests = <Completer<List<ResumableItem>>>[];
   final nextUpRequests = <Completer<List<NextUpItem>>>[];
-  int movieCalls = 0;
-  int showCalls = 0;
 
   @override
   Future<List<ResumableItem>> getResumeItems({int limit = 12}) {
@@ -99,19 +97,7 @@ class _ControlledHomeClient extends JellyfinApiClient {
     return completer.future;
   }
 
-  @override
-  Future<List<JellyfinLibraryItem>> getLatestMovies({int limit = 20}) async {
-    movieCalls++;
-    return <JellyfinLibraryItem>[_item('movie', 'Movie')];
-  }
-
-  @override
-  Future<List<JellyfinLibraryItem>> getLatestTvShows({int limit = 20}) async {
-    showCalls++;
-    return <JellyfinLibraryItem>[_item('series', 'Series', type: 'Series')];
-  }
 }
 
 ResumableItem _resume(String id, String name) => ResumableItem.fromJson(<String, dynamic>{'Id': id, 'Name': name, 'Type': 'Movie'});
 NextUpItem _nextUp(String id, String name) => NextUpItem.fromJson(<String, dynamic>{'Id': id, 'Name': name, 'Type': 'Episode'});
-JellyfinLibraryItem _item(String id, String name, {String type = 'Movie'}) => JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': id, 'Name': name, 'Type': type});

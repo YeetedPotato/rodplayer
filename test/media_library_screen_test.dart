@@ -287,12 +287,13 @@ class _LibraryClient extends JellyfinApiClient {
 
   @override
   Future<JellyfinItemsPage<JellyfinLibraryItem>> getLibraryItemsPage({
-    required JellyfinLibraryKind kind,
+    JellyfinLibraryKind? kind,
     JellyfinLibrarySort sort = JellyfinLibrarySort.title,
     JellyfinLibraryFilter filter = JellyfinLibraryFilter.all,
     int startIndex = 0,
     int limit = 48,
     String? parentId,
+    String? genre,
   }) {
     starts.add(startIndex);
     filters.add(filter);

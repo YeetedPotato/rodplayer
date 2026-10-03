@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/media_intelligence.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
@@ -6,7 +7,20 @@ import 'package:rodplayer/ui/widgets/media_badge_overlay.dart';
 import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 
 class FocusableMediaCard extends StatefulWidget {
-  const FocusableMediaCard({required this.title, this.subtitle, this.imageUrl, this.imageClient, this.progress, this.aspectRatio = 2 / 3, this.badge, this.mediaInfo, this.onTap, this.autofocus = false, this.focusNode, super.key});
+  const FocusableMediaCard(
+      {required this.title,
+      this.subtitle,
+      this.imageUrl,
+      this.imageClient,
+      this.progress,
+      this.aspectRatio = 2 / 3,
+      this.badge,
+      this.mediaInfo,
+      this.onTap,
+      this.onLongPress,
+      this.autofocus = false,
+      this.focusNode,
+      super.key});
   final String title;
   final String? subtitle, imageUrl;
   final JellyfinApiClient? imageClient;
@@ -15,38 +29,75 @@ class FocusableMediaCard extends StatefulWidget {
   final Widget? badge;
   final MediaIntelligence? mediaInfo;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool autofocus;
   final FocusNode? focusNode;
-  @override State<FocusableMediaCard> createState() => _FocusableMediaCardState();
+  @override
+  State<FocusableMediaCard> createState() => _FocusableMediaCardState();
 }
 
 class _FocusableMediaCardState extends State<FocusableMediaCard> {
   FocusNode? _ownedFocusNode;
   bool _hovered = false;
 
-  FocusNode get _effectiveFocusNode => widget.focusNode ?? (_ownedFocusNode ??= FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'));
-  @override void dispose() { _ownedFocusNode?.dispose(); super.dispose(); }
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ??
+      (_ownedFocusNode ??=
+          FocusNode(debugLabel: 'FocusableMediaCard: ${widget.title}'));
+  @override
+  void dispose() {
+    _ownedFocusNode?.dispose();
+    super.dispose();
+  }
 
   void _handleEmptyTap() {}
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
+    final theme =
+        Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme();
     final focused = _effectiveFocusNode.hasFocus;
     final radius = BorderRadius.circular(theme.radiusMedium);
-    final contentRadius = BorderRadius.circular(theme.radiusMedium > 2 ? theme.radiusMedium - 2 : 0);
+    final contentRadius = BorderRadius.circular(
+        theme.radiusMedium > 2 ? theme.radiusMedium - 2 : 0);
     final borderColor = focused
         ? theme.accentBright
         : _hovered
             ? theme.borderColor(0.24)
             : theme.borderColor(0.09);
     final boxShadow = focused
-        ? <BoxShadow>[BoxShadow(color: theme.accent.withValues(alpha: 0.18), blurRadius: 12)]
+        ? <BoxShadow>[
+            BoxShadow(
+                color: theme.accent.withValues(alpha: 0.18), blurRadius: 12)
+          ]
         : _hovered
-            ? <BoxShadow>[BoxShadow(color: theme.shadowColor, blurRadius: 12, offset: const Offset(0, 4))]
+            ? <BoxShadow>[
+                BoxShadow(
+                    color: theme.shadowColor,
+                    blurRadius: 12,
+                    offset: const Offset(0, 4))
+              ]
             : const <BoxShadow>[];
-    return AnimatedScale(
-        scale: focused ? 1.045 : _hovered ? 1.03 : 1,
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent || widget.onLongPress == null) {
+          return KeyEventResult.ignored;
+        }
+        final menuKey = event.logicalKey == LogicalKeyboardKey.contextMenu;
+        final shiftF10 = event.logicalKey == LogicalKeyboardKey.f10 &&
+            HardwareKeyboard.instance.isShiftPressed;
+        if (!menuKey && !shiftF10) return KeyEventResult.ignored;
+        widget.onLongPress!();
+        return KeyEventResult.handled;
+      },
+      child: AnimatedScale(
+        scale: focused
+            ? 1.045
+            : _hovered
+                ? 1.03
+                : 1,
         duration: const Duration(milliseconds: 175),
         curve: Curves.easeOutCubic,
         child: AnimatedContainer(
@@ -66,6 +117,8 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
               autofocus: widget.autofocus,
               onFocusChange: (_) => setState(() {}),
               onTap: widget.onTap ?? _handleEmptyTap,
+              onLongPress: widget.onLongPress,
+              onSecondaryTap: widget.onLongPress,
               excludeFromSemantics: widget.onTap == null,
               onHover: (value) {
                 if (_hovered != value) setState(() => _hovered = value);
@@ -84,24 +137,39 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
                   badge: widget.badge,
                   theme: theme,
                 );
-                final metadata = _Metadata(title: widget.title, subtitle: widget.subtitle, theme: theme);
+                final metadata = _Metadata(
+                    title: widget.title,
+                    subtitle: widget.subtitle,
+                    theme: theme);
                 if (!constraints.hasBoundedHeight) {
-                  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [poster, metadata]);
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [poster, metadata]);
                 }
-                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Expanded(flex: 3, child: poster),
-                  Flexible(flex: 1, child: metadata),
-                ]);
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(flex: 3, child: poster),
+                      Flexible(flex: 1, child: metadata),
+                    ]);
               }),
             ),
           ),
         ),
+      ),
     );
   }
 }
 
 class _Poster extends StatelessWidget {
-  const _Poster({required this.aspectRatio, required this.imageUrl, required this.imageClient, required this.progress, required this.mediaInfo, required this.badge, required this.theme});
+  const _Poster(
+      {required this.aspectRatio,
+      required this.imageUrl,
+      required this.imageClient,
+      required this.progress,
+      required this.mediaInfo,
+      required this.badge,
+      required this.theme});
   final double aspectRatio;
   final String? imageUrl;
   final JellyfinApiClient? imageClient;
@@ -114,16 +182,32 @@ class _Poster extends StatelessWidget {
   Widget build(BuildContext context) => AspectRatio(
         aspectRatio: aspectRatio,
         child: Stack(fit: StackFit.expand, children: [
-          _MediaImage(imageUrl: imageUrl, imageClient: imageClient, theme: theme),
-          if (mediaInfo != null) Positioned(top: 10, left: 10, right: 10, child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
+          _MediaImage(
+              imageUrl: imageUrl, imageClient: imageClient, theme: theme),
+          if (mediaInfo != null)
+            Positioned(
+                top: 10,
+                left: 10,
+                right: 10,
+                child: MediaBadgeOverlay(mediaInfo: mediaInfo!)),
           if (badge != null) Positioned(top: 10, right: 10, child: badge!),
-          if (progress != null) Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: progress!.clamp(0, 1).toDouble(), minHeight: 3, backgroundColor: theme.surface3, color: theme.accentBright)),
+          if (progress != null)
+            Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LinearProgressIndicator(
+                    value: progress!.clamp(0, 1).toDouble(),
+                    minHeight: 3,
+                    backgroundColor: theme.surface3,
+                    color: theme.accentBright)),
         ]),
       );
 }
 
 class _Metadata extends StatelessWidget {
-  const _Metadata({required this.title, required this.subtitle, required this.theme});
+  const _Metadata(
+      {required this.title, required this.subtitle, required this.theme});
   final String title;
   final String? subtitle;
   final RodPlayerTheme theme;
@@ -133,33 +217,61 @@ class _Metadata extends StatelessWidget {
         builder: (context, constraints) {
           final bounded = constraints.hasBoundedHeight;
           final maxHeight = constraints.maxHeight;
-          final textScale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.4);
+          final textScale =
+              MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.4);
           if (bounded && maxHeight < 52 * textScale) {
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700)),
+              child: Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: theme.textPrimary, fontWeight: FontWeight.w700)),
             );
           }
-          final showSubtitle = subtitle != null && (!bounded || maxHeight >= 76 * textScale);
-          final titleLines = showSubtitle && (!bounded || maxHeight >= 104 * textScale) ? 2 : 1;
-          final titleText = Text(title, maxLines: titleLines, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: theme.textPrimary, fontWeight: FontWeight.w700));
-          final subtitleText = showSubtitle ? Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: theme.textSecondary)) : null;
+          final showSubtitle =
+              subtitle != null && (!bounded || maxHeight >= 76 * textScale);
+          final titleLines =
+              showSubtitle && (!bounded || maxHeight >= 104 * textScale)
+                  ? 2
+                  : 1;
+          final titleText = Text(title,
+              maxLines: titleLines,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: theme.textPrimary, fontWeight: FontWeight.w700));
+          final subtitleText = showSubtitle
+              ? Text(subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: theme.textSecondary))
+              : null;
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min, children: [
-              if (bounded) Flexible(child: titleText) else titleText,
-              if (showSubtitle) ...[
-                const SizedBox(height: 3),
-                if (bounded) Flexible(child: subtitleText!) else subtitleText!,
-              ],
-            ]),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  if (bounded) Flexible(child: titleText) else titleText,
+                  if (showSubtitle) ...[
+                    const SizedBox(height: 3),
+                    if (bounded)
+                      Flexible(child: subtitleText!)
+                    else
+                      subtitleText!,
+                  ],
+                ]),
           );
         },
       );
 }
 
 class _MediaImage extends StatelessWidget {
-  const _MediaImage({required this.imageUrl, required this.imageClient, required this.theme});
+  const _MediaImage(
+      {required this.imageUrl, required this.imageClient, required this.theme});
   final String? imageUrl;
   final JellyfinApiClient? imageClient;
   final RodPlayerTheme theme;
@@ -167,8 +279,23 @@ class _MediaImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = imageUrl?.trim();
     if (url == null || url.isEmpty) return _placeholder();
-    if (imageClient != null) return RoutedJellyfinImage(client: imageClient!, url: url, fallback: _placeholder(), filterQuality: FilterQuality.medium, showFallbackWhileLoading: true);
-    return Image.network(url, fit: BoxFit.cover, filterQuality: FilterQuality.medium, errorBuilder: (_, __, ___) => _placeholder(), loadingBuilder: (context, child, progress) => progress == null ? child : _placeholder());
+    if (imageClient != null) {
+      return RoutedJellyfinImage(
+          client: imageClient!,
+          url: url,
+          fallback: _placeholder(),
+          filterQuality: FilterQuality.medium,
+          showFallbackWhileLoading: true);
+    }
+    return Image.network(url,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _placeholder(),
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : _placeholder());
   }
-  Widget _placeholder() => ColoredBox(color: theme.obsidianRaised, child: Icon(Icons.movie_outlined, color: theme.textMuted, size: 36));
+
+  Widget _placeholder() => ColoredBox(
+      color: theme.obsidianRaised,
+      child: Icon(Icons.movie_outlined, color: theme.textMuted, size: 36));
 }

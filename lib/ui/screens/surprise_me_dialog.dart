@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/discovery/surprise_picker.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/ui/screens/item_details_screen.dart';
+import 'package:rodplayer/ui/screens/playback_callbacks.dart';
 import 'package:rodplayer/ui/widgets/media_item_helpers.dart';
 import 'package:rodplayer/ui/widgets/routed_jellyfin_image.dart';
 
@@ -14,7 +16,9 @@ Future<void> showSurpriseMePicker({
   required BuildContext context,
   required JellyfinApiClient client,
   DetailPlayItemCallback? onPlayItem,
+  ResumeItemCallback? onResumeItem,
   JellyfinUserDataChangedCallback? onUserDataChanged,
+  ValueListenable<int>? serverDataRevision,
   Random? random,
 }) {
   final compact = MediaQuery.sizeOf(context).width < 600;
@@ -22,7 +26,9 @@ Future<void> showSurpriseMePicker({
     client: client,
     bottomSheet: compact,
     onPlayItem: onPlayItem,
+    onResumeItem: onResumeItem,
     onUserDataChanged: onUserDataChanged,
+    serverDataRevision: serverDataRevision,
     random: random,
   );
   if (compact) {
@@ -41,7 +47,9 @@ class SurpriseMeDialog extends StatefulWidget {
     required this.client,
     this.bottomSheet = false,
     this.onPlayItem,
+    this.onResumeItem,
     this.onUserDataChanged,
+    this.serverDataRevision,
     this.random,
     super.key,
   });
@@ -49,7 +57,9 @@ class SurpriseMeDialog extends StatefulWidget {
   final JellyfinApiClient client;
   final bool bottomSheet;
   final DetailPlayItemCallback? onPlayItem;
+  final ResumeItemCallback? onResumeItem;
   final JellyfinUserDataChangedCallback? onUserDataChanged;
+  final ValueListenable<int>? serverDataRevision;
   final Random? random;
 
   @override
@@ -200,7 +210,9 @@ class _SurpriseMeDialogState extends State<SurpriseMeDialog> {
                     icon: const Icon(Icons.info_outline),
                     label: const Text('Details'),
                   ),
-                  if (item != null && isDirectlyPlayable(item) && widget.onPlayItem != null)
+                  if (item != null &&
+                      isDirectlyPlayable(item) &&
+                      widget.onPlayItem != null)
                     FilledButton.icon(
                       onPressed: () => widget.onPlayItem!(context, item.id),
                       icon: const Icon(Icons.play_arrow),
@@ -247,7 +259,9 @@ class _SurpriseMeDialogState extends State<SurpriseMeDialog> {
         client: widget.client,
         itemId: item.id,
         onPlayItem: widget.onPlayItem,
+        onResumeItem: widget.onResumeItem,
         onUserDataChanged: widget.onUserDataChanged,
+        serverDataRevision: widget.serverDataRevision,
       ),
     ));
   }

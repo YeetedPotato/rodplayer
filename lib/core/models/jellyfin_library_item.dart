@@ -41,35 +41,52 @@ class JellyfinUserData {
   final double? playedPercentage;
   final int? unplayedItemCount;
 
-  factory JellyfinUserData.fromJson(Object? value, {Map<String, dynamic> fallback = const <String, dynamic>{}}) {
-    final json = value is Map ? Map<String, dynamic>.from(value) : const <String, dynamic>{};
+  factory JellyfinUserData.fromJson(Object? value,
+      {Map<String, dynamic> fallback = const <String, dynamic>{}}) {
+    final json = value is Map
+        ? Map<String, dynamic>.from(value)
+        : const <String, dynamic>{};
     return JellyfinUserData(
       isFavorite: _bool(json['IsFavorite'] ?? fallback['IsFavorite']) ?? false,
       played: _bool(json['Played'] ?? fallback['Played']) ?? false,
-      playbackPositionTicks: _integer(json['PlaybackPositionTicks'] ?? fallback['PlaybackPositionTicks']),
-      playedPercentage: _double(json['PlayedPercentage'] ?? fallback['PlayedPercentage']),
-      unplayedItemCount: _integer(json['UnplayedItemCount'] ?? fallback['UnplayedItemCount']),
+      playbackPositionTicks: _integer(
+          json['PlaybackPositionTicks'] ?? fallback['PlaybackPositionTicks']),
+      playedPercentage:
+          _double(json['PlayedPercentage'] ?? fallback['PlayedPercentage']),
+      unplayedItemCount:
+          _integer(json['UnplayedItemCount'] ?? fallback['UnplayedItemCount']),
     );
   }
 
-  JellyfinUserData copyWith({bool? isFavorite, bool? played, int? playbackPositionTicks, double? playedPercentage}) => JellyfinUserData(
+  JellyfinUserData copyWith(
+          {bool? isFavorite,
+          bool? played,
+          int? playbackPositionTicks,
+          double? playedPercentage}) =>
+      JellyfinUserData(
         isFavorite: isFavorite ?? this.isFavorite,
         played: played ?? this.played,
-        playbackPositionTicks: playbackPositionTicks ?? this.playbackPositionTicks,
+        playbackPositionTicks:
+            playbackPositionTicks ?? this.playbackPositionTicks,
         playedPercentage: playedPercentage ?? this.playedPercentage,
         unplayedItemCount: unplayedItemCount,
       );
 }
 
 class JellyfinUserDataChange {
-  const JellyfinUserDataChange({required this.itemId, this.isFavorite, this.played, this.playbackProgressMayHaveChanged = false});
+  const JellyfinUserDataChange(
+      {required this.itemId,
+      this.isFavorite,
+      this.played,
+      this.playbackProgressMayHaveChanged = false});
   final String itemId;
   final bool? isFavorite;
   final bool? played;
   final bool playbackProgressMayHaveChanged;
 }
 
-typedef JellyfinUserDataChangedCallback = void Function(JellyfinUserDataChange change);
+typedef JellyfinUserDataChangedCallback = void Function(
+    JellyfinUserDataChange change);
 
 class JellyfinPerson {
   const JellyfinPerson({
@@ -86,15 +103,25 @@ class JellyfinPerson {
   final String? type;
   final String? primaryImageTag;
 
-  factory JellyfinPerson.fromJson(Map<String, dynamic> json) {
-    final imageTags = json['ImageTags'] is Map ? Map<String, dynamic>.from(json['ImageTags'] as Map) : const <String, dynamic>{};
-    return JellyfinPerson(
-        id: _string(json['Id']) ?? '',
-        name: _string(json['Name']) ?? '',
-        role: _string(json['Role']),
-        type: _string(json['Type']),
-        primaryImageTag: _string(json['PrimaryImageTag'] ?? imageTags['Primary']),
+  String? imageUrl(String baseUrl, {int quality = 85}) => jellyfinImageUrl(
+        baseUrl: baseUrl,
+        itemId: id,
+        tag: primaryImageTag,
+        type: JellyfinImageType.primary,
+        quality: quality,
       );
+
+  factory JellyfinPerson.fromJson(Map<String, dynamic> json) {
+    final imageTags = json['ImageTags'] is Map
+        ? Map<String, dynamic>.from(json['ImageTags'] as Map)
+        : const <String, dynamic>{};
+    return JellyfinPerson(
+      id: _string(json['Id']) ?? '',
+      name: _string(json['Name']) ?? '',
+      role: _string(json['Role']),
+      type: _string(json['Type']),
+      primaryImageTag: _string(json['PrimaryImageTag'] ?? imageTags['Primary']),
+    );
   }
 }
 
@@ -142,6 +169,7 @@ class JellyfinLibraryItem {
     this.primaryImageTag,
     this.backdropImageTags = const <String>[],
     this.thumbImageTag,
+    this.logoImageTag,
     this.primaryImageAspectRatio,
     this.userData = const JellyfinUserData(),
     this.raw = const <String, dynamic>{},
@@ -177,6 +205,7 @@ class JellyfinLibraryItem {
   final String? primaryImageTag;
   final List<String> backdropImageTags;
   final String? thumbImageTag;
+  final String? logoImageTag;
   final double? primaryImageAspectRatio;
   final JellyfinUserData userData;
   final Map<String, dynamic> raw;
@@ -185,13 +214,20 @@ class JellyfinLibraryItem {
   bool get isFavorite => userData.isFavorite;
   bool get played => userData.played;
   String? get posterImageTag => primaryImageTag;
-  String? get backdropImageTag => backdropImageTags.isEmpty ? null : backdropImageTags.first;
-  Duration? get playbackPosition => playbackPositionTicks == null ? null : Duration(microseconds: playbackPositionTicks! ~/ 10);
-  Duration? get runTime => runTimeTicks == null ? null : Duration(microseconds: runTimeTicks! ~/ 10);
+  String? get backdropImageTag =>
+      backdropImageTags.isEmpty ? null : backdropImageTags.first;
+  Duration? get playbackPosition => playbackPositionTicks == null
+      ? null
+      : Duration(microseconds: playbackPositionTicks! ~/ 10);
+  Duration? get runTime =>
+      runTimeTicks == null ? null : Duration(microseconds: runTimeTicks! ~/ 10);
 
   factory JellyfinLibraryItem.fromJson(Map<String, dynamic> json) {
-    final imageTags = json['ImageTags'] is Map ? Map<String, dynamic>.from(json['ImageTags'] as Map) : const <String, dynamic>{};
-    final userData = JellyfinUserData.fromJson(json['UserData'], fallback: json);
+    final imageTags = json['ImageTags'] is Map
+        ? Map<String, dynamic>.from(json['ImageTags'] as Map)
+        : const <String, dynamic>{};
+    final userData =
+        JellyfinUserData.fromJson(json['UserData'], fallback: json);
     return JellyfinLibraryItem(
       id: _string(json['Id']) ?? '',
       title: _string(json['Name'] ?? json['SeriesName']) ?? '',
@@ -217,12 +253,17 @@ class JellyfinLibraryItem {
       status: _string(json['Status']),
       childCount: _integer(json['ChildCount']),
       recursiveItemCount: _integer(json['RecursiveItemCount']),
-      playbackPositionTicks: userData.playbackPositionTicks ?? _integer(json['PlaybackPositionTicks']),
-      playedPercentage: userData.playedPercentage ?? _double(json['PlayedPercentage']),
+      playbackPositionTicks: userData.playbackPositionTicks ??
+          _integer(json['PlaybackPositionTicks']),
+      playedPercentage:
+          userData.playedPercentage ?? _double(json['PlayedPercentage']),
       runTimeTicks: _integer(json['RunTimeTicks']),
-      primaryImageTag: _string(imageTags['Primary'] ?? json['PrimaryImageTag'] ?? json['ImageTag']),
-      backdropImageTags: _strings(json['BackdropImageTags'] ?? json['BackdropImageTag']),
+      primaryImageTag: _string(
+          imageTags['Primary'] ?? json['PrimaryImageTag'] ?? json['ImageTag']),
+      backdropImageTags:
+          _strings(json['BackdropImageTags'] ?? json['BackdropImageTag']),
       thumbImageTag: _string(imageTags['Thumb'] ?? json['ThumbImageTag']),
+      logoImageTag: _string(imageTags['Logo'] ?? json['LogoImageTag']),
       primaryImageAspectRatio: _double(json['PrimaryImageAspectRatio']),
       userData: userData,
       raw: Map<String, dynamic>.unmodifiable(json),
@@ -235,13 +276,17 @@ class JellyfinLibraryItem {
     return year == null ? type : '$year · $type';
   }
 
-  String? imageUrl(String baseUrl, {JellyfinImageType type = JellyfinImageType.primary, int? quality = 90}) => jellyfinImageUrl(
+  String? imageUrl(String baseUrl,
+          {JellyfinImageType type = JellyfinImageType.primary,
+          int? quality = 90}) =>
+      jellyfinImageUrl(
         baseUrl: baseUrl,
         itemId: id,
         tag: switch (type) {
           JellyfinImageType.primary => primaryImageTag,
           JellyfinImageType.backdrop => backdropImageTag,
           JellyfinImageType.thumb => thumbImageTag,
+          JellyfinImageType.logo => logoImageTag,
         },
         type: type,
         quality: quality,
@@ -280,8 +325,10 @@ class JellyfinLibraryItem {
       primaryImageTag: primaryImageTag,
       backdropImageTags: backdropImageTags,
       thumbImageTag: thumbImageTag,
+      logoImageTag: logoImageTag,
       primaryImageAspectRatio: primaryImageAspectRatio,
-      userData: userData.copyWith(isFavorite: change.isFavorite, played: change.played),
+      userData: userData.copyWith(
+          isFavorite: change.isFavorite, played: change.played),
       raw: raw,
     );
   }
@@ -319,12 +366,14 @@ class NextUpItem extends JellyfinLibraryItem {
     super.primaryImageTag,
     super.backdropImageTags,
     super.thumbImageTag,
+    super.logoImageTag,
     super.primaryImageAspectRatio,
     super.userData,
     super.raw,
   });
 
-  factory NextUpItem.fromJson(Map<String, dynamic> json) => NextUpItem.fromItem(JellyfinLibraryItem.fromJson(json));
+  factory NextUpItem.fromJson(Map<String, dynamic> json) =>
+      NextUpItem.fromItem(JellyfinLibraryItem.fromJson(json));
 
   factory NextUpItem.fromItem(JellyfinLibraryItem item) => NextUpItem(
         id: item.id,
@@ -357,6 +406,7 @@ class NextUpItem extends JellyfinLibraryItem {
         primaryImageTag: item.primaryImageTag,
         backdropImageTags: item.backdropImageTags,
         thumbImageTag: item.thumbImageTag,
+        logoImageTag: item.logoImageTag,
         primaryImageAspectRatio: item.primaryImageAspectRatio,
         userData: item.userData,
         raw: item.raw,
@@ -395,12 +445,14 @@ class ResumableItem extends JellyfinLibraryItem {
     super.primaryImageTag,
     super.backdropImageTags,
     super.thumbImageTag,
+    super.logoImageTag,
     super.primaryImageAspectRatio,
     super.userData,
     super.raw,
   });
 
-  factory ResumableItem.fromJson(Map<String, dynamic> json) => ResumableItem.fromItem(JellyfinLibraryItem.fromJson(json));
+  factory ResumableItem.fromJson(Map<String, dynamic> json) =>
+      ResumableItem.fromItem(JellyfinLibraryItem.fromJson(json));
 
   factory ResumableItem.fromItem(JellyfinLibraryItem item) => ResumableItem(
         id: item.id,
@@ -433,6 +485,7 @@ class ResumableItem extends JellyfinLibraryItem {
         primaryImageTag: item.primaryImageTag,
         backdropImageTags: item.backdropImageTags,
         thumbImageTag: item.thumbImageTag,
+        logoImageTag: item.logoImageTag,
         primaryImageAspectRatio: item.primaryImageAspectRatio,
         userData: item.userData,
         raw: item.raw,
@@ -442,7 +495,8 @@ class ResumableItem extends JellyfinLibraryItem {
 enum JellyfinImageType {
   primary('Primary'),
   backdrop('Backdrop'),
-  thumb('Thumb');
+  thumb('Thumb'),
+  logo('Logo');
 
   const JellyfinImageType(this.pathName);
   final String pathName;
@@ -458,21 +512,27 @@ String? jellyfinImageUrl({
   final cleanId = itemId.trim();
   final cleanTag = tag?.trim();
   if (cleanId.isEmpty || cleanTag == null || cleanTag.isEmpty) return null;
-  final uri = jellyfinUri(baseUrl, <String>['Items', cleanId, 'Images', type.pathName]);
+  final uri =
+      jellyfinUri(baseUrl, <String>['Items', cleanId, 'Images', type.pathName]);
   return uri.replace(queryParameters: <String, String>{
     'tag': cleanTag,
     if (quality != null) 'quality': '$quality',
   }).toString();
 }
 
-Uri jellyfinUri(String baseUrl, Iterable<String> pathSegments, {Map<String, String>? queryParameters}) {
+Uri jellyfinUri(String baseUrl, Iterable<String> pathSegments,
+    {Map<String, String>? queryParameters}) {
   final base = Uri.parse(baseUrl);
   final baseSegments = base.pathSegments.where((segment) => segment.isNotEmpty);
-  return base.replace(pathSegments: <String>[...baseSegments, ...pathSegments], queryParameters: queryParameters);
+  return base.replace(
+      pathSegments: <String>[...baseSegments, ...pathSegments],
+      queryParameters: queryParameters);
 }
 
-int? _integer(Object? value) => value is num ? value.toInt() : int.tryParse('$value');
-double? _double(Object? value) => value is num ? value.toDouble() : double.tryParse('$value');
+int? _integer(Object? value) =>
+    value is num ? value.toInt() : int.tryParse('$value');
+double? _double(Object? value) =>
+    value is num ? value.toDouble() : double.tryParse('$value');
 String? _string(Object? value) => value == null ? null : '$value';
 String? _tagline(Map<String, dynamic> json) {
   final taglines = json['Taglines'];
@@ -486,6 +546,7 @@ String? _tagline(Map<String, dynamic> json) {
   final legacy = _string(json['Tagline'])?.trim();
   return legacy == null || legacy.isEmpty ? null : legacy;
 }
+
 bool? _bool(Object? value) {
   if (value is bool) return value;
   if (value is! String) return null;
@@ -494,13 +555,22 @@ bool? _bool(Object? value) {
   if (normalized == 'false') return false;
   return null;
 }
-DateTime? _date(Object? value) => value == null ? null : DateTime.tryParse('$value');
+
+DateTime? _date(Object? value) =>
+    value == null ? null : DateTime.tryParse('$value');
 List<String> _strings(Object? value) {
-  if (value is List) return List<String>.unmodifiable(value.map((item) => '$item'));
+  if (value is List) {
+    return List<String>.unmodifiable(value.map((item) => '$item'));
+  }
   final single = _string(value);
-  return single == null || single.isEmpty ? const <String>[] : List<String>.unmodifiable(<String>[single]);
+  return single == null || single.isEmpty
+      ? const <String>[]
+      : List<String>.unmodifiable(<String>[single]);
 }
-List<String> _stringList(Object? value) => value is List ? List<String>.unmodifiable(value.map((item) => '$item')) : const <String>[];
+
+List<String> _stringList(Object? value) => value is List
+    ? List<String>.unmodifiable(value.map((item) => '$item'))
+    : const <String>[];
 List<String> _studios(Object? value) {
   if (value is! List) return const <String>[];
   final studios = <String>[];
@@ -510,7 +580,10 @@ List<String> _studios(Object? value) {
   }
   return List<String>.unmodifiable(studios);
 }
+
 List<JellyfinPerson> _people(Object? value) {
   if (value is! List) return const <JellyfinPerson>[];
-  return List<JellyfinPerson>.unmodifiable(value.whereType<Map>().map((item) => JellyfinPerson.fromJson(Map<String, dynamic>.from(item))));
+  return List<JellyfinPerson>.unmodifiable(value
+      .whereType<Map>()
+      .map((item) => JellyfinPerson.fromJson(Map<String, dynamic>.from(item))));
 }
