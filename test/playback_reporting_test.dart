@@ -53,12 +53,11 @@ void main() {
     late Map<String, dynamic> payload;
     final client = JellyfinApiClient(
       baseUrl: 'https://media.example.com',
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: _CaptureClient((request, body) {
         payload = jsonDecode(body) as Map<String, dynamic>;
         return http.Response('', 204);
-      }),
-    );
+      }));
     final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay));
     session.selectedAudio = 4;
     session.selectedSubtitle = 8;
@@ -71,12 +70,11 @@ void main() {
     final payloads = <Map<String, dynamic>>[];
     final client = JellyfinApiClient(
       baseUrl: 'https://media.example.com',
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: _CaptureClient((_, body) {
         payloads.add(jsonDecode(body) as Map<String, dynamic>);
         return http.Response('', 204);
-      }),
-    );
+      }));
     final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay));
     final reporter = PlaybackReporter(client: client, session: session);
     await reporter.started();
@@ -90,7 +88,7 @@ void main() {
   test('queued progress keeps its captured target and stream indexes through a transition', () async {
     final gate = Completer<http.Response>();
     final payloads = <Map<String, dynamic>>[];
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) {
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _CaptureClient((_, body) {
       final payload = jsonDecode(body) as Map<String, dynamic>;
       payloads.add(payload);
       if (payload['MediaSourceId'] == 'A' && payload['EventName'] == 'timeupdate') return gate.future;
@@ -115,7 +113,7 @@ void main() {
 
   test('synchronize transitions lifecycle without progress and preserves old indexes', () async {
     final payloads = <Map<String, dynamic>>[];
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
     final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay))..selectedAudio = 1..selectedSubtitle = 2;
     final reporter = PlaybackReporter(client: client, session: session);
     await reporter.started();
@@ -134,7 +132,7 @@ void main() {
 
   test('same-target synchronize refreshes stream indexes without a lifecycle event', () async {
     final payloads = <Map<String, dynamic>>[];
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _CaptureClient((_, body) { payloads.add(jsonDecode(body) as Map<String, dynamic>); return http.Response('', 204); }));
     final session = LogicalPlaybackSession(id: 'logical', itemId: 'item', activePlan: plan('A', PlayMethod.directPlay))..selectedAudio = 1..selectedSubtitle = 2;
     final reporter = PlaybackReporter(client: client, session: session);
     await reporter.started();

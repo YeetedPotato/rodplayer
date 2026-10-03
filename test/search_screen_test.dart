@@ -255,7 +255,7 @@ class _DiscoveryCall {
 
 class _SearchClient extends JellyfinApiClient {
   _SearchClient({this.searchPages = const {}, this.discoveryPages = const {}, this.delayedSearch = const {}, this.delayedDiscovery = const {}, this.failSearchStarts = const {}, this.genres = const [], this.failGenres = false})
-      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
   final Map<int, JellyfinItemsPage<JellyfinLibraryItem>> searchPages;
   final Map<int, JellyfinItemsPage<JellyfinLibraryItem>> discoveryPages;
   final Map<String, Completer<JellyfinItemsPage<JellyfinLibraryItem>>> delayedSearch;

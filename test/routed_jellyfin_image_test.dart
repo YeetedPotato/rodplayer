@@ -16,13 +16,12 @@ void main() {
     final requests = <Uri>[];
     final client = JellyfinApiClient(
       baseUrl: 'https://server.example/jellyfin',
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((request) async {
         requests.add(request.url);
         return MockClient.pngResponse();
-      }),
-    );
-    client.usePrivateTransport(status);
+      }));
+    bindTestPrivateTransport(client, status);
     await tester.pumpWidget(MaterialApp(
         home: RoutedJellyfinImage(
       client: client,
@@ -48,15 +47,14 @@ void main() {
     var sends = 0;
     final client = JellyfinApiClient(
       baseUrl: 'https://server.example/jellyfin',
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((_) async {
         sends++;
         return sends == 1
             ? http.Response('unavailable', 503)
             : MockClient.pngResponse();
-      }),
-    );
-    client.usePrivateTransport(status);
+      }));
+    bindTestPrivateTransport(client, status);
     await tester.pumpWidget(MaterialApp(
         home: RoutedJellyfinImage(
       client: client,

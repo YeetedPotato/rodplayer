@@ -1,10 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
+import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
+import 'package:rodplayer/core/network/service_transport.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/family_enrollment.dart';
@@ -107,8 +111,10 @@ class RodPlayerShell extends StatefulWidget {
 class _RodPlayerShellState extends State<RodPlayerShell> {
   JellyfinApiClient? _client;
   InstallationIdentity? _identity;
+  ServerId? _serverId;
   bool _loading = true;
   PrivateNetworkSessionController? _privateNetwork;
+  final _privateNetworkOwner = PrivateNetworkSessionOwner();
   PrivateTransportProfile? _privateNetworkProfile;
   final ValueNotifier<PrivateNetworkStatus?> _unavailablePrivateStatus =
       ValueNotifier(null);
@@ -125,8 +131,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
 
   @override
   void dispose() {
-    final network = _privateNetwork;
-    if (network != null) unawaited(network.close());
+    unawaited(_privateNetworkOwner.close().catchError((_) {}));
     _unavailablePrivateStatus.dispose();
     super.dispose();
   }
@@ -143,6 +148,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     final token =
         await widget.credentialStore.readToken(CredentialMigration.tokenKey);
     final user = widget.preferences.getString(CredentialMigration.userIdKey);
+    final serverId = await ConfiguredServerIdStore(widget.preferences).loadOrCreate();
     JellyfinApiClient? client;
     if (url != null &&
         token != null &&
@@ -150,13 +156,13 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
         url.isNotEmpty &&
         token.isNotEmpty &&
         user.isNotEmpty) {
-      client = _makeClient(url, identity)
-        ..accessToken = token
-        ..userId = user;
+      client = _makeClient(url, identity, serverId: serverId,
+          userId: user, accessToken: token);
     }
     if (!mounted) return;
     setState(() {
       _identity = identity;
+      _serverId = serverId;
       _client = client;
       _loading = false;
     });
@@ -177,7 +183,10 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 
   Future<void> _configurePrivateAccess(
-      String canonicalUrl, String invitationText, String setupCode) async {
+    String canonicalUrl,
+    String invitationText,
+    String setupCode,
+  ) async {
     await ManagedPrivateTransportSetup(
       preferences: widget.preferences,
       runtimeFactory: widget.privateNetworkRuntimeFactory,
@@ -187,14 +196,25 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
       invitationText: invitationText,
       setupCode: setupCode,
     );
-    final previous = _privateNetwork;
     _privateNetwork = null;
     _privateNetworkProfile = null;
-    if (previous != null) await previous.close();
+    await _privateNetworkOwner.detach();
   }
 
-  JellyfinApiClient _makeClient(String url, InstallationIdentity identity) {
-    final client = widget.clientFactory(url, identity);
+  JellyfinApiClient _makeClient(
+    String url,
+    InstallationIdentity identity, {
+    required ServerId serverId,
+    String? userId,
+    String? accessToken,
+  }) {
+    final client = widget.clientFactory(
+      url,
+      identity,
+      serverId: serverId,
+      userId: userId,
+      accessToken: accessToken,
+    );
     final association = _privateTransport.lookupFor(url);
     PrivateTransportProfile? profile;
     try {
@@ -216,20 +236,43 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
           _privateNetworkProfile?.controlUrl != profile.controlUrl ||
           _privateNetworkProfile?.serviceIpv4 != profile.serviceIpv4 ||
           _privateNetworkProfile?.servicePort != profile.servicePort) {
-        final previous = _privateNetwork;
-        if (previous != null) unawaited(previous.close());
-        _privateNetwork = PrivateNetworkSessionController(
-            widget.privateNetworkRuntimeFactory(), claim);
+        _privateNetwork = _privateNetworkOwner.replace(
+          widget.privateNetworkRuntimeFactory(),
+          claim,
+        );
         _privateNetworkProfile = profile;
       }
       final network = _privateNetwork!;
       unawaited(network.start());
-      client.usePrivateTransport(network.status,
-          waitUntilReady: network.waitUntilReady);
+      _bindPrivateTransport(
+        client,
+        network.status,
+        waitUntilReady: network.waitUntilReady,
+      );
     } else if (association.kind != PrivateTransportAssociationKind.none) {
-      client.usePrivateTransport(_unavailablePrivateStatus);
+      _bindPrivateTransport(client, _unavailablePrivateStatus);
     }
     return client;
+  }
+
+  void _bindPrivateTransport(
+    JellyfinApiClient client,
+    ValueListenable<PrivateNetworkStatus?> status, {
+    Future<void> Function()? waitUntilReady,
+  }) {
+    final transport = client.serviceTransport;
+    if (transport is! HttpServiceTransport) {
+      throw StateError(
+        'Private service requires the configured HTTP transport adapter',
+      );
+    }
+    transport.bindPrivateResolver(
+      PrivateServiceEndpointResolver(
+        canonicalBaseUrl: client.baseUrl,
+        status: status,
+      ),
+      waitUntilReady: waitUntilReady,
+    );
   }
 
   Future<void> _logout() async {
@@ -265,6 +308,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     if (_client == null) {
       return LoginScreen(
           identity: _identity!,
+          serverId: _serverId!,
           initialServerUrl:
               widget.preferences.getString(CredentialMigration.serverUrlKey),
           clientFactory: _makeClient,
@@ -294,8 +338,19 @@ Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client,
         itemId: itemId);
 
 JellyfinApiClient _defaultClientFactory(
-        String baseUrl, InstallationIdentity identity) =>
-    JellyfinApiClient(baseUrl: baseUrl, identity: identity);
+  String baseUrl,
+  InstallationIdentity identity, {
+  required ServerId serverId,
+  String? userId,
+  String? accessToken,
+}) =>
+    JellyfinApiClient(
+      baseUrl: baseUrl,
+      identity: identity,
+      serverId: serverId,
+      userId: userId,
+      accessToken: accessToken,
+    );
 
 PrivateNetworkRuntime _defaultPrivateNetworkRuntimeFactory() =>
     MethodChannelPrivateNetworkRuntime();

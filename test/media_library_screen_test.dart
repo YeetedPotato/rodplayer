@@ -276,7 +276,7 @@ class _LibraryClient extends JellyfinApiClient {
   })  : pages = pages ?? {0: JellyfinItemsPage<JellyfinLibraryItem>(items: items ?? <JellyfinLibraryItem>[], totalRecordCount: items?.length ?? 0, startIndex: 0)},
         failStarts = failStarts ?? <int>{},
         delayed = delayed ?? <JellyfinLibrarySort, Completer<JellyfinItemsPage<JellyfinLibraryItem>>>{},
-        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final Map<int, JellyfinItemsPage<JellyfinLibraryItem>> pages;
   final bool failInitial;

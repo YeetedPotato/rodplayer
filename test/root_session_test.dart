@@ -6,7 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
+import 'package:rodplayer/core/network/service_transport.dart';
 import 'package:rodplayer/core/network/family_enrollment.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
@@ -57,9 +60,9 @@ void main() {
                 'home': {'ipv4': '100.64.0.8', 'port': 4444},
               }),
               200))),
-      clientFactory: (url, identity) => JellyfinApiClient(
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) => JellyfinApiClient(
           baseUrl: url,
-          identity: identity,
+          identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
           client: http_testing.MockClient((request) async {
             requests.add(request);
             return http.Response('[]', 200);
@@ -140,9 +143,9 @@ void main() {
           }),
         );
       },
-      clientFactory: (url, identity) => JellyfinApiClient(
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) => JellyfinApiClient(
         baseUrl: url,
-        identity: identity,
+        identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
         client: http_testing.MockClient((request) async {
           requests.add(request);
           return http.Response('[]', 200);
@@ -213,10 +216,10 @@ void main() {
         runtimeCreations++;
         return runtime;
       },
-      clientFactory: (url, identity) {
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
         final client = JellyfinApiClient(
           baseUrl: url,
-          identity: identity,
+          identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
           client: http_testing.MockClient((request) async {
             requests.add(request);
             if (request.url.path.endsWith('/Users/Public')) {
@@ -345,15 +348,15 @@ void main() {
         factoryCalls++;
         return runtime;
       },
-      clientFactory: (url, identity) {
-        final client = _RootClient(baseUrl: url, identity: identity);
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
+        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
         clients.add(client);
         return client;
       },
     ));
     await tester.pumpAndSettle();
     expect(factoryCalls, 0);
-    expect(clients.single.usesPrivateTransport, isTrue);
+    expect(clients.single.serviceTransport.endpointChanges != null, isTrue);
     expect(
         () =>
             clients.single.resolveServiceUri(Uri.parse('https://server/Items')),
@@ -367,15 +370,15 @@ void main() {
         factoryCalls++;
         return runtime;
       },
-      clientFactory: (url, identity) {
-        final client = _RootClient(baseUrl: url, identity: identity);
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
+        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
         clients.add(client);
         return client;
       },
     ));
     await tester.pumpAndSettle();
     expect(factoryCalls, 1);
-    expect(clients.last.usesPrivateTransport, isTrue);
+    expect(clients.last.serviceTransport.endpointChanges != null, isTrue);
     expect(runtime.resumeCalls, 1);
     expect(runtime.lastClaim?.profileId, 'invite:one');
     expect(runtime.bootstrapCalls, 0);
@@ -401,12 +404,12 @@ void main() {
         runtimeCalls++;
         return _RootPrivateNetworkRuntime();
       },
-      clientFactory: (url, identity) =>
-          client = _RootClient(baseUrl: url, identity: identity),
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
+          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtimeCalls, 0);
-    expect(client.usesPrivateTransport, isFalse);
+    expect(client.serviceTransport.endpointChanges != null, isFalse);
     expect(
         client
             .resolveServiceUri(Uri.parse('https://public.example.test/Items')),
@@ -435,8 +438,8 @@ void main() {
             runtimeCalls++;
             return _RootPrivateNetworkRuntime();
           },
-          clientFactory: (url, identity) {
-            final client = _RootClient(baseUrl: url, identity: identity);
+          clientFactory: (url, identity, {required serverId, userId, accessToken}) {
+            final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
             clients.add(client);
             return client;
           },
@@ -449,7 +452,7 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(runtimeCalls, 1);
-    expect(clients.last.usesPrivateTransport, isTrue);
+    expect(clients.last.serviceTransport.endpointChanges != null, isTrue);
     expect(
         () => clients.last.resolveServiceUri(Uri.parse('https://server/Items')),
         throwsA(isA<PrivateNetworkException>()));
@@ -486,12 +489,12 @@ void main() {
           factoryCalls++;
           return _RootPrivateNetworkRuntime();
         },
-        clientFactory: (url, identity) =>
-            client = _RootClient(baseUrl: url, identity: identity),
+        clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
+            client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
       ));
       await tester.pumpAndSettle();
       expect(factoryCalls, 0);
-      expect(client.usesPrivateTransport, isTrue);
+      expect(client.serviceTransport.endpointChanges != null, isTrue);
       expect(() => client.resolveServiceUri(Uri.parse('https://server/Items')),
           throwsA(isA<PrivateNetworkException>()));
       await expectLater(
@@ -518,8 +521,8 @@ void main() {
       preferences: prefs,
       credentialStore: credentials,
       privateNetworkRuntimeFactory: () => runtime,
-      clientFactory: (url, identity) =>
-          client = _RootClient(baseUrl: url, identity: identity),
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
+          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtime.resumeCalls, 1);
@@ -551,15 +554,15 @@ void main() {
           runtimeCreated = true;
           return _RootPrivateNetworkRuntime();
         },
-        clientFactory: (url, identity) {
-          final client = _RootClient(baseUrl: url, identity: identity);
+        clientFactory: (url, identity, {required serverId, userId, accessToken}) {
+          final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
           clients.add(client);
           return client;
         },
       ));
       await tester.pumpAndSettle();
       expect(runtimeCreated, isFalse);
-      expect(clients.single.usesPrivateTransport, isTrue);
+      expect(clients.single.serviceTransport.endpointChanges != null, isTrue);
       expect(
           () => clients.single
               .resolveServiceUri(Uri.parse('https://server/Items')),
@@ -593,12 +596,12 @@ void main() {
         runtimeCreations++;
         return _RootPrivateNetworkRuntime();
       },
-      clientFactory: (url, identity) =>
-          client = _RootClient(baseUrl: url, identity: identity),
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
+          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtimeCreations, 0);
-    expect(client.usesPrivateTransport, isTrue);
+    expect(client.serviceTransport.endpointChanges != null, isTrue);
     expect(() => client.resolveServiceUri(Uri.parse('$server/Items')),
         throwsA(isA<PrivateNetworkException>()));
   });
@@ -622,14 +625,14 @@ void main() {
     await tester.pumpWidget(RodPlayerApp(
       preferences: prefs,
       credentialStore: store,
-      clientFactory: (url, identity) {
-        final client = _RootClient(baseUrl: url, identity: identity);
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
+        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
         clients.add(client);
         return client;
       },
     ));
     await tester.pumpAndSettle();
-    expect(clients.first.usesPrivateTransport, isTrue);
+    expect(clients.first.serviceTransport.endpointChanges != null, isTrue);
 
     Future<void> switchProfile() async {
       await tester.tap(find.byTooltip('Profile'));
@@ -648,7 +651,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
     expect(association.lookupFor('https://server').profileId, 'invite:one');
-    expect(clients.last.usesPrivateTransport, isTrue);
+    expect(clients.last.serviceTransport.endpointChanges != null, isTrue);
 
     await switchProfile();
     await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
@@ -660,7 +663,7 @@ void main() {
         'https://other.example.test');
     expect(prefs.getString(PrivateTransportProfileAssociation.preferenceKey),
         isNull);
-    expect(clients.last.usesPrivateTransport, isFalse);
+    expect(clients.last.serviceTransport.endpointChanges != null, isFalse);
   });
 
   testWidgets(
@@ -687,9 +690,9 @@ void main() {
         privateFactoryCalls++;
         return privateNetwork;
       },
-      clientFactory: (url, identity) {
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
         final client = _RootClient(
-            baseUrl: url, identity: identity, failLogout: clients.isEmpty);
+            baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken, failLogout: clients.isEmpty);
         clients.add(client);
         return client;
       },
@@ -711,8 +714,6 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.widgetWithText(TextField, 'https://server'), findsOneWidget);
 
-    clients.last.accessToken = 'token2';
-    clients.last.userId = 'user2';
     await tester.enterText(find.widgetWithText(TextField, 'Username'), 'user2');
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
@@ -737,20 +738,70 @@ PrivateTransportProfile _profile(String id) => PrivateTransportProfile(
 
 class _RootClient extends JellyfinApiClient {
   _RootClient(
-      {required super.baseUrl,
-      required super.identity,
-      this.failLogout = false})
-      : super(
-            client:
-                http_testing.MockClient((_) async => http.Response('{}', 200)));
+      {required String baseUrl,
+      required InstallationIdentity identity,
+      required ServerId serverId,
+      String? userId,
+      String? accessToken,
+      ServiceTransport? serviceTransport,
+      this.failLogout = false,
+      _RootClientState? state})
+      : _state = state ?? _RootClientState(),
+        super(
+          baseUrl: baseUrl,
+          identity: identity,
+          serverId: serverId,
+          userId: userId,
+          accessToken: accessToken,
+          serviceTransport: serviceTransport,
+          client: serviceTransport == null
+              ? http_testing.MockClient((request) async =>
+                  request.url.path.endsWith('/Users/AuthenticateByName')
+                      ? http.Response(
+                          jsonEncode({
+                            'AccessToken': 'root-test-token',
+                            'User': {'Id': 'root-test-user'},
+                          }),
+                          200)
+                      : http.Response('{}', 200))
+              : null,
+        );
+
+  final _RootClientState _state;
+
+  @override
+  Future<JellyfinApiClient> authenticate({
+    required String username,
+    required String password,
+  }) async =>
+      createAuthenticatedClient(
+        userId: 'root-test-user',
+        accessToken: 'root-test-token',
+      );
+
+  @override
+  JellyfinApiClient createAuthenticatedClient({
+    required String userId,
+    required String accessToken,
+  }) =>
+      _RootClient(
+        baseUrl: baseUrl,
+        identity: identity,
+        serverId: serverId,
+        userId: userId,
+        accessToken: accessToken,
+        serviceTransport: serviceTransport,
+        state: _state,
+        failLogout: failLogout,
+      );
 
   final bool failLogout;
-  bool closed = false;
-  int logoutCalls = 0;
+  bool get closed => _state.closed;
+  int get logoutCalls => _state.logoutCalls;
 
   @override
   Future<void> reportSessionEnded() async {
-    logoutCalls++;
+    _state.logoutCalls++;
     if (failLogout) throw StateError('offline');
   }
 
@@ -759,14 +810,21 @@ class _RootClient extends JellyfinApiClient {
       const JellyfinUserProfile(id: 'user', name: 'User');
 
   @override
-  Future<void> authenticate(
-      {required String username, required String password}) async {
-    accessToken ??= 'token';
-    userId ??= 'user';
-  }
+  Future<String> getVerifiedServerSystemId() async =>
+      baseUrl == 'https://other.example.test'
+          ? 'other-system'
+          : 'root-test-system';
 
   @override
-  void close() => closed = true;
+  void close() {
+    _state.closed = true;
+    super.close();
+  }
+}
+
+class _RootClientState {
+  bool closed = false;
+  int logoutCalls = 0;
 }
 
 class _RootPrivateNetworkRuntime implements PrivateNetworkRuntime {

@@ -78,7 +78,7 @@ void main() {
 }
 
 class _ControlledHomeClient extends JellyfinApiClient {
-  _ControlledHomeClient() : super(baseUrl: 'https://server', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+  _ControlledHomeClient() : super(baseUrl: 'https://server', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   final resumeRequests = <Completer<List<ResumableItem>>>[];
   final nextUpRequests = <Completer<List<NextUpItem>>>[];

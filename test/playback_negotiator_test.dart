@@ -20,7 +20,7 @@ class MockClient extends http.BaseClient {
 void main() {
   test('accepts server-provided audio-only transform transcode plan', () async {
     final body = File('test/fixtures/playback_info/video_copy_audio_transcode.json').readAsStringSync();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: MockClient(body))..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: MockClient(body),  userId: 'user', accessToken: 'test-token');
     final plan = await PlaybackNegotiator(client: client).negotiate(itemId: 'item');
     expect(plan.playMethod, PlayMethod.transcode);
     expect(plan.playbackUri.toString(), contains('/Videos/source-transcode/master.m3u8'));
@@ -31,9 +31,7 @@ void main() {
 
   test('builds standard Jellyfin direct-play URL instead of using filesystem path', () async {
     final body = File('test/fixtures/playback_info/direct_play_mkv.json').readAsStringSync();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: MockClient(body))
-      ..userId = 'user'
-      ..accessToken = 'secret';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: MockClient(body),  userId: 'user', accessToken: 'secret');
     final plan = await PlaybackNegotiator(client: client).negotiate(itemId: 'item');
     expect(plan.playMethod, PlayMethod.directPlay);
     expect(plan.playbackUri.path, '/Videos/item/stream');
@@ -45,7 +43,7 @@ void main() {
 
   test('requested audio and subtitle indexes survive negotiation', () async {
     final body = File('test/fixtures/playback_info/direct_play_mkv.json').readAsStringSync();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: MockClient(body))..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: MockClient(body),  userId: 'user', accessToken: 'test-token');
     final plan = await PlaybackNegotiator(client: client).negotiate(itemId: 'item', audioStreamIndex: 4, subtitleStreamIndex: 7);
     expect(plan.selectedAudioStreamIndex, 4);
     expect(plan.selectedSubtitleStreamIndex, 7);
@@ -66,9 +64,7 @@ void main() {
         },
       ],
     });
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: MockClient(body))
-      ..userId = 'user'
-      ..accessToken = 'secret';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: MockClient(body),  userId: 'user', accessToken: 'secret');
     final plan = await PlaybackNegotiator(client: client).negotiate(itemId: 'item');
     expect(plan.playMethod, PlayMethod.directStream);
     expect(plan.playbackUri.path, '/Videos/source-stream/stream.mkv');

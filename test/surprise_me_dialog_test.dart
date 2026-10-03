@@ -249,7 +249,7 @@ class _SurpriseClient extends JellyfinApiClient {
   _SurpriseClient({required this.count, this.delayedMovie})
       : super(
           baseUrl: 'https://server/jellyfin',
-          identity: testIdentity,
+          identity: testIdentity, serverId: testServerId,
           client:
               http_testing.MockClient((_) async => http.Response('{}', 200)),
         );

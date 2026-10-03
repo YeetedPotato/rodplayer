@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
-import 'package:rodplayer/core/network/private_network_runtime.dart';
 
 /// Keeps public image behavior unchanged and private image bytes on the routed
 /// HTTP transport. A gateway rotation creates a fresh request, never a stale URL.
@@ -32,7 +31,7 @@ class RoutedJellyfinImage extends StatefulWidget {
 class _RoutedJellyfinImageState extends State<RoutedJellyfinImage> {
   String? _requestKey;
   Future<Uint8List>? _bytes;
-  ValueListenable<PrivateNetworkStatus?>? _observedStatus;
+  Listenable? _observedEndpointChanges;
 
   @override
   void initState() {
@@ -52,31 +51,43 @@ class _RoutedJellyfinImageState extends State<RoutedJellyfinImage> {
 
   @override
   void dispose() {
-    _observedStatus?.removeListener(_onStatusChanged);
+    _observedEndpointChanges?.removeListener(_onEndpointChanged);
     super.dispose();
   }
 
   void _observeStatus() {
-    final next = widget.client.privateNetworkStatus;
-    if (identical(next, _observedStatus)) return;
-    _observedStatus?.removeListener(_onStatusChanged);
-    _observedStatus = next;
-    next?.addListener(_onStatusChanged);
+    final next = widget.client.serviceTransport.endpointChanges;
+    if (identical(next, _observedEndpointChanges)) return;
+    _observedEndpointChanges?.removeListener(_onEndpointChanged);
+    _observedEndpointChanges = next;
+    next?.addListener(_onEndpointChanged);
     _requestKey = null;
     _bytes = null;
   }
 
-  void _onStatusChanged() {
-    if (_observedStatus?.value?.canProxy != true) {
+  void _onEndpointChanged() {
+    // Keep a completed/in-flight request when the endpoint did not change.
+    // This signal can also fire for status-only transitions such as repeated
+    // ready notifications.
+    if (_currentRequestKey() != _requestKey) {
       _requestKey = null;
       _bytes = null;
     }
   }
 
+  String? _currentRequestKey() {
+    final canonical = Uri.tryParse(widget.url);
+    if (canonical == null) return null;
+    try {
+      return '${widget.client.resolveServiceUri(canonical)}|${widget.url}';
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final status = widget.client.privateNetworkStatus;
-    if (status == null) {
+    if (widget.client.serviceTransport.endpointChanges == null) {
       return Image.network(
         widget.url,
         fit: widget.fit,
@@ -88,25 +99,44 @@ class _RoutedJellyfinImageState extends State<RoutedJellyfinImage> {
             : null,
       );
     }
-    return ValueListenableBuilder<PrivateNetworkStatus?>(
-      valueListenable: status,
-      builder: (context, current, _) {
-        if (current?.canProxy != true) return widget.fallback;
-        final key = '${current!.gatewayBaseUrl}|${widget.url}';
-        if (_requestKey != key) {
-          _requestKey = key;
-          _bytes = widget.client.readServiceImage(Uri.parse(widget.url));
-        }
-        return FutureBuilder<Uint8List>(
-          future: _bytes,
-          builder: (context, snapshot) => snapshot.hasData
-              ? Image.memory(snapshot.data!,
-                  fit: widget.fit,
-                  filterQuality: widget.filterQuality,
-                  errorBuilder: (_, __, ___) => widget.fallback)
-              : widget.fallback,
-        );
-      },
+    return _buildPrivateImage();
+  }
+
+  Widget _buildPrivateImage() {
+    final endpointChanges = _observedEndpointChanges;
+    if (endpointChanges != null) {
+      return ListenableBuilder(
+        listenable: endpointChanges,
+        builder: (context, _) => _privateImageContent(),
+      );
+    }
+    return _privateImageContent();
+  }
+
+  Widget _privateImageContent() {
+    final canonical = Uri.tryParse(widget.url);
+    if (canonical == null) return widget.fallback;
+    final Uri routed;
+    try {
+      routed = widget.client.resolveServiceUri(canonical);
+    } catch (_) {
+      return widget.fallback;
+    }
+    final key = '$routed|${widget.url}';
+    if (_requestKey != key) {
+      _requestKey = key;
+      _bytes = widget.client.readServiceImage(canonical);
+    }
+    return FutureBuilder<Uint8List>(
+      future: _bytes,
+      builder: (context, snapshot) => snapshot.hasData
+          ? Image.memory(
+              snapshot.data!,
+              fit: widget.fit,
+              filterQuality: widget.filterQuality,
+              errorBuilder: (_, __, ___) => widget.fallback,
+            )
+          : widget.fallback,
     );
   }
 }

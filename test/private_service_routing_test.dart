@@ -41,12 +41,16 @@ void main() {
     final client = JellyfinApiClient(
       baseUrl: canonical,
       identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'test-token',
       client: MockClient((request) async {
         sent.add(request);
         return http.Response(jsonEncode({'Id': 'movie', 'Type': 'Movie'}), 200);
       }),
-    )..userId = 'user';
-    client.usePrivateTransport(status, waitUntilReady: () => readiness.future);
+    );
+    bindTestPrivateTransport(client, status,
+        waitUntilReady: () => readiness.future);
     final item = client.getItem('movie');
     await Future<void>.value();
     expect(sent, isEmpty);
@@ -71,11 +75,13 @@ void main() {
     final client = JellyfinApiClient(
         baseUrl: canonical,
         identity: testIdentity,
+        serverId: testServerId,
         client: MockClient((_) async {
           sends++;
           return http.Response('{}', 200);
         }));
-    client.usePrivateTransport(status, waitUntilReady: () => readiness.future);
+    bindTestPrivateTransport(client, status,
+        waitUntilReady: () => readiness.future);
     final request = client.getPublicUsers();
     await Future<void>.value();
     expect(sends, 0);
@@ -141,12 +147,15 @@ void main() {
     final client = JellyfinApiClient(
       baseUrl: canonical,
       identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'test-token',
       client: MockClient((request) async {
         urls.add(request.url);
         return http.Response('{}', 200);
       }),
-    )..userId = 'user';
-    expect(client.usesPrivateTransport, isFalse);
+    );
+    expect(client.serviceTransport.endpointChanges != null, isFalse);
     await client.getItem('movie');
     expect(urls.single.origin, 'https://media.example.test');
     expect(
@@ -164,6 +173,9 @@ void main() {
     final client = JellyfinApiClient(
       baseUrl: canonical,
       identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'token',
       client: MockClient((request) async {
         requests.add(request);
         return http.Response(
@@ -172,10 +184,8 @@ void main() {
                 : '{}',
             200);
       }),
-    )
-      ..userId = 'user'
-      ..accessToken = 'token';
-    client.usePrivateTransport(status);
+    );
+    bindTestPrivateTransport(client, status);
     expect(client.baseUrl, canonical);
     await client.getItem('movie');
     await client.getPlaybackInfo(const PlaybackInfoRequest(
@@ -213,17 +223,59 @@ void main() {
     final client = JellyfinApiClient(
       baseUrl: canonical,
       identity: testIdentity,
+      serverId: testServerId,
       client: MockClient((_) async {
         sends++;
         return http.Response('{}', 200);
       }),
-    )..userId = 'user';
-    client.usePrivateTransport(status);
+      userId: 'user',
+      accessToken: 'test-token',
+    );
+    bindTestPrivateTransport(client, status);
     await expectLater(
         client.getItem('movie'), throwsA(isA<PrivateNetworkException>()));
     expect(() => client.buildDirectPlayUri(itemId: 'movie', mediaSourceId: 's'),
         throwsA(isA<PrivateNetworkException>()));
     expect(sends, 0);
+    client.close();
+    status.dispose();
+  });
+
+  test(
+      'relay status cannot route service traffic or fall back to the public URL',
+      () async {
+    final status = ValueNotifier<PrivateNetworkStatus?>(
+      PrivateNetworkStatus(
+        state: PrivateNetworkState.ready,
+        path: PrivateNetworkPath.relay,
+        hasPersistedIdentity: true,
+        unavailableReason: PrivateNetworkUnavailableReason.none,
+        gatewayBaseUrl: Uri.parse('http://127.0.0.1:50001'),
+      ),
+    );
+    var sends = 0;
+    final client = JellyfinApiClient(
+      baseUrl: canonical,
+      identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'test-token',
+      client: MockClient((_) async {
+        sends++;
+        return http.Response('{}', 200);
+      }),
+    );
+    bindTestPrivateTransport(client, status);
+
+    await expectLater(
+      client.getItem('movie'),
+      throwsA(isA<PrivateNetworkException>()),
+    );
+    expect(sends, 0);
+    expect(
+      () => client.resolveServiceUri(Uri.parse('$canonical/Items/movie')),
+      throwsA(isA<PrivateNetworkException>()),
+    );
     client.close();
     status.dispose();
   });
@@ -234,9 +286,11 @@ void main() {
     final client = JellyfinApiClient(
         baseUrl: canonical,
         identity: testIdentity,
-        client: MockClient((_) async => http.Response('{}', 200)))
-      ..accessToken = 'token value';
-    client.usePrivateTransport(status);
+        serverId: testServerId,
+        userId: 'user',
+        accessToken: 'token value',
+        client: MockClient((_) async => http.Response('{}', 200)));
+    bindTestPrivateTransport(client, status);
     final source = '$canonical/Videos/x/master.m3u8?a=a%2Bb&a=c%2Fd&empty=&z=1';
     final routed = client.resolvePlaybackUri(source);
     expect(routed.host, '127.0.0.1');
@@ -258,11 +312,9 @@ void main() {
     expect(routed.toString(),
         'http://127.0.0.1:44001/jellyfin/Videos/a%2Fb/stream?x=a%2Bb&n=1');
     expect(
-        resolver
-            .resolveWebSocket(
-                Uri.parse('wss://media.example.test/jellyfin/socket'))
-            .scheme,
-        'ws');
+        () => resolver.resolveWebSocket(
+            Uri.parse('wss://media.example.test/jellyfin/socket')),
+        throwsA(isA<PrivateServiceWebSocketUnsupported>()));
     expect(
         () => resolver.resolve(Uri.parse('https://foreign.example.test/movie')),
         throwsA(isA<PrivateNetworkException>()));
@@ -270,7 +322,7 @@ void main() {
   });
 
   test(
-      'HTTP and WebSocket URLs use the live port without embedding credentials',
+      'HTTP URLs use the live port; private WebSockets remain unsupported',
       () {
     final status = ValueNotifier<PrivateNetworkStatus?>(ready(50001));
     final resolver = PrivateServiceEndpointResolver(
@@ -282,10 +334,11 @@ void main() {
       'http://127.0.0.1:50001/Users/Me?x=1',
     );
     final socket = Uri.parse('ws://private.example/socket?token=sensitive');
-    expect(resolver.resolveWebSocket(socket).toString(),
-        'ws://127.0.0.1:50001/socket?token=sensitive');
+    expect(() => resolver.resolveWebSocket(socket),
+        throwsA(isA<PrivateServiceWebSocketUnsupported>()));
     status.value = ready(50002);
-    expect(resolver.resolveWebSocket(socket).port, 50002);
+    expect(() => resolver.resolveWebSocket(socket),
+        throwsA(isA<PrivateServiceWebSocketUnsupported>()));
     expect(
         resolver.resolve(Uri.parse('http://private.example/subtitle.vtt')).port,
         50002);
@@ -293,7 +346,7 @@ void main() {
         isEmpty);
     status.value = unavailable;
     expect(() => resolver.resolveWebSocket(socket),
-        throwsA(isA<PrivateNetworkException>()));
+        throwsA(isA<PrivateServiceWebSocketUnsupported>()));
     status.dispose();
   });
 
@@ -410,6 +463,30 @@ void main() {
     expect(sends, 1);
     expect(cancelled, isTrue);
     await body.close();
+    transport.close();
+    status.dispose();
+  });
+
+  test('malformed redirect is never retried outside the private transport',
+      () async {
+    final status = ValueNotifier<PrivateNetworkStatus?>(ready(50002));
+    var sends = 0;
+    final transport = PrivateServiceHttpClient(
+      MockClient((request) async {
+        sends++;
+        return http.Response('', 302, headers: {'location': 'http://%zz'});
+      }),
+      PrivateServiceEndpointResolver(
+        canonicalBaseUrl: canonical,
+        status: status,
+      ),
+    );
+
+    await expectLater(
+      transport.get(Uri.parse('$canonical/redirect')),
+      throwsA(anything),
+    );
+    expect(sends, 1);
     transport.close();
     status.dispose();
   });

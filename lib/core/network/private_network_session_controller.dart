@@ -8,7 +8,16 @@ import 'package:rodplayer/core/network/private_network_runtime.dart';
 /// This is intentionally application-scoped: login, profile changes, and
 /// Jellyfin client recreation do not own the persisted mesh identity.
 class PrivateNetworkSessionController {
-  PrivateNetworkSessionController(this._runtime, this._claim);
+  PrivateNetworkSessionController(
+    this._runtime,
+    this._claim, {
+    this.beforeStart,
+  });
+
+  final Future<void> Function()? beforeStart;
+  Future<void>? _startTask;
+  Future<void>? _closeTask;
+  Future<void>? _shutdownTask;
 
   final PrivateNetworkRuntime _runtime;
   final PrivateNetworkIdentityClaim _claim;
@@ -36,7 +45,8 @@ class PrivateNetworkSessionController {
     }
     if (_terminal) {
       throw PrivateNetworkException(
-          _terminalFailure ?? failure ?? PrivateNetworkFailure.operationFailed);
+        _terminalFailure ?? failure ?? PrivateNetworkFailure.operationFailed,
+      );
     }
     if (failure != null) throw PrivateNetworkException(failure);
   }
@@ -58,7 +68,8 @@ class PrivateNetworkSessionController {
           (current.state == PrivateNetworkState.starting ||
               (current.state == PrivateNetworkState.unavailable &&
                   (current.unavailableReason ==
-                          PrivateNetworkUnavailableReason.directPathUnavailable ||
+                          PrivateNetworkUnavailableReason
+                              .directPathUnavailable ||
                       current.unavailableReason ==
                           PrivateNetworkUnavailableReason.transportFailure))));
 
@@ -72,17 +83,29 @@ class PrivateNetworkSessionController {
     }
   }
 
-  Future<void> start() async {
+  Future<void> start() => _startTask ??= _start();
+
+  Future<void> _start() async {
     if (_started || _closed) return;
     _started = true;
+
+    try {
+      await beforeStart?.call();
+    } on Object {
+      _enterTerminal(PrivateNetworkFailure.operationFailed);
+      return;
+    }
+    if (_closed) return;
 
     bool hostAvailable;
     try {
       hostAvailable = await _runtime.confirmHostAvailable();
     } catch (error) {
-      _enterTerminal(error is PrivateNetworkException
-          ? error.failure
-          : PrivateNetworkFailure.hostUnavailable);
+      _enterTerminal(
+        error is PrivateNetworkException
+            ? error.failure
+            : PrivateNetworkFailure.hostUnavailable,
+      );
       return;
     }
     if (!hostAvailable) {
@@ -142,18 +165,33 @@ class PrivateNetworkSessionController {
       _settleStatus(status.value!);
     } catch (error) {
       // Private networking is optional and must not block application startup.
-      _enterTerminal(error is PrivateNetworkException
-          ? error.failure
-          : PrivateNetworkFailure.operationFailed);
+      _enterTerminal(
+        error is PrivateNetworkException
+            ? error.failure
+            : PrivateNetworkFailure.operationFailed,
+      );
     }
   }
 
-  Future<void> close() async {
+  Future<void> close() => _closeTask ??= _close();
+
+  Future<void> _close() async {
     if (_closed) return;
     _closed = true;
     _enterTerminal(PrivateNetworkFailure.closed);
     await _subscription?.cancel();
     status.dispose();
+  }
+
+  /// Profile replacement releases native ownership, preserving disk identity.
+  /// Wait for in-flight startup before stop so its late resume cannot restart
+  /// the old node after the replacement has begun.
+  Future<void> shutdown() => _shutdownTask ??= _shutdown();
+
+  Future<void> _shutdown() async {
+    await close();
+    await _startTask;
+    await _runtime.stop();
   }
 
   void _acceptStatus(PrivateNetworkStatus next) {
@@ -180,5 +218,47 @@ class PrivateNetworkSessionController {
     _latestStatus = unavailable;
     status.value = unavailable;
     _enterTerminal(PrivateNetworkFailure.operationFailed);
+  }
+}
+
+/// One application-scoped owner serializes native profile close/start. A failed
+/// shutdown blocks replacement; it never force-starts against retained ownership.
+final class PrivateNetworkSessionOwner {
+  PrivateNetworkSessionController? current;
+  Future<void> _shutdownTail = Future<void>.value();
+  bool _closed = false;
+
+  PrivateNetworkSessionController replace(
+    PrivateNetworkRuntime runtime,
+    PrivateNetworkIdentityClaim claim,
+  ) {
+    if (_closed) throw StateError('Private network owner is closed');
+    final previous = current;
+    if (previous != null) {
+      previous.close().ignore();
+      _shutdownTail = _shutdownTail.then((_) => previous.shutdown());
+      _shutdownTail.ignore();
+    }
+    final barrier = _shutdownTail;
+    return current = PrivateNetworkSessionController(
+      runtime,
+      claim,
+      beforeStart: () => barrier,
+    );
+  }
+
+  Future<void> detach() async {
+    final previous = current;
+    current = null;
+    if (previous != null) {
+      await previous.close();
+      _shutdownTail = _shutdownTail.then((_) => previous.shutdown());
+    }
+    await _shutdownTail;
+  }
+
+  Future<void> close() async {
+    _closed = true;
+    await detach();
   }
 }

@@ -482,7 +482,7 @@ class _DetailClient extends JellyfinApiClient {
     this.pendingFavorite,
     this.pendingPlayed,
   })
-      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
   final JellyfinLibraryItem item;
   final List<JellyfinLibraryItem> seasons;
   final Map<String, List<JellyfinLibraryItem>> episodesBySeason;

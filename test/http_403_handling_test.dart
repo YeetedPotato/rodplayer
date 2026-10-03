@@ -18,7 +18,7 @@ class _ForbiddenClient extends http.BaseClient {
 
 void main() {
   test('JellyfinApiClient maps HTTP 403 to a connection exception with status', () async {
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _ForbiddenClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _ForbiddenClient());
     addTearDown(client.close);
     await expectLater(client.healthCheck(), throwsA(isA<ServerConnectionException>().having((exception) => exception.statusCode, 'statusCode', 403)));
   });

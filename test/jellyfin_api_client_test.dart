@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
 
 import 'test_support.dart';
 
@@ -25,13 +26,89 @@ void main() {
   const base = 'https://media.example.com';
 
   test('healthCheck returns server info on HTTP 200', () async {
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'ServerName': 'Test'}), 200)));
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'ServerName': 'Test'}), 200)));
     expect(await client.healthCheck(), <String, dynamic>{'ServerName': 'Test'});
   });
 
+  test('server system identity uses the authenticated public-info request',
+      () async {
+    late http.BaseRequest seen;
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'test-token',
+      client: MockClient((request) async {
+        seen = request;
+        return http.Response(jsonEncode({'Id': 'machine-123'}), 200);
+      }),
+    );
+    expect(await client.getVerifiedServerSystemId(), 'machine-123');
+    expect(seen.url.path, '/System/Info/Public');
+    expect(seen.headers['Authorization'], contains('test-token'));
+  });
+
+  test('server system identity rejects a missing server-provided ID', () async {
+    final client = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      serverId: testServerId,
+      userId: 'user',
+      accessToken: 'test-token',
+      client:
+          MockClient((_) async => http.Response('{"ServerName":"test"}', 200)),
+    );
+    await expectLater(client.getVerifiedServerSystemId(),
+        throwsA(isA<ServerConnectionException>()));
+  });
+
   test('authenticate throws JellyfinAuthException on HTTP 401', () async {
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((request) async => http.Response('', 401)));
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: MockClient((request) async => http.Response('', 401)));
     expect(() => client.authenticate(username: 'u', password: 'p'), throwsA(isA<JellyfinAuthException>()));
+  });
+
+  test('authentication returns a new account-scoped client', () async {
+    final requests = <http.BaseRequest>[];
+    final original = JellyfinApiClient(
+      baseUrl: base,
+      identity: testIdentity,
+      serverId: testServerId,
+      client: MockClient((request) async {
+        requests.add(request);
+        if (request.url.path.endsWith('/AuthenticateByName')) {
+          return http.Response(
+              jsonEncode({
+                'AccessToken': 'authenticated-secret',
+                'User': {'Id': 'account-a'},
+              }),
+              200);
+        }
+        return http.Response(jsonEncode({'Id': 'account-a', 'Name': 'A'}), 200);
+      }),
+    );
+
+    final authenticated = await original.authenticate(
+      username: 'alice',
+      password: 'not-persisted',
+    );
+    expect(original.userId, isNull);
+    expect(original.accessToken, isNull);
+    expect(authenticated.serverId, testServerId);
+    expect(authenticated.accountIdentity,
+        ServerAccountId(serverId: testServerId, userId: 'account-a'));
+    expect(authenticated.accessToken, 'authenticated-secret');
+    await expectLater(
+      authenticated.authenticate(username: 'another', password: 'password'),
+      throwsA(isA<StateError>()),
+    );
+    await authenticated.getCurrentUser();
+    expect(requests.last.headers['Authorization'],
+        contains('authenticated-secret'));
+
+    original.close();
+    expect((await authenticated.getCurrentUser()).id, 'account-a');
+    authenticated.close();
   });
 
   test('Authorization header uses Nautilus identity and stable device/version', () async {
@@ -40,9 +117,7 @@ void main() {
       seen = request;
       return http.Response(jsonEncode(<String, dynamic>{'Items': <dynamic>[]}), 200);
     });
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)
-      ..accessToken = 'Bearer secret'
-      ..userId = 'user-1';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user-1', accessToken: 'Bearer secret');
     await client.getItems();
     final auth = seen.headers['Authorization']!;
     expect(auth, contains('Client="Nautilus"'));
@@ -60,7 +135,7 @@ void main() {
           'TotalRecordCount': 1,
           'StartIndex': 0,
         }), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final page = await client.getItemsPage(limit: 1);
 
@@ -76,7 +151,7 @@ void main() {
       if (request.url.path.endsWith('/Items/item')) return http.Response(jsonEncode(<String, dynamic>{'Id': 'item', 'Name': 'Film'}), 200);
       return http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200);
     });
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     await client.getItemsPage();
     await client.getNextUp();
@@ -91,7 +166,7 @@ void main() {
 
   test('resume and next up endpoints use authenticated user', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     await client.getResumeItems();
     await client.getNextUp();
@@ -105,7 +180,7 @@ void main() {
 
   test('latest movies and TV request specific item types', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     await client.getLatestMovies();
     await client.getLatestTvShows();
@@ -122,7 +197,7 @@ void main() {
           'TotalRecordCount': 10,
           'StartIndex': 5,
         }), 200));
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final page = await client.getLibraryItemsPage(
       kind: JellyfinLibraryKind.movies,
@@ -152,7 +227,7 @@ void main() {
 
   test('library sorts and filters map to Jellyfin query values', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     await client.getLibraryItemsPage(kind: JellyfinLibraryKind.tvShows, sort: JellyfinLibrarySort.recentlyAdded);
     await client.getLibraryItemsPage(kind: JellyfinLibraryKind.movies, sort: JellyfinLibrarySort.releaseDate);
@@ -171,7 +246,7 @@ void main() {
       if (request.url.path.endsWith('/Views')) return http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200);
       return http.Response(jsonEncode(<String, dynamic>{'Id': 'item', 'Name': 'Film'}), 200);
     });
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     await client.getUserViews();
     final item = await client.getItem('item');
@@ -191,7 +266,7 @@ void main() {
           'TotalRecordCount': 1,
           'StartIndex': 0,
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final seasons = await client.getSeasons(seriesId: 'series/id');
 
@@ -212,7 +287,7 @@ void main() {
             <String, dynamic>{'Id': 'e2', 'Name': 'Episode 2', 'Type': 'Episode', 'SeriesName': 'Show', 'ParentIndexNumber': 1, 'IndexNumber': 2},
           ],
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final episodes = await client.getEpisodes(seriesId: 'series/id', seasonId: 'season id');
 
@@ -234,7 +309,7 @@ void main() {
           'TotalRecordCount': 9,
           'StartIndex': 4,
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final page = await client.getSearchItemsPage(query: 'star wars', type: JellyfinSearchType.tvShows, genre: 'Sci Fi', startIndex: 4, limit: 8);
 
@@ -258,7 +333,7 @@ void main() {
 
   test('search type mappings are typed', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     for (final type in JellyfinSearchType.values) {
       await client.getSearchItemsPage(query: 'x', type: type);
@@ -275,7 +350,7 @@ void main() {
           'TotalRecordCount': 3,
           'StartIndex': 2,
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final page = await client.getDiscoveryItemsPage(kind: JellyfinDiscoveryKind.tvShows, sort: JellyfinDiscoverySort.releaseDate, genre: 'Drama', startIndex: 2, limit: 6);
 
@@ -294,7 +369,7 @@ void main() {
 
   test('discovery sort mappings are typed', () async {
     final mock = MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'Items': <Map<String, dynamic>>[]}), 200));
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     for (final sort in JellyfinDiscoverySort.values) {
       await client.getDiscoveryItemsPage(kind: JellyfinDiscoveryKind.movies, sort: sort);
@@ -311,7 +386,7 @@ void main() {
             <String, dynamic>{},
           ],
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final genres = await client.getGenres();
 
@@ -331,7 +406,7 @@ void main() {
             <String, dynamic>{'Id': 'b', 'Name': 'B', 'Type': 'Movie'},
           ],
         }), 200));
-    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, client: mock)..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: '$base/jellyfin', identity: testIdentity, serverId: testServerId, client: mock,  userId: 'user', accessToken: 'test-token');
 
     final items = await client.getSimilarItems(itemId: 'item/id', limit: 7);
 
@@ -344,7 +419,7 @@ void main() {
   });
 
   test('getPlaybackInfo returns DTO and does not choose best stream', () async {
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'PlaySessionId': 'play', 'MediaSources': <Map<String, dynamic>>[<String, dynamic>{'Id': 'source', 'MediaStreams': <dynamic>[] }]}), 200)))..userId = 'user';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: MockClient((request) async => http.Response(jsonEncode(<String, dynamic>{'PlaySessionId': 'play', 'MediaSources': <Map<String, dynamic>>[<String, dynamic>{'Id': 'source', 'MediaStreams': <dynamic>[] }]}), 200)),  userId: 'user', accessToken: 'test-token');
     final response = await client.getPlaybackInfo(const PlaybackInfoRequest(itemId: 'item', deviceProfile: <String, dynamic>{'Name': 'RodPlayer'}));
     expect(response.playSessionId, 'play');
     expect(response.mediaSources.single.id, 'source');
@@ -352,49 +427,85 @@ void main() {
 
   test('user profile endpoints map routes bodies and session logout', () async {
     final seen = <http.BaseRequest>[];
+    final mock = MockClient((request) async {
+      seen.add(request);
+      if (request.url.path == '/jellyfin/Users/user%20id')
+        return http.Response(
+            jsonEncode(<String, dynamic>{
+              'Id': 'user id',
+              'Name': 'Current',
+              'Configuration': <String, dynamic>{
+                'GroupedFolders': <String>['keep']
+              }
+            }),
+            200);
+      if (request.url.path == '/jellyfin/Users/Public')
+        return http.Response(
+            jsonEncode(<Map<String, dynamic>>[
+              <String, dynamic>{'Id': 'a', 'Name': 'A'},
+              <String, dynamic>{'Id': 'b', 'Name': 'B'}
+            ]),
+            200);
+      if (request.url.path == '/jellyfin/Users/Configuration') {
+        final body =
+            jsonDecode((request as http.Request).body) as Map<String, dynamic>;
+        expect(request.url.queryParameters['userId'], 'user id');
+        expect(body['GroupedFolders'], <String>['keep']);
+        expect(body['AudioLanguagePreference'], 'eng');
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/jellyfin/Sessions/Logout')
+        return http.Response('', 204);
+      return http.Response('missing', 404);
+    });
     final client = JellyfinApiClient(
       baseUrl: '$base/jellyfin',
       identity: testIdentity,
-      client: MockClient((request) async {
-        seen.add(request);
-        if (request.url.path == '/jellyfin/Users/user%20id') return http.Response(jsonEncode(<String, dynamic>{'Id': 'user id', 'Name': 'Current', 'Configuration': <String, dynamic>{'GroupedFolders': <String>['keep']}}), 200);
-        if (request.url.path == '/jellyfin/Users/Public') return http.Response(jsonEncode(<Map<String, dynamic>>[<String, dynamic>{'Id': 'a', 'Name': 'A'}, <String, dynamic>{'Id': 'b', 'Name': 'B'}]), 200);
-        if (request.url.path == '/jellyfin/Users/Configuration') {
-          final body = jsonDecode((request as http.Request).body) as Map<String, dynamic>;
-          expect(request.url.queryParameters['userId'], 'user id');
-          expect(body['GroupedFolders'], <String>['keep']);
-          expect(body['AudioLanguagePreference'], 'eng');
-          return http.Response('', 204);
-        }
-        if (request.url.path == '/jellyfin/Sessions/Logout') return http.Response('', 204);
-        return http.Response('missing', 404);
-      }),
-    )..userId = 'user id';
+      serverId: testServerId,
+      userId: 'user id',
+      accessToken: 'test-token',
+      client: mock,
+    );
 
     expect((await client.getCurrentUser()).name, 'Current');
-    client.userId = null;
-    expect((await client.getPublicUsers()).map((user) => user.name), <String>['A', 'B']);
-    client.userId = 'user id';
-    await client.updateCurrentUserConfiguration(const JellyfinUserConfiguration(raw: <String, dynamic>{'GroupedFolders': <String>['keep']}, audioLanguagePreference: 'eng'));
+    final publicClient = JellyfinApiClient(
+      baseUrl: '$base/jellyfin',
+      identity: testIdentity,
+      serverId: testServerId,
+      client: mock,
+    );
+    expect((await publicClient.getPublicUsers()).map((user) => user.name),
+        <String>['A', 'B']);
+    await client.updateCurrentUserConfiguration(
+        const JellyfinUserConfiguration(raw: <String, dynamic>{
+      'GroupedFolders': <String>['keep']
+    }, audioLanguagePreference: 'eng'));
     await client.reportSessionEnded();
-    final image = client.userPrimaryImageUri(const JellyfinUserProfile(id: 'user id', name: 'A', primaryImageTag: 'tag'))!;
+    final image = client.userPrimaryImageUri(const JellyfinUserProfile(
+        id: 'user id', name: 'A', primaryImageTag: 'tag'))!;
     expect(image.path, '/jellyfin/Users/user%20id/Images/Primary');
     expect(image.queryParameters['tag'], 'tag');
-    expect(seen.map((request) => request.url.path), containsAll(<String>['/jellyfin/Users/user%20id', '/jellyfin/Users/Public', '/jellyfin/Users/Configuration', '/jellyfin/Sessions/Logout']));
+    expect(
+        seen.map((request) => request.url.path),
+        containsAll(<String>[
+          '/jellyfin/Users/user%20id',
+          '/jellyfin/Users/Public',
+          '/jellyfin/Users/Configuration',
+          '/jellyfin/Sessions/Logout'
+        ]));
   });
 
   test('configuration update falls back only for missing modern route', () async {
     var calls = 0;
     final client = JellyfinApiClient(
       baseUrl: base,
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((request) async {
         calls++;
         if (calls == 1) return http.Response('', 404);
         expect(request.url.path, '/Users/user/Configuration');
         return http.Response('', 204);
-      }),
-    )..userId = 'user';
+      }),  userId: 'user', accessToken: 'test-token');
     await client.updateCurrentUserConfiguration(const JellyfinUserConfiguration());
     expect(calls, 2);
   });
@@ -404,15 +515,14 @@ void main() {
     final methods = <String>[];
     final client = JellyfinApiClient(
       baseUrl: '$base/jellyfin',
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((request) async {
         paths.add('${request.method} ${request.url.path}?${request.url.query}');
         methods.add(request.method);
         if (paths.length == 1) return http.Response('', 204);
         if (paths.length == 2) return http.Response('', 404);
         return http.Response('', 204);
-      }),
-    )..userId = 'user id';
+      }),  userId: 'user id', accessToken: 'test-token');
 
     await client.setFavorite(itemId: 'item/id', isFavorite: true);
     await client.setFavorite(itemId: 'item/id', isFavorite: false);
@@ -427,14 +537,13 @@ void main() {
     var calls = 0;
     final client = JellyfinApiClient(
       baseUrl: base,
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((request) async {
         calls++;
         expect(request.url.path, '/UserPlayedItems/item%20id');
         expect(request.url.queryParameters['userId'], 'user');
         return http.Response('', 400);
-      }),
-    )..userId = 'user';
+      }),  userId: 'user', accessToken: 'test-token');
 
     await expectLater(client.setPlayed(itemId: 'item id', played: true), throwsA(isA<ServerConnectionException>()));
     expect(calls, 1);
@@ -446,12 +555,11 @@ void main() {
         final seen = <String>[];
         final client = JellyfinApiClient(
           baseUrl: '$base/jellyfin',
-          identity: testIdentity,
+          identity: testIdentity, serverId: testServerId,
           client: MockClient((request) async {
             seen.add('${request.method} ${request.url.path}?${request.url.query}');
             return http.Response('', 204);
-          }),
-        )..userId = 'user id';
+          }),  userId: 'user id', accessToken: 'test-token');
         if (operation == 'favorite') {
           await client.setFavorite(itemId: 'item/id', isFavorite: enabled);
         } else {
@@ -465,12 +573,11 @@ void main() {
         final seen = <String>[];
         final client = JellyfinApiClient(
           baseUrl: '$base/jellyfin',
-          identity: testIdentity,
+          identity: testIdentity, serverId: testServerId,
           client: MockClient((request) async {
             seen.add('${request.method} ${request.url.path}?${request.url.query}');
             return http.Response('', seen.length == 1 ? status : 204);
-          }),
-        )..userId = 'user id';
+          }),  userId: 'user id', accessToken: 'test-token');
         if (operation == 'favorite') {
           await client.setFavorite(itemId: 'item/id', isFavorite: true);
         } else {
@@ -488,12 +595,11 @@ void main() {
         var calls = 0;
         final client = JellyfinApiClient(
           baseUrl: base,
-          identity: testIdentity,
+          identity: testIdentity, serverId: testServerId,
           client: MockClient((request) async {
             calls++;
             return http.Response('', status);
-          }),
-        )..userId = 'user';
+          }),  userId: 'user', accessToken: 'test-token');
         final future = operation == 'favorite' ? client.setFavorite(itemId: 'item', isFavorite: true) : client.setPlayed(itemId: 'item', played: true);
         await expectLater(future, throwsA(isA<ServerConnectionException>()));
         expect(calls, 1);
@@ -502,7 +608,7 @@ void main() {
   });
 
   test('buildDirectPlayUri uses Jellyfin stream endpoint with auth and session query', () {
-    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, client: MockClient((_) async => http.Response('', 200)))..accessToken = 'Bearer token';
+    final client = JellyfinApiClient(baseUrl: base, identity: testIdentity, serverId: testServerId, client: MockClient((_) async => http.Response('', 200)),  userId: 'test-user', accessToken: 'Bearer token');
     final uri = client.buildDirectPlayUri(itemId: 'item', mediaSourceId: 'source', playSessionId: 'play', audioStreamIndex: 4, subtitleStreamIndex: 6);
     expect(uri.path, '/Videos/item/stream');
     expect(uri.queryParameters, containsPair('static', 'true'));
@@ -533,11 +639,8 @@ void main() {
         ));
     final client = JellyfinApiClient(
       baseUrl: '$base/jellyfin',
-      identity: testIdentity,
-      client: mock,
-    )
-      ..accessToken = 'Bearer secret'
-      ..userId = 'must-not-be-sent';
+      identity: testIdentity, serverId: testServerId,
+      client: mock,  userId: 'must-not-be-sent', accessToken: 'Bearer secret');
 
     final segments = await client.getMediaSegments(itemId: 'item/id');
 
@@ -559,7 +662,7 @@ void main() {
   test('getMediaSegments treats successful empty Items as authoritative empty', () async {
     final client = JellyfinApiClient(
       baseUrl: base,
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((_) async => http.Response(
             jsonEncode(<String, dynamic>{
               'Items': <dynamic>[],
@@ -567,8 +670,7 @@ void main() {
               'StartIndex': 0,
             }),
             200,
-          )),
-    );
+          )));
 
     final segments = await client.getMediaSegments(itemId: 'item');
     expect(segments, isNotNull);
@@ -579,9 +681,8 @@ void main() {
     for (final status in <int>[404, 405]) {
       final client = JellyfinApiClient(
         baseUrl: base,
-        identity: testIdentity,
-        client: MockClient((_) async => http.Response('', status)),
-      );
+        identity: testIdentity, serverId: testServerId,
+        client: MockClient((_) async => http.Response('', status)));
       expect(await client.getMediaSegments(itemId: 'item'), isNull);
     }
   });
@@ -589,9 +690,8 @@ void main() {
   test('getMediaSegments surfaces non-availability HTTP failures', () async {
     final client = JellyfinApiClient(
       baseUrl: base,
-      identity: testIdentity,
-      client: MockClient((_) async => http.Response('failure', 500)),
-    );
+      identity: testIdentity, serverId: testServerId,
+      client: MockClient((_) async => http.Response('failure', 500)));
 
     await expectLater(
       client.getMediaSegments(itemId: 'item'),
@@ -602,15 +702,14 @@ void main() {
   test('getMediaSegments rejects malformed QueryResult without Items', () async {
     final client = JellyfinApiClient(
       baseUrl: base,
-      identity: testIdentity,
+      identity: testIdentity, serverId: testServerId,
       client: MockClient((_) async => http.Response(
             jsonEncode(<String, dynamic>{
               'TotalRecordCount': 0,
               'StartIndex': 0,
             }),
             200,
-          )),
-    );
+          )));
 
     await expectLater(
       client.getMediaSegments(itemId: 'item'),

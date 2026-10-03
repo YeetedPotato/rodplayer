@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
@@ -13,7 +14,10 @@ import 'package:rodplayer/ui/screens/login_screen.dart';
 import 'test_support.dart';
 
 void main() {
-  Widget app(Widget child, {double textScale = 1, AppearanceMode appearance = AppearanceMode.oled}) => MaterialApp(
+  Widget app(Widget child,
+          {double textScale = 1,
+          AppearanceMode appearance = AppearanceMode.oled}) =>
+      MaterialApp(
         theme: rodPlayerThemeData(mode: appearance),
         home: Builder(
             builder: (context) => MediaQuery(
@@ -23,10 +27,13 @@ void main() {
       );
 
   testWidgets('login remains readable in Light appearance', (tester) async {
-    await tester.pumpWidget(app(LoginScreen(
-      identity: testIdentity,
-      onAuthenticated: (_, __) async {},
-    ), appearance: AppearanceMode.light));
+    await tester.pumpWidget(app(
+        LoginScreen(
+          identity: testIdentity,
+          serverId: testServerId,
+          onAuthenticated: (_, __) async {},
+        ),
+        appearance: AppearanceMode.light));
     await tester.pumpAndSettle();
     expect(find.text('Nautilus'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -37,6 +44,7 @@ void main() {
     var calls = 0;
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
+      serverId: testServerId,
       onAuthenticated: (_, __) async {},
       onConfigurePrivateAccess: (_, __, ___) async {
         calls++;
@@ -65,7 +73,8 @@ void main() {
     var profileLoads = 0;
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
-      clientFactory: (_, __) {
+      serverId: testServerId,
+      clientFactory: (_, __, {required serverId, userId, accessToken}) {
         profileLoads++;
         return _LoginClient(
             publicUsers: const [JellyfinUserProfile(id: 'u', name: 'Alice')]);
@@ -101,6 +110,7 @@ void main() {
     testWidgets('private setup failure hides $detail', (tester) async {
       await tester.pumpWidget(app(LoginScreen(
         identity: testIdentity,
+        serverId: testServerId,
         onAuthenticated: (_, __) async {},
         onConfigurePrivateAccess: (_, __, ___) async =>
             throw StateError(detail),
@@ -135,8 +145,9 @@ void main() {
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
+      serverId: testServerId,
       initialServerUrl: 'https://server/jellyfin',
-      clientFactory: (url, identity) {
+      clientFactory: (url, identity, {required serverId, userId, accessToken}) {
         final client = _LoginClient(publicUsers: <JellyfinUserProfile>[
           const JellyfinUserProfile(id: 'u', name: 'Alice')
         ]);
@@ -160,7 +171,9 @@ void main() {
     JellyfinApiClient? authed;
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
-      clientFactory: (_, __) => _LoginClient(),
+      serverId: testServerId,
+      clientFactory: (_, __, {required serverId, userId, accessToken}) =>
+          _LoginClient(serverId: serverId),
       onAuthenticated: (_, client) async => authed = client,
     )));
     await tester.pumpAndSettle();
@@ -190,8 +203,13 @@ void main() {
     await tester.pumpWidget(app(
         LoginScreen(
           identity: testIdentity,
+          serverId: testServerId,
           initialServerUrl: 'https://server',
-          clientFactory: (_, __) => _LoginClient(failPublic: created++ == 0),
+          clientFactory: (_, __, {required serverId, userId, accessToken}) =>
+              _LoginClient(
+            serverId: serverId,
+            failPublic: created++ == 0,
+          ),
           onAuthenticated: (_, client) async => authed = client,
         ),
         textScale: 1.25));
@@ -210,8 +228,9 @@ void main() {
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
+      serverId: testServerId,
       initialServerUrl: 'https://server-a',
-      clientFactory: (url, __) {
+      clientFactory: (url, __, {required serverId, userId, accessToken}) {
         final client = _LoginClient(publicUsers: <JellyfinUserProfile>[
           JellyfinUserProfile(
               id: url, name: url.contains('server-a') ? 'Alice' : 'Bob')
@@ -241,8 +260,9 @@ void main() {
     final clients = <_LoginClient>[];
     await tester.pumpWidget(app(LoginScreen(
       identity: testIdentity,
+      serverId: testServerId,
       initialServerUrl: 'https://server-a',
-      clientFactory: (url, __) {
+      clientFactory: (url, __, {required serverId, userId, accessToken}) {
         final client = _LoginClient(
             publicFuture: clients.isEmpty
                 ? slow.future
@@ -278,10 +298,18 @@ class _LoginClient extends JellyfinApiClient {
   _LoginClient(
       {this.publicUsers = const <JellyfinUserProfile>[],
       this.publicFuture,
-      this.failPublic = false})
-      : super(
+      this.failPublic = false,
+      ServerId? serverId,
+      String? userId,
+      String? accessToken,
+      List<String>? passwordSink})
+      : passwords = passwordSink ?? <String>[],
+        super(
             baseUrl: 'https://server',
             identity: testIdentity,
+            serverId: serverId ?? testServerId,
+            userId: userId,
+            accessToken: accessToken,
             client:
                 http_testing.MockClient((_) async => http.Response('{}', 200)));
 
@@ -289,7 +317,7 @@ class _LoginClient extends JellyfinApiClient {
   final Future<List<JellyfinUserProfile>>? publicFuture;
   final bool failPublic;
   bool closed = false;
-  final passwords = <String>[];
+  final List<String> passwords;
 
   @override
   Future<List<JellyfinUserProfile>> getPublicUsers() async {
@@ -300,12 +328,26 @@ class _LoginClient extends JellyfinApiClient {
   }
 
   @override
-  Future<void> authenticate(
+  Future<JellyfinApiClient> authenticate(
       {required String username, required String password}) async {
     passwords.add(password);
-    accessToken = 'token';
-    userId = 'user';
+    return createAuthenticatedClient(userId: 'user', accessToken: 'token');
   }
+
+  @override
+  JellyfinApiClient createAuthenticatedClient({
+    required String userId,
+    required String accessToken,
+  }) =>
+      _LoginClient(
+        publicUsers: publicUsers,
+        publicFuture: publicFuture,
+        failPublic: failPublic,
+        serverId: serverId,
+        userId: userId,
+        accessToken: accessToken,
+        passwordSink: passwords,
+      );
 
   @override
   void close() => closed = true;

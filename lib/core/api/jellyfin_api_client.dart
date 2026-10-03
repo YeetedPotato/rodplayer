@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
@@ -9,8 +9,8 @@ import 'package:rodplayer/core/api/models/media_segment.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
-import 'package:rodplayer/core/network/private_network_runtime.dart';
-import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
+import 'package:rodplayer/core/network/service_transport.dart';
 
 class JellyfinAuthException implements Exception {
   JellyfinAuthException(this.message);
@@ -93,33 +93,50 @@ class JellyfinApiClient {
   JellyfinApiClient({
     required String baseUrl,
     required this.identity,
+    required this.serverId,
+    String? userId,
+    String? accessToken,
     http.Client? client,
+    ServiceTransport? serviceTransport,
   })  : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
-        _rawClient = client ?? http.Client();
+        accountIdentity = userId == null || userId.isEmpty
+            ? null
+            : ServerAccountId(serverId: serverId, userId: userId),
+        _accessToken = accessToken,
+        serviceTransport = _makeTransport(client, serviceTransport) {
+    if (client != null && serviceTransport != null) {
+      throw ArgumentError(
+          'Provide either client or serviceTransport, not both');
+    }
+    if ((_accessToken == null) != (accountIdentity == null)) {
+      throw ArgumentError(
+          'Authenticated clients require both userId and token');
+    }
+  }
+
+  static ServiceTransport _makeTransport(
+    http.Client? client,
+    ServiceTransport? serviceTransport,
+  ) =>
+      serviceTransport ?? HttpServiceTransport(client: client);
 
   final String baseUrl;
   final InstallationIdentity identity;
-  final http.Client _rawClient;
-  PrivateServiceEndpointResolver? _privateResolver;
-  PrivateServiceHttpClient? _privateClient;
-  http.Client get _client => _privateClient ?? _rawClient;
-  bool get usesPrivateTransport => _privateResolver != null;
-  ValueListenable<PrivateNetworkStatus?>? get privateNetworkStatus => _privateResolver?.status;
+  final ServerId serverId;
+  final ServerAccountId? accountIdentity;
+  final String? _accessToken;
+  final ServiceTransport serviceTransport;
+  http.Client get _client => serviceTransport.httpClient;
+  String? get accessToken => _accessToken;
+  String? get userId => accountIdentity?.userId;
+  bool _ownsTransport = true;
 
-  void usePrivateTransport(ValueListenable<PrivateNetworkStatus?> status,
-      {Future<void> Function()? waitUntilReady}) {
-    final resolver = PrivateServiceEndpointResolver(canonicalBaseUrl: baseUrl, status: status);
-    _privateResolver = resolver;
-    _privateClient = PrivateServiceHttpClient(_rawClient, resolver,
-        waitUntilReady: waitUntilReady);
-  }
-
-  Uri resolveServiceUri(Uri canonicalUrl) => _privateResolver?.resolve(canonicalUrl) ?? canonicalUrl;
-  Uri resolveWebSocketUri(Uri canonicalUrl) => _privateResolver?.resolveWebSocket(canonicalUrl) ?? canonicalUrl;
-  Future<Uint8List> readServiceImage(Uri canonicalUrl) => _client.readBytes(canonicalUrl, headers: headers);
-
-  String? accessToken;
-  String? userId;
+  Uri resolveServiceUri(Uri canonicalUrl) =>
+      serviceTransport.resolveServiceUri(canonicalUrl);
+  Uri resolveWebSocketUri(Uri canonicalUrl) =>
+      serviceTransport.resolveWebSocketUri(canonicalUrl);
+  Future<Uint8List> readServiceImage(Uri canonicalUrl) =>
+      serviceTransport.readBytes(canonicalUrl, headers: headers);
 
   Map<String, String> get headers {
     final token = cleanToken(accessToken);
@@ -127,35 +144,140 @@ class JellyfinApiClient {
       'MediaBrowser Client="${identity.clientName}", Device="${identity.deviceName}", DeviceId="${identity.deviceId}", Version="${identity.appVersion}"',
     );
     if (token != null) authorization.write(', Token="$token"');
-    return <String, String>{'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': authorization.toString()};
+    return <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': authorization.toString()
+    };
   }
 
   static String? cleanToken(String? token) {
     final value = token?.trim();
     if (value == null || value.isEmpty) return null;
-    return value.replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '').trim();
+    return value
+        .replaceFirst(RegExp(r'^Bearer\s+', caseSensitive: false), '')
+        .trim();
   }
 
   Future<Map<String, dynamic>> healthCheck() async {
     try {
-      final response = await _client.get(Uri.parse('$baseUrl/System/Info/Public'));
+      final response =
+          await _client.get(Uri.parse('$baseUrl/System/Info/Public'));
       _check(response);
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (error) {
       if (error is ServerConnectionException) rethrow;
-      throw ServerConnectionException('Unable to reach Jellyfin-compatible server: $error');
+      throw ServerConnectionException(
+          'Unable to reach Jellyfin-compatible server: $error');
     }
   }
 
-  Future<void> authenticate({required String username, required String password}) async {
-    final response = await _client.post(Uri.parse('$baseUrl/Users/AuthenticateByName'), headers: headers, body: jsonEncode(<String, dynamic>{'Username': username, 'Pw': password}));
-    if (response.statusCode == 401 || response.statusCode == 403) throw JellyfinAuthException('Server rejected the supplied credentials (${response.statusCode})');
+  /// Reads the server-provided stable system identifier over the verified
+  /// endpoint. This value is metadata for consistency checks, not [ServerId].
+  Future<String> getVerifiedServerSystemId() async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/System/Info/Public'),
+      headers: headers,
+    );
+    final info = _jsonObject(response);
+    final value = info['Id'];
+    if (value is! String || value.trim().isEmpty) {
+      throw ServerConnectionException(
+        'Server did not provide a stable system identifier',
+      );
+    }
+    return value.trim();
+  }
+
+  Future<JellyfinApiClient> authenticate(
+      {required String username, required String password}) async {
+    if (accountIdentity != null || _accessToken != null || !_ownsTransport) {
+      throw StateError('An authenticated client identity cannot be changed');
+    }
+    final response = await _client.post(
+        Uri.parse('$baseUrl/Users/AuthenticateByName'),
+        headers: headers,
+        body: jsonEncode(
+            <String, dynamic>{'Username': username, 'Pw': password}));
+    if (response.statusCode == 401 || response.statusCode == 403)
+      throw JellyfinAuthException(
+          'Server rejected the supplied credentials (${response.statusCode})');
     _check(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    accessToken = data['AccessToken'] as String?;
-    userId = (data['User'] as Map<String, dynamic>?)?['Id'] as String?;
-    if (accessToken == null || userId == null) throw JellyfinAuthException('Authentication response did not include AccessToken and User.Id');
+    final token = cleanToken(data['AccessToken'] as String?);
+    final user = (data['User'] as Map<String, dynamic>?)?['Id'] as String?;
+    if (token == null || user == null || user.isEmpty) {
+      throw JellyfinAuthException(
+          'Authentication response did not include AccessToken and User.Id');
+    }
+    final authenticated =
+        createAuthenticatedClient(userId: user, accessToken: token);
+    _ownsTransport = false;
+    authenticated._ownsTransport = true;
+    return authenticated;
   }
+
+  /// Creates a new immutable authenticated client sharing this client's
+  /// transport. Test/adaptor subclasses can preserve their behavior by
+  /// returning the matching subclass with the supplied identity.
+  JellyfinApiClient createAuthenticatedClient({
+    required String userId,
+    required String accessToken,
+  }) =>
+      JellyfinApiClient(
+        baseUrl: baseUrl,
+        identity: identity,
+        serverId: serverId,
+        userId: userId,
+        accessToken: accessToken,
+        serviceTransport: serviceTransport,
+      );
+
+  /// Transfers this authenticated transport to an otherwise identical client
+  /// with the registry-selected app server identity. The token/account remain
+  /// immutable and the previous client no longer closes the shared transport.
+  JellyfinApiClient withServerId(ServerId value) {
+    final account = accountIdentity;
+    final token = _accessToken;
+    if (account == null || token == null || !_ownsTransport) {
+      throw StateError('Only an owning authenticated client can be rebound');
+    }
+    if (value == serverId) return this;
+    final rebound = createServerIdentityClient(
+      serverId: value,
+      userId: account.userId,
+      accessToken: token,
+    );
+    if (identical(rebound, this) ||
+        rebound.serverId != value ||
+        rebound.accountIdentity !=
+            ServerAccountId(
+              serverId: value,
+              userId: account.userId,
+            ) ||
+        !identical(rebound.serviceTransport, serviceTransport)) {
+      rebound.close();
+      throw StateError('Rebound client did not preserve session ownership');
+    }
+    _ownsTransport = false;
+    return rebound;
+  }
+
+  /// Factory seam for adapters that preserve their client subclass across a
+  /// registry identity rebind. Implementations must reuse [serviceTransport].
+  JellyfinApiClient createServerIdentityClient({
+    required ServerId serverId,
+    required String userId,
+    required String accessToken,
+  }) =>
+      JellyfinApiClient(
+        baseUrl: baseUrl,
+        identity: identity,
+        serverId: serverId,
+        userId: userId,
+        accessToken: accessToken,
+        serviceTransport: serviceTransport,
+      );
 
   String _userQuery() {
     final id = userId;
@@ -448,7 +570,12 @@ class JellyfinApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) throw ServerConnectionException('Server request failed (${response.statusCode})', statusCode: response.statusCode);
   }
 
-  void close() => _client.close();
+  void close() {
+    if (_ownsTransport) {
+      _ownsTransport = false;
+      serviceTransport.close();
+    }
+  }
 }
 
 int? _int(Object? value) => value is num ? value.toInt() : int.tryParse('$value');

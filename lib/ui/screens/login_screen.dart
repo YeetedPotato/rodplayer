@@ -2,16 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
+import 'package:rodplayer/core/models/server_identity.dart';
 import 'package:rodplayer/core/theme/rodplayer_theme.dart';
 
 typedef JellyfinClientFactory = JellyfinApiClient Function(
-    String baseUrl, InstallationIdentity identity);
+  String baseUrl,
+  InstallationIdentity identity, {
+  required ServerId serverId,
+  String? userId,
+  String? accessToken,
+});
 typedef PrivateAccessSetup = Future<void> Function(
     String canonicalServerUrl, String invitationText, String setupCode);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     required this.identity,
+    required this.serverId,
     required this.onAuthenticated,
     this.initialServerUrl,
     this.clientFactory = _defaultClientFactory,
@@ -20,6 +27,7 @@ class LoginScreen extends StatefulWidget {
   });
 
   final InstallationIdentity identity;
+  final ServerId serverId;
   final Future<void> Function(String url, JellyfinApiClient client)
       onAuthenticated;
   final String? initialServerUrl;
@@ -31,8 +39,19 @@ class LoginScreen extends StatefulWidget {
 }
 
 JellyfinApiClient _defaultClientFactory(
-        String baseUrl, InstallationIdentity identity) =>
-    JellyfinApiClient(baseUrl: baseUrl, identity: identity);
+  String baseUrl,
+  InstallationIdentity identity, {
+  required ServerId serverId,
+  String? userId,
+  String? accessToken,
+}) =>
+    JellyfinApiClient(
+      baseUrl: baseUrl,
+      identity: identity,
+      serverId: serverId,
+      userId: userId,
+      accessToken: accessToken,
+    );
 
 class _LoginScreenState extends State<LoginScreen> {
   final _url = TextEditingController();
@@ -107,7 +126,11 @@ class _LoginScreenState extends State<LoginScreen> {
       _profilesError = null;
       _profilesUrl = url;
     });
-    final client = widget.clientFactory(url, widget.identity);
+    final client = widget.clientFactory(
+      url,
+      widget.identity,
+      serverId: widget.serverId,
+    );
     try {
       final profiles = await client.getPublicUsers();
       if (!mounted || generation != _profileGeneration || _normalize() != url) {
@@ -136,29 +159,34 @@ class _LoginScreenState extends State<LoginScreen> {
       _busy = true;
       _error = null;
     });
-    final client = widget.clientFactory(url, widget.identity);
+    final client = widget.clientFactory(
+      url,
+      widget.identity,
+      serverId: widget.serverId,
+    );
+    JellyfinApiClient? authenticatedClient;
     try {
-      await client.authenticate(
+      authenticatedClient = await client.authenticate(
           username: _username.text.trim(), password: _password.text);
       if (!mounted) {
-        client.close();
+        authenticatedClient.close();
         return;
       }
-      await widget.onAuthenticated(url, client);
+      await widget.onAuthenticated(url, authenticatedClient);
     } on JellyfinAuthException {
       if (mounted) setState(() => _error = 'Invalid username or password.');
-      client.close();
+      (authenticatedClient ?? client).close();
     } on ServerConnectionException catch (error) {
       if (mounted) {
         setState(() => _error = 'Connection error: ${error.message}');
       }
-      client.close();
+      (authenticatedClient ?? client).close();
     } catch (_) {
       if (mounted) {
         setState(() =>
             _error = 'Unable to connect. Check the server URL and try again.');
       }
-      client.close();
+      (authenticatedClient ?? client).close();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -200,7 +228,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) => PopScope(
         canPop: true,
         child: Scaffold(
-          backgroundColor: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).obsidian,
+          backgroundColor: (Theme.of(context).extension<RodPlayerTheme>() ??
+                  const RodPlayerTheme())
+              .obsidian,
           body: SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -247,10 +277,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                   style: TextStyle(
                                       color: _setupMessage ==
                                               'Private access configured.'
-                                          ? (Theme.of(context).extension<RodPlayerTheme>() ??
+                                          ? (Theme.of(context).extension<
+                                                      RodPlayerTheme>() ??
                                                   const RodPlayerTheme())
                                               .success
-                                          : (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error)),
+                                          : (Theme.of(context).extension<
+                                                      RodPlayerTheme>() ??
+                                                  const RodPlayerTheme())
+                                              .error)),
                             ),
                           const SizedBox(height: 12),
                           _ProfilePicker(
@@ -277,7 +311,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 padding: const EdgeInsets.only(top: 16),
                                 child: Text(_error!,
                                     style: TextStyle(
-                                        color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error))),
+                                        color: (Theme.of(context).extension<
+                                                    RodPlayerTheme>() ??
+                                                const RodPlayerTheme())
+                                            .error))),
                           const SizedBox(height: 24),
                           SizedBox(
                               width: double.infinity,
@@ -377,7 +414,11 @@ class _PrivateAccessDialogState extends State<_PrivateAccessDialog> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: Text(_error!,
-                        style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error)),
+                        style: TextStyle(
+                            color: (Theme.of(context)
+                                        .extension<RodPlayerTheme>() ??
+                                    const RodPlayerTheme())
+                                .error)),
                   ),
               ]),
             ),
@@ -423,7 +464,10 @@ class _ProfilePicker extends StatelessWidget {
             child: Text(error!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: (Theme.of(context).extension<RodPlayerTheme>() ?? const RodPlayerTheme()).error))),
+                style: TextStyle(
+                    color: (Theme.of(context).extension<RodPlayerTheme>() ??
+                            const RodPlayerTheme())
+                        .error))),
         TextButton(onPressed: onRetry, child: const Text('Retry')),
       ]);
     }

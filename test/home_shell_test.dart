@@ -561,7 +561,7 @@ class _FakeHomeClient extends JellyfinApiClient {
         nextUp = nextUp ?? <NextUpItem>[NextUpItem.fromJson(<String, dynamic>{'Id': 'episode', 'Name': 'Next Episode', 'Type': 'Episode', 'SeriesName': 'Show', 'ParentIndexNumber': 1, 'IndexNumber': 2})],
         movies = movies ?? <JellyfinLibraryItem>[JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'movie', 'Name': 'Latest Movie', 'Type': 'Movie', 'ProductionYear': 2024})],
         shows = shows ?? <JellyfinLibraryItem>[JellyfinLibraryItem.fromJson(<String, dynamic>{'Id': 'series', 'Name': 'Latest Series', 'Type': 'Series'})],
-        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+        super(baseUrl: 'https://server/jellyfin', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   _FakeHomeClient.empty()
       : this(resume: const <ResumableItem>[], nextUp: const <NextUpItem>[], movies: const <JellyfinLibraryItem>[], shows: const <JellyfinLibraryItem>[]);

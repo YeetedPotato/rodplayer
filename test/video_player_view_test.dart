@@ -22,7 +22,7 @@ void main() {
   testWidgets('VideoPlayerView uses generic engine and fake surface for media key play pause', (tester) async {
     final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await engine.play();
     await tester.pumpWidget(MaterialApp(
       home: VideoPlayerView(
@@ -50,7 +50,7 @@ void main() {
     final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
     await engine.play();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
     expect(find.byTooltip('Pause'), findsOneWidget);
     await tester.pump(const Duration(seconds: 3));
@@ -68,7 +68,7 @@ void main() {
     final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
     await engine.play();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump();
@@ -91,7 +91,7 @@ void main() {
     await playing.play();
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: paused, surface: const _FakeSurface()));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
     binding.value = PlaybackRuntimeViewBinding(engine: playing, surface: const _FakeSurface());
     await tester.pump();
@@ -111,7 +111,7 @@ void main() {
     buffering.buffering.value = true;
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: playing, surface: const _FakeSurface()));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
     binding.value = PlaybackRuntimeViewBinding(engine: paused, surface: const _FakeSurface());
     await tester.pump(const Duration(seconds: 4));
@@ -131,7 +131,7 @@ void main() {
     second.duration = const Duration(seconds: 100);
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: first, surface: const _FakeSurface()));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
     final player = tester.element(find.byType(Scaffold));
     Focus.of(player).requestFocus();
@@ -158,7 +158,7 @@ void main() {
     final engine = TestPlaybackEngine();
     addTearDown(engine.dispose);
     await engine.play();
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(engine: engine, surface: const _FakeSurface(), client: client)));
     await tester.pump(const Duration(milliseconds: 2900));
     await tester.sendEventToBinding(const PointerHoverEvent(position: Offset(200, 200)));
@@ -179,7 +179,7 @@ void main() {
     addTearDown(second.dispose);
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: first, surface: const _NamedSurface('first')));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
 
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client, itemId: 'item')));
     expect(find.text('first'), findsOneWidget);
@@ -199,7 +199,7 @@ void main() {
     addTearDown(engine.dispose);
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client)));
     expect(find.text('first'), findsOneWidget);
     binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
@@ -227,9 +227,8 @@ void main() {
     addTearDown(binding.dispose);
     final client = JellyfinApiClient(
       baseUrl: 'https://media.example.com',
-      identity: testIdentity,
-      client: _NoopClient(),
-    );
+      identity: testIdentity, serverId: testServerId,
+      client: _NoopClient());
 
     await tester.pumpWidget(MaterialApp(
       home: VideoPlayerView(
@@ -493,7 +492,7 @@ void main() {
     var recoveries = 0;
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('first')));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client, onPlaybackError: () async { recoveries++; })));
     engine.error.value = 'old failure';
     binding.value = PlaybackRuntimeViewBinding(engine: engine, surface: const _NamedSurface('second'));
@@ -508,7 +507,7 @@ void main() {
     var recoveries = 0;
     final binding = ValueNotifier<PlaybackRuntimeViewBinding>(PlaybackRuntimeViewBinding(engine: engine, surface: const _FakeSurface()));
     addTearDown(binding.dispose);
-    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, client: _NoopClient());
+    final client = JellyfinApiClient(baseUrl: 'https://media.example.com', identity: testIdentity, serverId: testServerId, client: _NoopClient());
     await tester.pumpWidget(MaterialApp(home: VideoPlayerView(activeBinding: binding, client: client, onPlaybackError: () async { recoveries++; })));
     engine.error.value = 'failure';
     await tester.pump();
@@ -583,9 +582,8 @@ Future<void> _pumpSkipPlayer(
 ) async {
   final client = JellyfinApiClient(
     baseUrl: 'https://media.example.com',
-    identity: testIdentity,
-    client: _NoopClient(),
-  );
+    identity: testIdentity, serverId: testServerId,
+    client: _NoopClient());
   await tester.pumpWidget(
     MaterialApp(
       home: VideoPlayerView(

@@ -2,6 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 
+/// Private gateway WebSocket upgrades have not been approved or validated.
+final class PrivateServiceWebSocketUnsupported implements Exception {
+  const PrivateServiceWebSocketUnsupported();
+}
+
 /// Resolves one explicitly associated service, never arbitrary URLs.
 class PrivateServiceEndpointResolver {
   PrivateServiceEndpointResolver({
@@ -12,21 +17,15 @@ class PrivateServiceEndpointResolver {
   final Uri _canonical;
   final ValueListenable<PrivateNetworkStatus?> status;
 
-  Uri resolve(Uri canonicalUrl) => _resolve(canonicalUrl, socket: false);
+  Uri resolve(Uri canonicalUrl) => _resolve(canonicalUrl);
 
   Uri resolveWebSocket(Uri canonicalUrl) =>
-      _resolve(canonicalUrl, socket: true);
+      throw const PrivateServiceWebSocketUnsupported();
 
-  Uri _resolve(Uri canonicalUrl, {required bool socket}) {
-    final expectedScheme = socket
-        ? (_canonical.scheme == 'https' ? 'wss' : 'ws')
-        : _canonical.scheme;
-    if (canonicalUrl.scheme != expectedScheme ||
+  Uri _resolve(Uri canonicalUrl) {
+    if (canonicalUrl.scheme != _canonical.scheme ||
         canonicalUrl.host.toLowerCase() != _canonical.host.toLowerCase() ||
-        (socket
-            ? canonicalUrl.hasPort != _canonical.hasPort ||
-                (canonicalUrl.hasPort && canonicalUrl.port != _canonical.port)
-            : canonicalUrl.port != _canonical.port) ||
+        canonicalUrl.port != _canonical.port ||
         canonicalUrl.userInfo.isNotEmpty) {
       throw const PrivateNetworkException(
           PrivateNetworkFailure.operationFailed);
@@ -38,7 +37,7 @@ class PrivateServiceEndpointResolver {
     }
     final gateway = current!.gatewayBaseUrl!;
     return canonicalUrl.replace(
-      scheme: socket ? 'ws' : gateway.scheme,
+      scheme: gateway.scheme,
       host: gateway.host,
       port: gateway.port,
       userInfo: '',

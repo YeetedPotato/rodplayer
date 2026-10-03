@@ -149,7 +149,7 @@ class _ProfileClient extends JellyfinApiClient {
     this.pendingProfile = false,
     this.pendingSave,
   })
-      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
+      : super(baseUrl: 'https://server/jellyfin', identity: testIdentity, serverId: testServerId, client: http_testing.MockClient((_) async => http.Response('{}', 200)));
 
   bool failProfileOnce;
   bool failSaveOnce;
