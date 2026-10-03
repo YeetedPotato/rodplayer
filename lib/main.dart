@@ -5,6 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
+import 'package:rodplayer/core/session/server_session.dart';
+import 'package:rodplayer/core/session/active_server_context.dart';
+import 'package:rodplayer/core/models/server_registry_store.dart';
+import 'package:rodplayer/core/models/server_registry.dart';
+import 'package:rodplayer/core/security/server_registry_migration.dart';
+import 'package:rodplayer/core/events/jellyfin_server_event_session_factory.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/server_identity.dart';
 import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
@@ -35,7 +41,8 @@ Future<void> main() async {
   final preferences = await SharedPreferences.getInstance();
   runApp(RodPlayerApp(
       preferences: preferences,
-      credentialStore: const SecureCredentialStore()));
+      credentialStore: const SecureCredentialStore(),
+      serverEventSessionBuilder: createJellyfinServerEventSession));
 }
 
 class RodPlayerApp extends StatefulWidget {
@@ -45,6 +52,7 @@ class RodPlayerApp extends StatefulWidget {
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
     this.enrollmentClientFactory = _defaultEnrollmentClientFactory,
+    this.serverEventSessionBuilder,
     super.key,
   });
 
@@ -53,14 +61,16 @@ class RodPlayerApp extends StatefulWidget {
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
   final EnrollmentClientFactory enrollmentClientFactory;
+  final ServerEventSessionBuilder? serverEventSessionBuilder;
 
   @override
   State<RodPlayerApp> createState() => _RodPlayerAppState();
 }
 
 class _RodPlayerAppState extends State<RodPlayerApp> {
-  late final AppearanceController _appearance =
-      AppearanceController(widget.preferences);
+  late final AppearanceController _appearance = AppearanceController(
+    widget.preferences,
+  );
 
   @override
   void dispose() {
@@ -80,6 +90,7 @@ class _RodPlayerAppState extends State<RodPlayerApp> {
             clientFactory: widget.clientFactory,
             privateNetworkRuntimeFactory: widget.privateNetworkRuntimeFactory,
             enrollmentClientFactory: widget.enrollmentClientFactory,
+            serverEventSessionBuilder: widget.serverEventSessionBuilder,
             appearanceController: _appearance,
           ),
         ),
@@ -93,6 +104,7 @@ class RodPlayerShell extends StatefulWidget {
     this.clientFactory = _defaultClientFactory,
     this.privateNetworkRuntimeFactory = _defaultPrivateNetworkRuntimeFactory,
     this.enrollmentClientFactory = _defaultEnrollmentClientFactory,
+    this.serverEventSessionBuilder,
     this.appearanceController,
     super.key,
   });
@@ -102,6 +114,7 @@ class RodPlayerShell extends StatefulWidget {
   final JellyfinClientFactory clientFactory;
   final PrivateNetworkRuntime Function() privateNetworkRuntimeFactory;
   final EnrollmentClientFactory enrollmentClientFactory;
+  final ServerEventSessionBuilder? serverEventSessionBuilder;
   final AppearanceController? appearanceController;
 
   @override
@@ -109,10 +122,19 @@ class RodPlayerShell extends StatefulWidget {
 }
 
 class _RodPlayerShellState extends State<RodPlayerShell> {
-  JellyfinApiClient? _client;
+  // Compatibility bridge owns exactly one active session. Registry/controller
+  // switching remains a foundation until a deliberate server-management flow.
+  ActiveServerContext? _activeServer;
+  int _contextGeneration = 0;
+  JellyfinApiClient? get _client => _activeServer?.session.client;
+  late final PreferencesServerRegistryStore _serverRegistry =
+      PreferencesServerRegistryStore(widget.preferences);
+  bool _serverRegistryCorrupt = false;
+  bool _authenticationPending = false;
   InstallationIdentity? _identity;
   ServerId? _serverId;
   bool _loading = true;
+  final ValueNotifier<int> _serverEventRevision = ValueNotifier<int>(0);
   PrivateNetworkSessionController? _privateNetwork;
   final _privateNetworkOwner = PrivateNetworkSessionOwner();
   PrivateTransportProfile? _privateNetworkProfile;
@@ -132,54 +154,289 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   @override
   void dispose() {
     unawaited(_privateNetworkOwner.close().catchError((_) {}));
+    final active = _activeServer;
+    if (active != null) unawaited(active.session.close());
     _unavailablePrivateStatus.dispose();
+    _serverEventRevision.dispose();
     super.dispose();
   }
 
   Future<void> _restore() async {
     final migration = CredentialMigration(
-        preferences: widget.preferences,
-        credentialStore: widget.credentialStore);
+      preferences: widget.preferences,
+      credentialStore: widget.credentialStore,
+    );
     await migration.migrate();
-    final identity =
-        await SharedPreferencesInstallationIdentityStore(widget.preferences)
-            .load();
+    if (!mounted) return;
+    try {
+      await ServerRegistryMigration(
+        preferences: widget.preferences,
+        credentials: widget.credentialStore,
+        registry: _serverRegistry,
+      ).migrateLegacyInstallation();
+    } on ServerRegistryCorruptException {
+      // Keep the legacy single-server session usable without overwriting the
+      // corrupt registry document. Registry-based switching stays unavailable.
+      _serverRegistryCorrupt = true;
+    } on Object {
+      // Registry migration is additive. Preserve the current single-server
+      // legacy restore path and leave the registry bytes untouched.
+      _serverRegistryCorrupt = true;
+    }
+    if (!mounted) return;
+    final identity = await SharedPreferencesInstallationIdentityStore(
+      widget.preferences,
+    ).load();
     final url = widget.preferences.getString(CredentialMigration.serverUrlKey);
-    final token =
-        await widget.credentialStore.readToken(CredentialMigration.tokenKey);
+    final token = await widget.credentialStore.readToken(
+      CredentialMigration.tokenKey,
+    );
     final user = widget.preferences.getString(CredentialMigration.userIdKey);
-    final serverId = await ConfiguredServerIdStore(widget.preferences).loadOrCreate();
+    var serverId =
+        await ConfiguredServerIdStore(widget.preferences).loadOrCreate();
+    if (!mounted) return;
+    if (!_serverRegistryCorrupt && url != null && user != null) {
+      try {
+        final snapshot = await _serverRegistry.load();
+        final activeId = snapshot.activeServerId;
+        final activeAccount = snapshot.activeAccountId;
+        final activeRecord =
+            activeId == null ? null : snapshot.server(activeId);
+        if (activeRecord != null &&
+            activeAccount?.userId == user &&
+            activeRecord.endpoints.contains(ServerEndpoint(url)) &&
+            activeRecord.accounts.any(
+              (account) => account.identity == activeAccount,
+            )) {
+          serverId = activeRecord.id;
+        }
+      } on Object {
+        _serverRegistryCorrupt = true;
+      }
+    }
     JellyfinApiClient? client;
+    if (!mounted) return;
     if (url != null &&
         token != null &&
         user != null &&
         url.isNotEmpty &&
         token.isNotEmpty &&
         user.isNotEmpty) {
-      client = _makeClient(url, identity, serverId: serverId,
-          userId: user, accessToken: token);
+      client = _makeClient(
+        url,
+        identity,
+        serverId: serverId,
+        userId: user,
+        accessToken: token,
+      );
     }
-    if (!mounted) return;
+    if (!mounted) {
+      client?.close();
+      final network = _privateNetwork;
+      _privateNetwork = null;
+      _privateNetworkProfile = null;
+      if (network != null) unawaited(network.close());
+      return;
+    }
+    final account = client?.accountIdentity;
+    final active = client == null || account == null
+        ? null
+        : _createActiveContext(client, account);
     setState(() {
       _identity = identity;
       _serverId = serverId;
-      _client = client;
+      _activeServer = active;
       _loading = false;
     });
   }
 
   Future<void> _authenticated(String url, JellyfinApiClient client) async {
-    final previousUrl =
-        widget.preferences.getString(CredentialMigration.serverUrlKey);
+    if (_activeServer != null || _authenticationPending) {
+      throw StateError('Sign out of the active session before signing in.');
+    }
+    _authenticationPending = true;
+    try {
+      await _commitAuthenticated(url, client);
+    } finally {
+      _authenticationPending = false;
+    }
+  }
+
+  Future<void> _commitAuthenticated(
+    String url,
+    JellyfinApiClient client,
+  ) async {
+    final verifiedSystemId = await client.getVerifiedServerSystemId();
+    var serverId = client.serverId;
+    if (!_serverRegistryCorrupt) {
+      try {
+        serverId = ServerIdentityResolver().resolveLogin(
+          registry: await _serverRegistry.load(),
+          endpoint: ServerEndpoint(url),
+          verifiedSystemId: verifiedSystemId,
+          provisionalServerId: client.serverId,
+        );
+      } on ServerIdentityConflictException {
+        rethrow;
+      } on Object {
+        _serverRegistryCorrupt = true;
+      }
+    }
+    await _activeServer?.session.events?.close();
+    final previousUrl = widget.preferences.getString(
+      CredentialMigration.serverUrlKey,
+    );
     await widget.preferences.setString(CredentialMigration.serverUrlKey, url);
     if (previousUrl != url) {
       await _privateTransport.clear();
     }
-    await widget.credentialStore
-        .writeToken(CredentialMigration.tokenKey, client.accessToken!);
-    await widget.preferences
-        .setString(CredentialMigration.userIdKey, client.userId!);
-    if (mounted) setState(() => _client = client);
+    await widget.credentialStore.writeToken(
+      CredentialMigration.tokenKey,
+      client.accessToken!,
+    );
+    await widget.preferences.setString(
+      CredentialMigration.userIdKey,
+      client.userId!,
+    );
+    if (!_serverRegistryCorrupt) {
+      try {
+        await _persistServerAccount(
+          url,
+          client,
+          serverId: serverId,
+          verifiedSystemId: verifiedSystemId,
+        );
+      } on ServerRegistryCorruptException {
+        _serverRegistryCorrupt = true;
+      } on FormatException {
+        _serverRegistryCorrupt = true;
+      } on Object {
+        // Keep the successful legacy single-server login usable; the next
+        // startup retries the nonsecret registry migration from verified
+        // secure-store state.
+        _serverRegistryCorrupt = true;
+      }
+    }
+    if (_serverRegistryCorrupt) serverId = client.serverId;
+    final activeClient =
+        serverId == client.serverId ? client : client.withServerId(serverId);
+    final account = activeClient.accountIdentity;
+    if (account == null)
+      throw StateError('Authenticated client has no account identity');
+    final previous = _activeServer;
+    final next = _createActiveContext(
+      activeClient,
+      account,
+      verifiedSystemId: verifiedSystemId,
+    );
+    if (mounted) {
+      setState(() {
+        _activeServer = next;
+        _serverId = activeClient.serverId;
+      });
+      if (previous != null) await previous.session.close();
+    } else {
+      await next.session.close();
+    }
+  }
+
+  ActiveServerContext _createActiveContext(
+    JellyfinApiClient client,
+    ServerAccountId account, {
+    String? verifiedSystemId,
+  }) {
+    final generation = ++_contextGeneration;
+    final eventSession = widget.serverEventSessionBuilder?.call(
+      client: client,
+      isCurrent: () =>
+          mounted &&
+          _contextGeneration == generation &&
+          _activeServer?.generation == generation &&
+          !(_activeServer?.session.isClosed ?? true),
+      onLibraryInvalidated: _onServerDataInvalidated,
+      onUserDataInvalidated: _onServerDataInvalidated,
+      onItemsInvalidated: (_) => _onServerDataInvalidated(),
+    );
+    return ActiveServerContext(
+      generation: generation,
+      session: ServerSession(
+        serverId: client.serverId,
+        accountId: account,
+        verifiedSystemId: verifiedSystemId,
+        events: eventSession,
+        client: client,
+      ),
+    );
+  }
+
+  void _onServerDataInvalidated() {
+    if (!mounted) return;
+    _serverEventRevision.value++;
+  }
+
+  Future<void> _persistServerAccount(
+    String url,
+    JellyfinApiClient client, {
+    required ServerId serverId,
+    required String verifiedSystemId,
+  }) async {
+    final userId = client.userId;
+    final accountId = userId == null
+        ? null
+        : ServerAccountId(serverId: serverId, userId: userId);
+    final token = client.accessToken;
+    if (accountId == null || token == null) {
+      throw StateError('Authenticated session identity is incomplete');
+    }
+    final credentialReference = ServerRegistryMigration.credentialReferenceFor(
+      accountId,
+    );
+    final snapshot = await _serverRegistry.load();
+    final existing = snapshot.server(serverId);
+    if (existing?.verifiedSystemId != null &&
+        existing!.verifiedSystemId != verifiedSystemId) {
+      throw const ServerIdentityConflictException(
+          ServerIdentityConflict.endpointMismatch);
+    }
+    await widget.credentialStore.writeToken(credentialReference, token);
+    if (await widget.credentialStore.readToken(credentialReference) != token) {
+      throw StateError('Could not verify server account credential');
+    }
+    final endpoint = ServerEndpoint(url);
+    final account = ServerUserAccount(
+      identity: accountId,
+      credentialReference: credentialReference,
+    );
+    final record = existing == null
+        ? ServerRecord(
+            id: accountId.serverId,
+            displayName: endpoint.uri.host,
+            endpoints: <ServerEndpoint>[endpoint],
+            accounts: <ServerUserAccount>[account],
+            verifiedSystemId: verifiedSystemId,
+          )
+        : ServerRecord(
+            id: existing.id,
+            displayName: existing.displayName,
+            endpoints: <ServerEndpoint>{
+              endpoint,
+              ...existing.endpoints,
+            }.toList(),
+            accounts: <ServerUserAccount>[
+              ...existing.accounts.where((item) => item.identity != accountId),
+              account,
+            ],
+            verifiedSystemId: existing.verifiedSystemId ?? verifiedSystemId,
+          );
+    if (existing == null) {
+      await _serverRegistry.addServer(record);
+    } else {
+      await _serverRegistry.updateServer(record);
+    }
+    await _serverRegistry.setActiveServer(
+      accountId.serverId,
+      accountId: accountId,
+    );
   }
 
   Future<void> _configurePrivateAccess(
@@ -285,6 +542,7 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
 
   Future<void> _clearSession({required bool keepServerUrl}) async {
     final client = _client;
+    final account = _activeServer?.accountId;
     if (client != null) {
       try {
         await client.reportSessionEnded();
@@ -294,10 +552,23 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
       await widget.preferences.remove(CredentialMigration.serverUrlKey);
       await _privateTransport.clear();
     }
+    await _activeServer?.session.events?.close();
     await widget.credentialStore.deleteToken(CredentialMigration.tokenKey);
+    if (account != null) {
+      await widget.credentialStore.deleteToken(
+        ServerRegistryMigration.credentialReferenceFor(account),
+      );
+    }
+
     await widget.preferences.remove(CredentialMigration.userIdKey);
-    client?.close();
-    if (mounted) setState(() => _client = null);
+    if (mounted) {
+      final previous = _activeServer;
+      _contextGeneration++;
+      setState(() => _activeServer = null);
+      if (previous != null) await previous.session.close();
+    } else {
+      client?.close();
+    }
   }
 
   @override
@@ -305,26 +576,29 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (_client == null) {
+    if (_activeServer == null) {
       return LoginScreen(
-          identity: _identity!,
-          serverId: _serverId!,
-          initialServerUrl:
-              widget.preferences.getString(CredentialMigration.serverUrlKey),
-          clientFactory: _makeClient,
-          onConfigurePrivateAccess: _configurePrivateAccess,
-          onAuthenticated: _authenticated);
+        identity: _identity!,
+        serverId: _serverId!,
+        initialServerUrl: widget.preferences.getString(
+          CredentialMigration.serverUrlKey,
+        ),
+        clientFactory: _makeClient,
+        onConfigurePrivateAccess: _configurePrivateAccess,
+        onAuthenticated: _authenticated,
+      );
     }
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape): () =>
-            Navigator.maybePop(context)
+            Navigator.maybePop(context),
       },
       child: RodPlayerAppShell(
-          client: _client!,
-          onLogout: _logout,
-          onSwitchProfile: _switchProfile,
-          appearanceController: widget.appearanceController),
+        client: _activeServer!.session.client,
+        onLogout: _logout,
+        onSwitchProfile: _switchProfile,
+        appearanceController: widget.appearanceController,
+      ),
     );
   }
 }

@@ -7,21 +7,62 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
-import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/models/server_identity.dart';
-import 'package:rodplayer/core/network/service_transport.dart';
+import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
 import 'package:rodplayer/core/network/family_enrollment.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
 import 'package:rodplayer/core/network/private_transport_profile.dart';
+import 'package:rodplayer/core/network/service_transport.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
+import 'package:rodplayer/core/security/server_registry_migration.dart';
 import 'package:rodplayer/main.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets(
+      'production root admits only one authentication and active session',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final credentials = MemoryCredentialStore();
+    await tester.pumpWidget(
+        RodPlayerApp(preferences: prefs, credentialStore: credentials));
+    await tester.pumpAndSettle();
+    final login = tester.widget<LoginScreen>(find.byType(LoginScreen));
+    final a = _RootClient(
+        baseUrl: 'https://a.example.test',
+        identity: login.identity,
+        serverId: login.serverId,
+        userId: 'user-a',
+        accessToken: 'token-a');
+    final b = _RootClient(
+        baseUrl: 'https://b.example.test',
+        identity: login.identity,
+        serverId: ServerId('b'),
+        userId: 'user-b',
+        accessToken: 'token-b');
+    addTearDown(b.close);
+    final first = login.onAuthenticated(a.baseUrl, a);
+    await expectLater(login.onAuthenticated(b.baseUrl, b), throwsStateError);
+    await first;
+    await tester.pumpAndSettle();
+    expect(find.byType(RodPlayerAppShell), findsOneWidget);
+    expect(
+        tester
+            .widget<RodPlayerAppShell>(find.byType(RodPlayerAppShell))
+            .client
+            .userId,
+        'user-a');
+    await expectLater(login.onAuthenticated(b.baseUrl, b), throwsStateError);
+    expect(prefs.getString(CredentialMigration.serverUrlKey), a.baseUrl);
+    expect(
+        await credentials.readToken(CredentialMigration.tokenKey), 'token-a');
+    expect(prefs.getString(CredentialMigration.userIdKey), 'user-a');
+  });
   testWidgets('setup cancellation completes before normal private listener',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -60,13 +101,18 @@ void main() {
                 'home': {'ipv4': '100.64.0.8', 'port': 4444},
               }),
               200))),
-      clientFactory: (url, identity, {required serverId, userId, accessToken}) => JellyfinApiClient(
-          baseUrl: url,
-          identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
-          client: http_testing.MockClient((request) async {
-            requests.add(request);
-            return http.Response('[]', 200);
-          })),
+      clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) =>
+          JellyfinApiClient(
+              baseUrl: url,
+              identity: identity,
+              serverId: serverId,
+              userId: userId,
+              accessToken: accessToken,
+              client: http_testing.MockClient((request) async {
+                requests.add(request);
+                return http.Response('[]', 200);
+              })),
     ));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
@@ -143,9 +189,14 @@ void main() {
           }),
         );
       },
-      clientFactory: (url, identity, {required serverId, userId, accessToken}) => JellyfinApiClient(
+      clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) =>
+          JellyfinApiClient(
         baseUrl: url,
-        identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
+        identity: identity,
+        serverId: serverId,
+        userId: userId,
+        accessToken: accessToken,
         client: http_testing.MockClient((request) async {
           requests.add(request);
           return http.Response('[]', 200);
@@ -219,9 +270,15 @@ void main() {
       clientFactory: (url, identity, {required serverId, userId, accessToken}) {
         final client = JellyfinApiClient(
           baseUrl: url,
-          identity: identity, serverId: serverId, userId: userId, accessToken: accessToken,
+          identity: identity,
+          serverId: serverId,
+          userId: userId,
+          accessToken: accessToken,
           client: http_testing.MockClient((request) async {
             requests.add(request);
+            if (request.url.path.endsWith('/System/Info/Public')) {
+              return http.Response('{"Id":"root-login-server"}', 200);
+            }
             if (request.url.path.endsWith('/Users/Public')) {
               return http.Response('[{"Id":"user","Name":"Alice"}]', 200);
             }
@@ -349,7 +406,12 @@ void main() {
         return runtime;
       },
       clientFactory: (url, identity, {required serverId, userId, accessToken}) {
-        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
+        final client = _RootClient(
+            baseUrl: url,
+            identity: identity,
+            serverId: serverId,
+            userId: userId,
+            accessToken: accessToken);
         clients.add(client);
         return client;
       },
@@ -371,7 +433,12 @@ void main() {
         return runtime;
       },
       clientFactory: (url, identity, {required serverId, userId, accessToken}) {
-        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
+        final client = _RootClient(
+            baseUrl: url,
+            identity: identity,
+            serverId: serverId,
+            userId: userId,
+            accessToken: accessToken);
         clients.add(client);
         return client;
       },
@@ -404,8 +471,14 @@ void main() {
         runtimeCalls++;
         return _RootPrivateNetworkRuntime();
       },
-      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
-          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
+      clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) =>
+          client = _RootClient(
+              baseUrl: url,
+              identity: identity,
+              serverId: serverId,
+              userId: userId,
+              accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtimeCalls, 0);
@@ -438,8 +511,14 @@ void main() {
             runtimeCalls++;
             return _RootPrivateNetworkRuntime();
           },
-          clientFactory: (url, identity, {required serverId, userId, accessToken}) {
-            final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
+          clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) {
+            final client = _RootClient(
+                baseUrl: url,
+                identity: identity,
+                serverId: serverId,
+                userId: userId,
+                accessToken: accessToken);
             clients.add(client);
             return client;
           },
@@ -489,8 +568,14 @@ void main() {
           factoryCalls++;
           return _RootPrivateNetworkRuntime();
         },
-        clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
-            client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
+        clientFactory: (url, identity,
+                {required serverId, userId, accessToken}) =>
+            client = _RootClient(
+                baseUrl: url,
+                identity: identity,
+                serverId: serverId,
+                userId: userId,
+                accessToken: accessToken),
       ));
       await tester.pumpAndSettle();
       expect(factoryCalls, 0);
@@ -521,8 +606,14 @@ void main() {
       preferences: prefs,
       credentialStore: credentials,
       privateNetworkRuntimeFactory: () => runtime,
-      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
-          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
+      clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) =>
+          client = _RootClient(
+              baseUrl: url,
+              identity: identity,
+              serverId: serverId,
+              userId: userId,
+              accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtime.resumeCalls, 1);
@@ -554,8 +645,14 @@ void main() {
           runtimeCreated = true;
           return _RootPrivateNetworkRuntime();
         },
-        clientFactory: (url, identity, {required serverId, userId, accessToken}) {
-          final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
+        clientFactory: (url, identity,
+            {required serverId, userId, accessToken}) {
+          final client = _RootClient(
+              baseUrl: url,
+              identity: identity,
+              serverId: serverId,
+              userId: userId,
+              accessToken: accessToken);
           clients.add(client);
           return client;
         },
@@ -596,8 +693,14 @@ void main() {
         runtimeCreations++;
         return _RootPrivateNetworkRuntime();
       },
-      clientFactory: (url, identity, {required serverId, userId, accessToken}) =>
-          client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken),
+      clientFactory: (url, identity,
+              {required serverId, userId, accessToken}) =>
+          client = _RootClient(
+              baseUrl: url,
+              identity: identity,
+              serverId: serverId,
+              userId: userId,
+              accessToken: accessToken),
     ));
     await tester.pumpAndSettle();
     expect(runtimeCreations, 0);
@@ -626,13 +729,22 @@ void main() {
       preferences: prefs,
       credentialStore: store,
       clientFactory: (url, identity, {required serverId, userId, accessToken}) {
-        final client = _RootClient(baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken);
+        final client = _RootClient(
+            baseUrl: url,
+            identity: identity,
+            serverId: serverId,
+            userId: userId,
+            accessToken: accessToken);
         clients.add(client);
         return client;
       },
     ));
     await tester.pumpAndSettle();
     expect(clients.first.serviceTransport.endpointChanges != null, isTrue);
+    final originalServerId = tester
+        .widget<RodPlayerAppShell>(find.byType(RodPlayerAppShell))
+        .client
+        .serverId;
 
     Future<void> switchProfile() async {
       await tester.tap(find.byTooltip('Profile'));
@@ -652,6 +764,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(association.lookupFor('https://server').profileId, 'invite:one');
     expect(clients.last.serviceTransport.endpointChanges != null, isTrue);
+    expect(find.byType(RodPlayerAppShell), findsOneWidget);
+    expect(
+      tester
+          .widget<RodPlayerAppShell>(find.byType(RodPlayerAppShell))
+          .client
+          .serverId,
+      originalServerId,
+    );
 
     await switchProfile();
     await tester.enterText(find.widgetWithText(TextField, 'Server URL'),
@@ -664,6 +784,13 @@ void main() {
     expect(prefs.getString(PrivateTransportProfileAssociation.preferenceKey),
         isNull);
     expect(clients.last.serviceTransport.endpointChanges != null, isFalse);
+    expect(
+      tester
+          .widget<RodPlayerAppShell>(find.byType(RodPlayerAppShell))
+          .client
+          .serverId,
+      isNot(originalServerId),
+    );
   });
 
   testWidgets(
@@ -692,13 +819,25 @@ void main() {
       },
       clientFactory: (url, identity, {required serverId, userId, accessToken}) {
         final client = _RootClient(
-            baseUrl: url, identity: identity, serverId: serverId, userId: userId, accessToken: accessToken, failLogout: clients.isEmpty);
+            baseUrl: url,
+            identity: identity,
+            serverId: serverId,
+            userId: userId,
+            accessToken: accessToken,
+            failLogout: clients.isEmpty);
         clients.add(client);
         return client;
       },
     ));
     await tester.pumpAndSettle();
     expect(find.byType(RodPlayerAppShell), findsOneWidget);
+    final firstAccount = ServerAccountId(
+      serverId: clients.first.serverId,
+      userId: 'user',
+    );
+    final firstCredentialReference =
+        ServerRegistryMigration.credentialReferenceFor(firstAccount);
+    expect(await store.readToken(firstCredentialReference), 'token');
 
     await tester.tap(find.byTooltip('Profile'));
     await tester.pumpAndSettle();
@@ -710,6 +849,7 @@ void main() {
     expect(clients.first.logoutCalls, 1);
     expect(clients.first.closed, isTrue);
     expect(await store.readToken(CredentialMigration.tokenKey), isNull);
+    expect(await store.readToken(firstCredentialReference), isNull);
     expect(prefs.getString(CredentialMigration.serverUrlKey), 'https://server');
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.widgetWithText(TextField, 'https://server'), findsOneWidget);
@@ -717,10 +857,18 @@ void main() {
     await tester.enterText(find.widgetWithText(TextField, 'Username'), 'user2');
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
+    final secondAccount = ServerAccountId(
+      serverId: clients.last.serverId,
+      userId: 'root-test-user',
+    );
+    final secondCredentialReference =
+        ServerRegistryMigration.credentialReferenceFor(secondAccount);
+    expect(await store.readToken(secondCredentialReference), 'root-test-token');
     await tester.tap(find.byTooltip('Log out'));
     await tester.pumpAndSettle();
     expect(prefs.getString(CredentialMigration.serverUrlKey), isNull);
     expect(await store.readToken(CredentialMigration.tokenKey), isNull);
+    expect(await store.readToken(secondCredentialReference), isNull);
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(privateNetwork.resetCalls, 0);
     expect(privateFactoryCalls, 0);
