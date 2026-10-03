@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:rodplayer/core/api/models/playback_info_request.dart';
 import 'package:rodplayer/core/api/models/playback_info_response.dart';
 import 'package:rodplayer/core/api/models/media_segment.dart';
+import 'package:rodplayer/core/api/models/live_tv.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
 import 'package:rodplayer/core/models/jellyfin_library_item.dart';
 import 'package:rodplayer/core/models/jellyfin_user_profile.dart';
@@ -557,6 +558,77 @@ class JellyfinApiClient {
           _uri(<String>['Users', _requireUserId(), 'Items', itemId],
               <String, Object?>{'Fields': _detailFields}),
           headers: headers)));
+
+  Future<JellyfinItemsPage<JellyfinLiveTvChannel>> getLiveTvChannelsPage({
+    int startIndex = 0,
+    int limit = 100,
+  }) async {
+    if (startIndex < 0 || limit < 1 || limit > 500)
+      throw ArgumentError('Invalid Live TV channel page');
+    return _page(
+      _jsonObject(await _client.get(
+        _uri(<String>[
+          'LiveTv',
+          'Channels'
+        ], <String, Object?>{
+          'UserId': _requireUserId(),
+          'StartIndex': startIndex,
+          'Limit': limit,
+          'EnableImages': true,
+          'EnableUserData': true,
+          'EnableTotalRecordCount': true,
+        }),
+        headers: headers,
+      )),
+      JellyfinLiveTvChannel.fromJson,
+    );
+  }
+
+  Future<JellyfinItemsPage<JellyfinLiveTvProgram>> getLiveTvProgramsPage({
+    Iterable<String> channelIds = const <String>[],
+    required DateTime start,
+    required DateTime end,
+    int startIndex = 0,
+    int limit = 200,
+  }) async {
+    if (!end.isAfter(start) || startIndex < 0 || limit < 1 || limit > 1000) {
+      throw ArgumentError('Invalid Live TV guide window');
+    }
+    final ids = channelIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return _page(
+      _jsonObject(await _client.get(
+        _uri(<String>[
+          'LiveTv',
+          'Programs'
+        ], <String, Object?>{
+          'UserId': _requireUserId(),
+          if (ids.isNotEmpty) 'ChannelIds': ids.join(','),
+          // Overlapping guide windows must include programmes that began
+          // before the window but are still airing at its lower bound.
+          'MinEndDate': start.toUtc().toIso8601String(),
+          'MaxStartDate': end.toUtc().toIso8601String(),
+          'StartIndex': startIndex,
+          'Limit': limit,
+          'EnableTotalRecordCount': true,
+          'EnableUserData': true,
+        }),
+        headers: headers,
+      )),
+      JellyfinLiveTvProgram.fromJson,
+    );
+  }
+
+  Future<JellyfinLiveTvProgram> getLiveTvProgram(String programId) async =>
+      JellyfinLiveTvProgram.fromJson(_jsonObject(await _client.get(
+        _uri(<String>['LiveTv', 'Programs', programId],
+            <String, Object?>{'UserId': _requireUserId()}),
+        headers: headers,
+      )));
 
   Future<List<JellyfinLibraryItem>> getSeasons(
           {required String seriesId}) async =>
