@@ -9,6 +9,7 @@ import 'package:rodplayer/core/nautilus_settings_backup.dart';
 import 'package:rodplayer/core/player_ui_settings.dart';
 import 'package:rodplayer/core/settings/ui_settings_persistence.dart';
 import 'package:rodplayer/ui/screens/settings_screen.dart';
+import 'package:rodplayer/ui/player/playback_settings_sheet.dart';
 import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/core/theme/appearance_mode.dart';
 
@@ -30,6 +31,94 @@ void main() {
               .copyWith(seekIntervalSeconds: seek, showEndTime: showEndTime),
           home: HomeShelfPreferences.defaults);
 
+  Future<void> sheet(WidgetTester tester) => tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: PlaybackSettingsSheet(
+              settings: PlayerUiSettings.defaults, onChanged: (_) {}))));
+
+  testWidgets(
+      'playback different-control changes share coalesced durable owner and export',
+      (tester) async {
+    await sheet(tester);
+    await tester.pumpAndSettle();
+    storage.gate = Completer<void>();
+    storage.entered = Completer<void>();
+    tester
+        .widget<DropdownButtonFormField<int>>(
+            find.byType(DropdownButtonFormField<int>).first)
+        .onChanged!(15);
+    await tester.pump();
+    await storage.entered!.future;
+    tester
+        .widget<DropdownButtonFormField<int>>(
+            find.byType(DropdownButtonFormField<int>).last)
+        .onChanged!(8);
+    await tester.pump();
+    expect(find.text('Saving settings...'), findsOneWidget);
+    final owner = await UiSettingsPersistence.acquire(prefs);
+    expect(owner.intent.player.seekIntervalSeconds, 15);
+    expect(owner.intent.player.autoHideSeconds, 8);
+    storage.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(prefs.getInt(PlayerUiSettings.seekKey), 15);
+    expect(prefs.getInt(PlayerUiSettings.hideKey), 8);
+    final exported =
+        NautilusSettingsBackup.parseImport(owner.baseline.exportJson());
+    expect(exported.player.seekIntervalSeconds, 15);
+    expect(exported.player.autoHideSeconds, 8);
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+    expect(
+        identical(owner, await UiSettingsPersistence.acquire(prefs)), isTrue);
+  });
+
+  testWidgets('playback later-key failure reloads durable truth',
+      (tester) async {
+    await sheet(tester);
+    await tester.pumpAndSettle();
+    storage.failKey = 'flutter.${PlayerUiSettings.hideKey}';
+    tester
+        .widget<DropdownButtonFormField<int>>(
+            find.byType(DropdownButtonFormField<int>).first)
+        .onChanged!(30);
+    await tester.pumpAndSettle();
+    final store = await UiSettingsPersistence.acquire(prefs);
+    expect(store.baseline.player.seekIntervalSeconds, 10);
+    expect(prefs.getInt(PlayerUiSettings.seekKey), isNull);
+    expect(
+        find.text(
+            'Unable to save playback settings. Stored settings reloaded.'),
+        findsOneWidget);
+    expect(find.text('10 seconds'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'dismissed playback save completes and reopening sees durable value',
+      (tester) async {
+    await sheet(tester);
+    await tester.pumpAndSettle();
+    storage.gate = Completer<void>();
+    storage.entered = Completer<void>();
+    tester
+        .widget<DropdownButtonFormField<int>>(
+            find.byType(DropdownButtonFormField<int>).first)
+        .onChanged!(15);
+    await tester.pump();
+    await storage.entered!.future;
+    await tester.pumpWidget(const SizedBox());
+    await sheet(tester);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Saving settings...'), findsOneWidget);
+    storage.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Saving settings...'), findsNothing);
+    expect(find.text('15 seconds'), findsOneWidget);
+    expect(prefs.getInt(PlayerUiSettings.seekKey), 15);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('settings load failure is scoped and retryable', (tester) async {
     await prefs.setString(PlayerUiSettings.hideKey, 'malformed');
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
@@ -41,6 +130,45 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Seek interval'), findsOneWidget);
   });
+
+  for (final failReload in [false, true]) {
+    testWidgets('Settings follows dismissed failed save; reread fails=$failReload',
+        (tester) async {
+      await sheet(tester);
+      await tester.pumpAndSettle();
+      storage.gate = Completer<void>();
+      storage.entered = Completer<void>();
+      storage.failKey = 'flutter.${PlayerUiSettings.hideKey}';
+      storage.failRead = failReload;
+      tester.widget<DropdownButtonFormField<int>>(
+          find.byType(DropdownButtonFormField<int>).first).onChanged!(30);
+      await tester.pump();
+      await storage.entered!.future;
+      await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+      await tester.pumpAndSettle();
+      expect(find.text('Saving UI settings...'), findsOneWidget);
+      expect(find.text('30 seconds'), findsOneWidget);
+      storage.gate!.complete();
+      await tester.pumpAndSettle();
+      final owner = await UiSettingsPersistence.acquire(prefs);
+      expect(owner.isSaving, isFalse);
+      expect(find.text('Saving UI settings...'), findsNothing);
+      expect(find.text('10 seconds'), findsOneWidget);
+      expect(owner.baselineVerified, !failReload);
+      expect(find.text('Stored settings could not be verified.'),
+          failReload ? findsOneWidget : findsNothing);
+      expect(tester.takeException(), isNull);
+      if (failReload) {
+        await tester.pumpWidget(const SizedBox());
+        await sheet(tester);
+        await tester.pumpAndSettle();
+        expect(find.text('Stored playback settings could not be verified.'),
+            findsOneWidget,
+            reason: 'already-settled unverified state remains explicit');
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
 
   testWidgets('Home mutation preserves a newer shared player intent',
       (tester) async {

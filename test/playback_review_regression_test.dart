@@ -1,18 +1,19 @@
-import 'test_support.dart';
-import 'package:rodplayer/core/api/jellyfin_api_client.dart';
-import 'package:http/testing.dart';
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rodplayer/core/api/jellyfin_api_client.dart';
 import 'package:rodplayer/core/api/models/media_source_info.dart';
 import 'package:rodplayer/core/api/models/play_method.dart';
 import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/multi_backend_playback_negotiator.dart';
 import 'package:rodplayer/core/playback/playback_environment.dart';
+import 'package:rodplayer/core/playback/playback_backend_registry.dart';
 import 'package:rodplayer/core/playback/playback_reporting.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
@@ -22,7 +23,11 @@ import 'package:rodplayer/core/player/playback_subtitle_switch_coordinator.dart'
 import 'package:rodplayer/core/player/playback_command_controller.dart';
 import 'package:rodplayer/core/player/playback_video_surface.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
+import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
+import 'package:rodplayer/ui/player/player_route.dart';
+import 'package:rodplayer/ui/player/track_selector_sheet.dart';
 import 'fakes/test_playback_engine.dart';
+import 'test_support.dart';
 
 const _subtitle = RodPlayerTrack(
     engineTrackId: 'subtitle-9',
@@ -34,6 +39,99 @@ const _audio = RodPlayerTrack(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  for (final (position, playing) in [
+    (Duration.zero, true),
+    (const Duration(seconds: 73), true),
+    (Duration.zero, false),
+    (const Duration(seconds: 73), false),
+  ]) {
+    testWidgets('PlayerRoute paused load; initial=$position playing=$playing',
+        (tester) async {
+      final runtime = _Runtime();
+      final client = _client(playback: true);
+      addTearDown(client.close);
+      const capabilities = MethodChannel('rodplayer/playback_capabilities');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(capabilities, (_) async => null);
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(capabilities, null));
+      await tester.pumpWidget(MaterialApp(
+          home: PlayerRoute(
+        client: client,
+        itemId: 'ITEM',
+        startPosition: position,
+        initiallyPlaying: playing,
+        runtimeSetFactory: () async => PlatformPlaybackRuntimeSet(
+            registry: PlaybackRuntimeRegistry(runtimes: [runtime]),
+            backendRegistry: const PlaybackBackendRegistry()),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text('surface-A'), findsOneWidget);
+      final engine = runtime.created.single.engine as _Engine;
+      expect(engine.loadedPaused, isTrue);
+      expect(engine.loadedPlan!.playbackUri.toString(),
+          'https://jellyfin.invalid/authoritative.mkv?api_key=test-token');
+      expect(engine.actions,
+          ['load', if (position > Duration.zero) 'seek', if (playing) 'play']);
+      expect(engine.position, position);
+      expect(engine.playing.value, playing);
+      expect(engine.playedAfterCommit, playing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(engine.disposed, isTrue);
+    });
+  }
+
+  testWidgets(
+      'production subtitle command + sheet acknowledges committed replacement',
+      (tester) async {
+    final harness = _Harness();
+    addTearDown(harness.dispose);
+    await harness.start();
+    final subtitles = harness.subtitles(({
+      required itemId,
+      required selectedMediaSourceId,
+      audioStreamIndex,
+      subtitleStreamIndex,
+    }) async {
+      expect(selectedMediaSourceId, 'A');
+      expect(audioStreamIndex, 3);
+      expect(subtitleStreamIndex, 9);
+      return _decision(_plan('A', subtitle: 9));
+    });
+    final statuses = <PlaybackCommandStatus>[];
+    final commands = PlaybackCommandController.forCoordinator(
+        harness.coordinator,
+        renegotiateSubtitle: subtitles.select);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () => TrackSelectorSheet.show(context,
+                        controls: harness.coordinator.activeBinding,
+                        commandController: commands),
+                    child: const Text('Tracks'))))));
+    await tester.tap(find.text('Tracks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('French'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unable to change subtitles'), findsNothing);
+    expect(harness.coordinator.session.selectedSubtitle, 9);
+    expect((harness.runtime.created.first.engine as _Engine).disposed, isTrue);
+    expect(harness.coordinator.activeBinding.value.plan!.playbackUri,
+        _plan('A').playbackUri);
+    final selected = find.ancestor(
+        of: find.text('French'),
+        matching: find.byWidgetPredicate(
+            (w) => w is Semantics && w.properties.selected == true));
+    expect(selected, findsOneWidget);
+    final result = await commands.dispatchCurrent(
+        command: const SelectSubtitleCommand(_subtitle),
+        origin: PlaybackCommandOrigin.localUi);
+    statuses.add(result.status);
+    expect(statuses, [PlaybackCommandStatus.appliedReplacement]);
+    expect(result.wasApplied, isTrue);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   test('held subtitle A cannot supersede newer production source B', () async {
     final harness = _Harness();

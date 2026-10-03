@@ -6,6 +6,7 @@ import 'package:rodplayer/core/playback/logical_playback_session.dart';
 import 'package:rodplayer/core/playback/playback_plan.dart';
 import 'package:rodplayer/core/player/track_controller.dart';
 import 'package:rodplayer/core/player/playback_runtime.dart';
+import 'package:rodplayer/ui/player/track_display_label.dart';
 import 'fakes/test_playback_engine.dart';
 
 void main() {
@@ -146,7 +147,13 @@ void main() {
     expect(isSyntheticEngineTrackId('file:///captions.srt'), isFalse);
   });
 
-
+  test('unmapped real tracks use numbered truthful fallback labels', () {
+    const audio = RodPlayerTrack(engineTrackId: 'audio-1', label: 'Unknown');
+    const subtitle =
+        RodPlayerTrack(engineTrackId: 'subtitle-1', label: 'Unknown');
+    expect(audioTrackDisplayLabel(audio, ordinal: 2), 'Audio track 2');
+    expect(subtitleTrackDisplayLabel(subtitle, ordinal: 3), 'Unknown');
+  });
 }
 
 PlaybackPlan _plan({int? audio, int? subtitle}) => PlaybackPlan(
