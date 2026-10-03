@@ -1,48 +1,64 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rodplayer/core/api/jellyfin_api_client.dart';
-import 'package:rodplayer/core/session/server_session.dart';
-import 'package:rodplayer/core/session/active_server_context.dart';
-import 'package:rodplayer/core/models/server_registry_store.dart';
-import 'package:rodplayer/core/models/server_registry.dart';
-import 'package:rodplayer/core/security/server_registry_migration.dart';
-import 'package:rodplayer/core/events/jellyfin_server_event_session_factory.dart';
 import 'package:rodplayer/core/device/installation_identity.dart';
+import 'package:rodplayer/core/events/jellyfin_server_event_session_factory.dart';
 import 'package:rodplayer/core/models/server_identity.dart';
-import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
-import 'package:rodplayer/core/network/service_transport.dart';
 import 'package:rodplayer/core/network/private_network_session_controller.dart';
 import 'package:rodplayer/core/network/private_network_runtime.dart';
 import 'package:rodplayer/core/network/family_enrollment.dart';
 import 'package:rodplayer/core/network/managed_private_transport_setup.dart';
 import 'package:rodplayer/core/network/private_transport_profile_association.dart';
 import 'package:rodplayer/core/network/private_transport_profile.dart';
+import 'package:rodplayer/core/network/private_service_endpoint_resolver.dart';
+import 'package:rodplayer/core/network/service_transport.dart';
 import 'package:rodplayer/core/playback/runtime_playback_environment.dart';
 import 'package:rodplayer/core/player/player_controller.dart';
 import 'package:rodplayer/platform/network/method_channel_private_network_runtime.dart';
 import 'package:rodplayer/platform/playback/platform_playback_runtimes.dart';
 import 'package:rodplayer/core/security/credential_migration.dart';
+import 'package:rodplayer/core/security/server_registry_migration.dart';
+import 'package:rodplayer/core/models/server_registry.dart';
+import 'package:rodplayer/core/models/server_registry_store.dart';
+import 'package:rodplayer/core/session/active_server_context.dart';
+import 'package:rodplayer/core/session/server_session.dart';
 import 'package:rodplayer/core/security/credential_store.dart';
 import 'package:rodplayer/core/theme/appearance_controller.dart';
 import 'package:rodplayer/ui/player/video_player_view.dart';
 import 'package:rodplayer/ui/screens/login_screen.dart';
 import 'package:rodplayer/ui/shell/rodplayer_app_shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb &&
+      const <TargetPlatform>{
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }.contains(defaultTargetPlatform)) {
+    try {
+      await windowManager.ensureInitialized();
+    } on Object {
+      // Window management is optional; keep the rest of startup available.
+    }
+  }
   if (mediaKitPlaybackSupportedOn(platformFamilyForCurrentTarget())) {
     MediaKit.ensureInitialized();
   }
   final preferences = await SharedPreferences.getInstance();
-  runApp(RodPlayerApp(
+  runApp(
+    RodPlayerApp(
       preferences: preferences,
       credentialStore: const SecureCredentialStore(),
-      serverEventSessionBuilder: createJellyfinServerEventSession));
+      serverEventSessionBuilder: createJellyfinServerEventSession,
+    ),
+  );
 }
 
 class RodPlayerApp extends StatefulWidget {
@@ -604,13 +620,17 @@ class _RodPlayerShellState extends State<RodPlayerShell> {
   }
 }
 
-Widget playerRoute(MediaKitPlaybackEngine engine, JellyfinApiClient client,
-        String itemId) =>
+Widget playerRoute(
+  MediaKitPlaybackEngine engine,
+  JellyfinApiClient client,
+  String itemId,
+) =>
     VideoPlayerView(
-        engine: engine,
-        surface: MediaKitPlaybackVideoSurface(engine),
-        client: client,
-        itemId: itemId);
+      engine: engine,
+      surface: MediaKitPlaybackVideoSurface(engine),
+      client: client,
+      itemId: itemId,
+    );
 
 JellyfinApiClient _defaultClientFactory(
   String baseUrl,
